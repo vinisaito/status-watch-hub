@@ -17,8 +17,8 @@ All colors MUST be HSL.
     --popover: 0 0% 100%;
     --popover-foreground: 222.2 84% 4.9%;
 
-    --primary: 222.2 47.4% 11.2%;
-    --primary-foreground: 210 40% 98%;
+    --primary: 210 100% 50%;
+    --primary-foreground: 0 0% 98%;
 
     --secondary: 210 40% 96.1%;
     --secondary-foreground: 222.2 47.4% 11.2%;
@@ -36,7 +36,20 @@ All colors MUST be HSL.
     --input: 214.3 31.8% 91.4%;
     --ring: 222.2 84% 4.9%;
 
-    --radius: 0.5rem;
+    /* Dashboard específico colors */
+    --success: 142 76% 36%;
+    --success-foreground: 0 0% 98%;
+    --warning: 45 93% 47%;
+    --warning-foreground: 0 0% 98%;
+    --danger: 0 84% 60%;
+    --danger-foreground: 0 0% 98%;
+
+    /* Gradients */
+    --gradient-success: linear-gradient(135deg, 142 76% 36%, 142 76% 46%);
+    --gradient-warning: linear-gradient(135deg, 45 93% 47%, 45 93% 57%);
+    --gradient-danger: linear-gradient(135deg, 0 84% 60%, 0 84% 70%);
+
+    --radius: 0.75rem;
 
     --sidebar-background: 0 0% 98%;
 
