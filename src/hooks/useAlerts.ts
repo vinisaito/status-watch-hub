@@ -120,7 +120,10 @@ export const useAlerts = (filters: any) => {
         naoAcionados: newAlert.acionado ? prev.naoAcionados : prev.naoAcionados + 1
       }));
       
-      playAlertSound();
+      // Só toca o som se o alerta NÃO foi acionado
+      if (!newAlert.acionado) {
+        playAlertSound();
+      }
       
       toast({
         title: "Novo Alerta!",

@@ -64,47 +64,49 @@ const AlertsTable = ({ alerts, loading }: AlertsTableProps) => {
   }
 
   return (
-    <Card>
-      <Table>
-        <TableHeader>
-          <TableRow>
-            <TableHead>Alerta</TableHead>
-            <TableHead>Grupo Executor</TableHead>
-            <TableHead>Status</TableHead>
-            <TableHead>Abertura</TableHead>
-            <TableHead>Sumário</TableHead>
-            <TableHead>Severidade</TableHead>
-            <TableHead>Acionado</TableHead>
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {alerts.length === 0 ? (
+    <Card className="shadow-md">
+      <div className="overflow-x-auto">
+        <Table>
+          <TableHeader>
             <TableRow>
-              <TableCell colSpan={7} className="text-center text-muted-foreground py-8">
-                Nenhum alerta encontrado
-              </TableCell>
+              <TableHead className="min-w-[120px]">Alerta</TableHead>
+              <TableHead className="min-w-[200px]">Grupo Executor</TableHead>
+              <TableHead className="min-w-[100px]">Status</TableHead>
+              <TableHead className="min-w-[150px]">Abertura</TableHead>
+              <TableHead className="min-w-[250px]">Sumário</TableHead>
+              <TableHead className="min-w-[120px]">Severidade</TableHead>
+              <TableHead className="min-w-[100px]">Acionado</TableHead>
             </TableRow>
-          ) : (
-            alerts.map((alert) => (
-              <TableRow key={alert.id} className="hover:bg-muted/50">
-                <TableCell className="font-mono text-sm">{alert.alerta}</TableCell>
-                <TableCell>{alert.grupoExecutor}</TableCell>
-                <TableCell>{getStatusBadge(alert.status)}</TableCell>
-                <TableCell className="font-mono text-sm">{formatDate(alert.abertura)}</TableCell>
-                <TableCell className="max-w-xs truncate" title={alert.sumario}>
-                  {alert.sumario}
-                </TableCell>
-                <TableCell>{getSeveridadeBadge(alert.severidade)}</TableCell>
-                <TableCell>
-                  <Badge variant={alert.acionado ? "default" : "secondary"}>
-                    {alert.acionado ? "SIM" : "NÃO"}
-                  </Badge>
+          </TableHeader>
+          <TableBody>
+            {alerts.length === 0 ? (
+              <TableRow>
+                <TableCell colSpan={7} className="text-center text-muted-foreground py-8">
+                  Nenhum alerta encontrado
                 </TableCell>
               </TableRow>
-            ))
-          )}
-        </TableBody>
-      </Table>
+            ) : (
+              alerts.map((alert) => (
+                <TableRow key={alert.id} className="hover:bg-muted/50">
+                  <TableCell className="font-mono text-sm">{alert.alerta}</TableCell>
+                  <TableCell className="break-words">{alert.grupoExecutor}</TableCell>
+                  <TableCell>{getStatusBadge(alert.status)}</TableCell>
+                  <TableCell className="font-mono text-sm whitespace-nowrap">{formatDate(alert.abertura)}</TableCell>
+                  <TableCell className="break-words max-w-xs" title={alert.sumario}>
+                    {alert.sumario}
+                  </TableCell>
+                  <TableCell>{getSeveridadeBadge(alert.severidade)}</TableCell>
+                  <TableCell>
+                    <Badge variant={alert.acionado ? "default" : "secondary"}>
+                      {alert.acionado ? "SIM" : "NÃO"}
+                    </Badge>
+                  </TableCell>
+                </TableRow>
+              ))
+            )}
+          </TableBody>
+        </Table>
+      </div>
     </Card>
   );
 };

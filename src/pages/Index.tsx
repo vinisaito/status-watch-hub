@@ -90,25 +90,23 @@ const Index = () => {
         <FilterBar filters={filters} onFilterChange={handleFilterChange} />
 
         {/* Export Section */}
-        <Card className="p-4">
-          <div className="flex items-center justify-between">
-            <DateFilter
-              startDate={startDate}
-              endDate={endDate}
-              onStartDateChange={setStartDate}
-              onEndDateChange={setEndDate}
-            />
-            <div className="flex gap-2">
-              <Button onClick={handleExport} variant="outline" className="gap-2">
-                <FileDown className="h-4 w-4" />
-                Exportar dados
-              </Button>
-              <Button onClick={refetch} variant="outline">
-                Atualizar
-              </Button>
-            </div>
+        <div className="flex flex-col lg:flex-row gap-3 items-start lg:items-center justify-between bg-muted/50 p-3 rounded-lg shadow-sm">
+          <DateFilter
+            startDate={startDate}
+            endDate={endDate}
+            onStartDateChange={setStartDate}
+            onEndDateChange={setEndDate}
+          />
+          <div className="flex gap-2">
+            <Button onClick={handleExport} variant="outline" size="sm" className="gap-2">
+              <FileDown className="h-4 w-4" />
+              Exportar
+            </Button>
+            <Button onClick={refetch} variant="outline" size="sm">
+              Atualizar
+            </Button>
           </div>
-        </Card>
+        </div>
 
         {/* Alerts Table */}
         <AlertsTable alerts={alerts} loading={loading} />
