@@ -70,31 +70,34 @@ export const useAlerts = (filters: any) => {
       setLoading(true);
       setError(null);
       
-      // Em produção, use: const response = await apiService.getAlerts(filters);
-      // Para desenvolvimento, usando dados mock:
-      const response: AlertsResponse = {
-        alerts: mockAlerts.filter(alert => {
-          if (filters.alerta && !alert.alerta.toLowerCase().includes(filters.alerta.toLowerCase())) return false;
-          if (filters.grupoExecutor && filters.grupoExecutor !== 'all' && !alert.grupoExecutor.toLowerCase().includes(filters.grupoExecutor.toLowerCase())) return false;
-          if (filters.status && filters.status !== 'all' && alert.status !== filters.status) return false;
-          if (filters.sumario && !alert.sumario.toLowerCase().includes(filters.sumario.toLowerCase())) return false;
-          if (filters.severidade && filters.severidade !== 'all' && alert.severidade !== filters.severidade) return false;
-          if (filters.acionado && filters.acionado !== 'all') {
-            const acionadoFilter = filters.acionado === 'sim';
-            if (alert.acionado !== acionadoFilter) return false;
-          }
-          return true;
-        }),
-        total: mockAlerts.length,
-        acionados: mockAlerts.filter(a => a.acionado).length,
-        naoAcionados: mockAlerts.filter(a => !a.acionado).length
-      };
+      const response = await apiService.getAlerts(filters);
+      
+      // Aplicar filtros localmente
+      const filteredAlerts = response.alerts.filter(alert => {
+        if (filters.alerta && !alert.alerta.toLowerCase().includes(filters.alerta.toLowerCase())) return false;
+        if (filters.grupoExecutor && filters.grupoExecutor !== 'all' && !alert.grupoExecutor.toLowerCase().includes(filters.grupoExecutor.toLowerCase())) return false;
+        if (filters.status && filters.status !== 'all' && alert.status !== filters.status) return false;
+        if (filters.sumario && !alert.sumario.toLowerCase().includes(filters.sumario.toLowerCase())) return false;
+        if (filters.severidade && filters.severidade !== 'all' && alert.severidade !== filters.severidade) return false;
+        if (filters.acionado && filters.acionado !== 'all') {
+          const acionadoFilter = filters.acionado === 'sim';
+          if (alert.acionado !== acionadoFilter) return false;
+        }
+        return true;
+      });
 
-      setAlerts(response.alerts);
-      setMetrics({
+      const finalResponse = {
+        alerts: filteredAlerts,
         total: response.total,
         acionados: response.acionados,
         naoAcionados: response.naoAcionados
+      };
+
+      setAlerts(finalResponse.alerts);
+      setMetrics({
+        total: finalResponse.total,
+        acionados: finalResponse.acionados,
+        naoAcionados: finalResponse.naoAcionados
       });
     } catch (err) {
       setError('Erro ao carregar alertas');

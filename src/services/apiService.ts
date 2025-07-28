@@ -1,7 +1,7 @@
 import { Alert } from "@/components/AlertsTable";
 
 // Configure your AWS API Gateway endpoint here
-const API_BASE_URL = "https://your-api-gateway-id.execute-api.us-east-1.amazonaws.com/prod";
+const API_BASE_URL = "https://7nu1y7qzs1.execute-api.us-east-1.amazonaws.com/prod";
 
 export interface ApiResponse<T> {
   data: T;
@@ -45,18 +45,35 @@ class ApiService {
   }
 
   async getAlerts(filters?: any): Promise<AlertsResponse> {
-    const queryParams = new URLSearchParams();
-    
-    if (filters) {
-      Object.entries(filters).forEach(([key, value]) => {
-        if (value && value !== 'all') {
-          queryParams.append(key, value as string);
-        }
-      });
-    }
+    try {
+      const response = await fetch(`${API_BASE_URL}/dados`);
+      
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
 
-    const endpoint = `/alerts${queryParams.toString() ? `?${queryParams.toString()}` : ''}`;
-    return this.makeRequest<AlertsResponse>(endpoint);
+      const data = await response.json();
+      const alerts: Alert[] = JSON.parse(data.body).map((item: any) => ({
+        id: item.num_chamado,
+        alerta: item.num_chamado,
+        grupoExecutor: item.equipe,
+        status: item.soluc_aplicada ? 'fechado' : 'aberto',
+        abertura: item.dat_abertura,
+        sumario: item.titulo,
+        severidade: item.impacto || 'media',
+        acionado: !!item.causado_pela_rdm
+      }));
+
+      return {
+        alerts,
+        total: alerts.length,
+        acionados: alerts.filter(a => a.acionado).length,
+        naoAcionados: alerts.filter(a => !a.acionado).length
+      };
+    } catch (error) {
+      console.error('API request failed:', error);
+      throw error;
+    }
   }
 
   async exportData(format: 'csv' | 'xlsx' = 'csv'): Promise<Blob> {
