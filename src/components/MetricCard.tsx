@@ -6,9 +6,10 @@ interface MetricCardProps {
   value: number;
   variant: "success" | "warning" | "danger";
   className?: string;
+  onClick?: () => void;
 }
 
-const MetricCard = ({ title, value, variant, className }: MetricCardProps) => {
+const MetricCard = ({ title, value, variant, className, onClick }: MetricCardProps) => {
   const variantStyles = {
     success: "bg-success text-success-foreground",
     warning: "bg-warning text-warning-foreground", 
@@ -16,11 +17,15 @@ const MetricCard = ({ title, value, variant, className }: MetricCardProps) => {
   };
 
   return (
-    <Card className={cn(
-      "p-6 text-center transition-all duration-300 hover:scale-105 hover:shadow-lg",
-      variantStyles[variant],
-      className
-    )}>
+    <Card 
+      className={cn(
+        "p-6 text-center transition-all duration-300 hover:scale-105 hover:shadow-lg",
+        onClick && "cursor-pointer",
+        variantStyles[variant],
+        className
+      )}
+      onClick={onClick}
+    >
       <div className="space-y-2">
         <h3 className="text-3xl font-bold">{value}</h3>
         <p className="text-sm font-medium uppercase tracking-wide">{title}</p>

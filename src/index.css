@@ -36,12 +36,12 @@ All colors MUST be HSL.
     --input: 214.3 31.8% 91.4%;
     --ring: 222.2 84% 4.9%;
 
-    /* Dashboard específico colors */
-    --success: 142 76% 36%;
+    /* Dashboard específico colors - cores mais suaves */
+    --success: 142 69% 58%;
     --success-foreground: 0 0% 98%;
-    --warning: 45 93% 47%;
+    --warning: 45 93% 58%;
     --warning-foreground: 0 0% 98%;
-    --danger: 0 84% 60%;
+    --danger: 0 84% 70%;
     --danger-foreground: 0 0% 98%;
 
     /* Gradients */

@@ -6,6 +6,7 @@ import MetricCard from "@/components/MetricCard";
 import FilterBar from "@/components/FilterBar";
 import AlertsTable from "@/components/AlertsTable";
 import ThemeToggle from "@/components/ThemeToggle";
+import DateFilter from "@/components/DateFilter";
 import { useAlerts } from "@/hooks/useAlerts";
 
 const Index = () => {
@@ -18,10 +19,23 @@ const Index = () => {
     acionado: "all"
   });
 
+  const [startDate, setStartDate] = useState<Date | undefined>(undefined);
+  const [endDate, setEndDate] = useState<Date | undefined>(undefined);
+
   const { alerts, metrics, loading, refetch, playAlertSound } = useAlerts(filters);
 
   const handleFilterChange = (key: string, value: string) => {
     setFilters(prev => ({ ...prev, [key]: value }));
+  };
+
+  const handleCardClick = (type: 'total' | 'acionados' | 'naoAcionados') => {
+    if (type === 'total') {
+      setFilters(prev => ({ ...prev, acionado: 'all' }));
+    } else if (type === 'acionados') {
+      setFilters(prev => ({ ...prev, acionado: 'sim' }));
+    } else if (type === 'naoAcionados') {
+      setFilters(prev => ({ ...prev, acionado: 'nao' }));
+    }
   };
 
   const handleExport = async () => {
@@ -52,9 +66,24 @@ const Index = () => {
 
         {/* Metrics Cards */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-          <MetricCard title="Total" value={metrics.total} variant="success" />
-          <MetricCard title="Não acionados" value={metrics.naoAcionados} variant="danger" />
-          <MetricCard title="Acionados" value={metrics.acionados} variant="warning" />
+          <MetricCard 
+            title="Total" 
+            value={metrics.total} 
+            variant="success" 
+            onClick={() => handleCardClick('total')}
+          />
+          <MetricCard 
+            title="Não acionados" 
+            value={metrics.naoAcionados} 
+            variant="danger" 
+            onClick={() => handleCardClick('naoAcionados')}
+          />
+          <MetricCard 
+            title="Acionados" 
+            value={metrics.acionados} 
+            variant="warning" 
+            onClick={() => handleCardClick('acionados')}
+          />
         </div>
 
         {/* Filters */}
@@ -63,10 +92,12 @@ const Index = () => {
         {/* Export Section */}
         <Card className="p-4">
           <div className="flex items-center justify-between">
-            <div>
-              <h3 className="font-semibold">Período de abertura</h3>
-              <p className="text-sm text-muted-foreground">30 jun/2025 - 30 jun/2025</p>
-            </div>
+            <DateFilter
+              startDate={startDate}
+              endDate={endDate}
+              onStartDateChange={setStartDate}
+              onEndDateChange={setEndDate}
+            />
             <div className="flex gap-2">
               <Button onClick={handleExport} variant="outline" className="gap-2">
                 <FileDown className="h-4 w-4" />
