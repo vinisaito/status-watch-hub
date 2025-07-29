@@ -30,8 +30,8 @@ const MetricCard = ({ title, value, variant, className, onClick }: MetricCardPro
       }}
     >
       <div className="space-y-3">
-        <h3 className="text-4xl font-bold">{value}</h3>
-        <p className="text-sm font-medium uppercase tracking-wide opacity-90">{title}</p>
+        <h3 className="text-4xl font-bold text-black">{value}</h3>
+        <p className="text-sm font-medium uppercase tracking-wide text-black opacity-70">{title}</p>
       </div>
     </Card>
   );

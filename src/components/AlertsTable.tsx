@@ -1,8 +1,11 @@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
+import { Checkbox } from "@/components/ui/checkbox";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
+import { useState } from "react";
+import { useToast } from "@/hooks/use-toast";
 
 export interface Alert {
   id: string;
@@ -18,9 +21,12 @@ export interface Alert {
 interface AlertsTableProps {
   alerts: Alert[];
   loading?: boolean;
+  webhookUrl?: string;
 }
 
-const AlertsTable = ({ alerts, loading }: AlertsTableProps) => {
+const AlertsTable = ({ alerts, loading, webhookUrl = "" }: AlertsTableProps) => {
+  const [checkedAlerts, setCheckedAlerts] = useState<Set<string>>(new Set());
+  const { toast } = useToast();
   const getStatusBadge = (status: Alert["status"]) => {
     const variants = {
       aberto: "bg-danger text-danger-foreground",
@@ -51,6 +57,47 @@ const AlertsTable = ({ alerts, loading }: AlertsTableProps) => {
     }
   };
 
+  const handleCheckboxChange = async (alertId: string, alert: Alert) => {
+    if (checkedAlerts.has(alertId)) return; // Já foi marcado uma vez
+    
+    const newCheckedAlerts = new Set(checkedAlerts);
+    newCheckedAlerts.add(alertId);
+    setCheckedAlerts(newCheckedAlerts);
+
+    // Enviar mensagem para Google Chat
+    if (webhookUrl) {
+      try {
+        await fetch(webhookUrl, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          mode: "no-cors",
+          body: JSON.stringify({
+            text: `🚨 Alerta Acionado!\n\n*Número:* ${alert.alerta}\n*Equipe:* ${alert.grupoExecutor}\n*Sumário:* ${alert.sumario}\n*Severidade:* ${alert.severidade.toUpperCase()}\n*Data:* ${formatDate(alert.abertura)}`
+          }),
+        });
+
+        toast({
+          title: "Sucesso!",
+          description: "Alerta marcado e mensagem enviada para o Google Chat",
+        });
+      } catch (error) {
+        toast({
+          title: "Erro",
+          description: "Falha ao enviar mensagem para o Google Chat",
+          variant: "destructive",
+        });
+      }
+    } else {
+      toast({
+        title: "Webhook não configurado",
+        description: "Configure o webhook do Google Chat nas configurações",
+        variant: "destructive",
+      });
+    }
+  };
+
   if (loading) {
     return (
       <Card className="p-6">
@@ -76,12 +123,13 @@ const AlertsTable = ({ alerts, loading }: AlertsTableProps) => {
               <TableHead className="min-w-[250px]">Sumário</TableHead>
               <TableHead className="min-w-[120px]">Severidade</TableHead>
               <TableHead className="min-w-[100px]">Acionado</TableHead>
+              <TableHead className="min-w-[100px]">Ação</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {alerts.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={7} className="text-center text-muted-foreground py-8">
+                <TableCell colSpan={8} className="text-center text-muted-foreground py-8">
                   Nenhum alerta encontrado
                 </TableCell>
               </TableRow>
@@ -100,6 +148,13 @@ const AlertsTable = ({ alerts, loading }: AlertsTableProps) => {
                     <Badge variant={alert.acionado ? "default" : "secondary"}>
                       {alert.acionado ? "SIM" : "NÃO"}
                     </Badge>
+                  </TableCell>
+                  <TableCell>
+                    <Checkbox
+                      checked={checkedAlerts.has(alert.id)}
+                      disabled={checkedAlerts.has(alert.id)}
+                      onCheckedChange={() => handleCheckboxChange(alert.id, alert)}
+                    />
                   </TableCell>
                 </TableRow>
               ))

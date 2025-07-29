@@ -7,6 +7,7 @@ import FilterBar from "@/components/FilterBar";
 import AlertsTable from "@/components/AlertsTable";
 import ThemeToggle from "@/components/ThemeToggle";
 import DateFilter from "@/components/DateFilter";
+import GoogleChatConfig from "@/components/GoogleChatConfig";
 import { useAlerts } from "@/hooks/useAlerts";
 
 const Index = () => {
@@ -21,6 +22,7 @@ const Index = () => {
 
   const [startDate, setStartDate] = useState<Date | undefined>(undefined);
   const [endDate, setEndDate] = useState<Date | undefined>(undefined);
+  const [webhookUrl, setWebhookUrl] = useState("");
 
   const { alerts, metrics, loading, refetch, playAlertSound } = useAlerts(filters);
 
@@ -52,7 +54,7 @@ const Index = () => {
       <div className="max-w-7xl mx-auto space-y-6">
         {/* Header */}
         <div className="flex items-center justify-between">
-          <div>
+          <div className="flex-1 text-center">
             <h1 className="text-3xl font-bold text-foreground">Painel de acionamento - CIOps</h1>
             <p className="text-muted-foreground">Monitoramento de alertas em tempo real</p>
           </div>
@@ -108,8 +110,14 @@ const Index = () => {
           </div>
         </div>
 
+        {/* Google Chat Configuration */}
+        <GoogleChatConfig 
+          webhookUrl={webhookUrl} 
+          onWebhookUrlChange={setWebhookUrl} 
+        />
+
         {/* Alerts Table */}
-        <AlertsTable alerts={alerts} loading={loading} />
+        <AlertsTable alerts={alerts} loading={loading} webhookUrl={webhookUrl} />
       </div>
     </div>
   );
