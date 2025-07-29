@@ -22,9 +22,12 @@ const Index = () => {
 
   const [startDate, setStartDate] = useState<Date | undefined>(undefined);
   const [endDate, setEndDate] = useState<Date | undefined>(undefined);
-  const [webhookUrl, setWebhookUrl] = useState("");
+  const [webhookConfigs, setWebhookConfigs] = useState<{grupoExecutor: string; webhookUrl: string}[]>([]);
 
   const { alerts, metrics, loading, refetch, playAlertSound } = useAlerts(filters);
+
+  // Extrair grupos únicos dos alertas para a configuração
+  const availableGroups = Array.from(new Set(alerts.map(alert => alert.grupoExecutor).filter(Boolean)));
 
   const handleFilterChange = (key: string, value: string) => {
     setFilters(prev => ({ ...prev, [key]: value }));
@@ -112,12 +115,13 @@ const Index = () => {
 
         {/* Google Chat Configuration */}
         <GoogleChatConfig 
-          webhookUrl={webhookUrl} 
-          onWebhookUrlChange={setWebhookUrl} 
+          webhookConfigs={webhookConfigs}
+          onWebhookConfigsChange={setWebhookConfigs}
+          availableGroups={availableGroups}
         />
 
         {/* Alerts Table */}
-        <AlertsTable alerts={alerts} loading={loading} webhookUrl={webhookUrl} />
+        <AlertsTable alerts={alerts} loading={loading} webhookConfigs={webhookConfigs} />
       </div>
     </div>
   );

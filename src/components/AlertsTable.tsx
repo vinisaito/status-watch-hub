@@ -21,12 +21,13 @@ export interface Alert {
 interface AlertsTableProps {
   alerts: Alert[];
   loading?: boolean;
-  webhookUrl?: string;
+  webhookConfigs?: {grupoExecutor: string; webhookUrl: string}[];
 }
 
-const AlertsTable = ({ alerts, loading, webhookUrl = "" }: AlertsTableProps) => {
+const AlertsTable = ({ alerts, loading, webhookConfigs = [] }: AlertsTableProps) => {
   const [checkedAlerts, setCheckedAlerts] = useState<Set<string>>(new Set());
   const { toast } = useToast();
+  
   const getStatusBadge = (status: Alert["status"]) => {
     const variants = {
       aberto: "bg-danger text-danger-foreground",
@@ -64,10 +65,12 @@ const AlertsTable = ({ alerts, loading, webhookUrl = "" }: AlertsTableProps) => 
     newCheckedAlerts.add(alertId);
     setCheckedAlerts(newCheckedAlerts);
 
-    // Enviar mensagem para Google Chat
-    if (webhookUrl) {
+    // Encontrar webhook específico para o grupo executor
+    const webhookConfig = webhookConfigs.find(config => config.grupoExecutor === alert.grupoExecutor);
+    
+    if (webhookConfig?.webhookUrl) {
       try {
-        await fetch(webhookUrl, {
+        await fetch(webhookConfig.webhookUrl, {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
@@ -80,7 +83,7 @@ const AlertsTable = ({ alerts, loading, webhookUrl = "" }: AlertsTableProps) => 
 
         toast({
           title: "Sucesso!",
-          description: "Alerta marcado e mensagem enviada para o Google Chat",
+          description: `Alerta marcado e mensagem enviada para o Google Chat do grupo: ${alert.grupoExecutor}`,
         });
       } catch (error) {
         toast({
@@ -92,7 +95,7 @@ const AlertsTable = ({ alerts, loading, webhookUrl = "" }: AlertsTableProps) => 
     } else {
       toast({
         title: "Webhook não configurado",
-        description: "Configure o webhook do Google Chat nas configurações",
+        description: `Configure o webhook do Google Chat para o grupo: ${alert.grupoExecutor}`,
         variant: "destructive",
       });
     }
