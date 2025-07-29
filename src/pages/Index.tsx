@@ -1,7 +1,8 @@
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { FileDown } from "lucide-react";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { FileDown, Settings } from "lucide-react";
 import MetricCard from "@/components/MetricCard";
 import FilterBar from "@/components/FilterBar";
 import AlertsTable from "@/components/AlertsTable";
@@ -62,6 +63,24 @@ const Index = () => {
             <p className="text-muted-foreground">Monitoramento de alertas em tempo real</p>
           </div>
           <div className="flex gap-3">
+            <Dialog>
+              <DialogTrigger asChild>
+                <Button variant="outline" size="sm" className="gap-2">
+                  <Settings className="h-4 w-4" />
+                  Configurações
+                </Button>
+              </DialogTrigger>
+              <DialogContent className="max-w-4xl max-h-[80vh] overflow-y-auto">
+                <DialogHeader>
+                  <DialogTitle>Configurações do Google Chat</DialogTitle>
+                </DialogHeader>
+                <GoogleChatConfig 
+                  webhookConfigs={webhookConfigs}
+                  onWebhookConfigsChange={setWebhookConfigs}
+                  availableGroups={availableGroups}
+                />
+              </DialogContent>
+            </Dialog>
             <Button onClick={playAlertSound} variant="outline">
               Testar Som
             </Button>
@@ -112,13 +131,6 @@ const Index = () => {
             </Button>
           </div>
         </div>
-
-        {/* Google Chat Configuration */}
-        <GoogleChatConfig 
-          webhookConfigs={webhookConfigs}
-          onWebhookConfigsChange={setWebhookConfigs}
-          availableGroups={availableGroups}
-        />
 
         {/* Alerts Table */}
         <AlertsTable alerts={alerts} loading={loading} webhookConfigs={webhookConfigs} />
