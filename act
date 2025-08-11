@@ -1,12 +1,23 @@
 import { useState, useEffect } from 'react';
-import { Check, AlertTriangle, ExternalLink } from 'lucide-react';
+import { Check, AlertTriangle, ExternalLink, Eye, EyeOff } from 'lucide-react';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { toast } from '@/hooks/use-toast';
-import { AlertData } from './Dashboard';
-import { CrisisProcessDialog } from './CrisisProcessDialog';
+
+// Adicione aqui as interfaces que você usa na sua aplicação
+export interface AlertData {
+  id: string;
+  numeroChamado: string;
+  classificacao: string;
+  equipe: string;
+  status: string;
+  abertura: string;
+  titulo: string;
+  severidade: string;
+}
 
 interface ActionTableProps {
   alertData: AlertData[];
@@ -17,6 +28,7 @@ interface ActionTableProps {
 export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: ActionTableProps) => {
   const [selectedIncident, setSelectedIncident] = useState<AlertData | null>(null);
   const [crisisDialogOpen, setCrisisDialogOpen] = useState(false);
+  const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
 
   // Estado que guarda os numeros chamados já acionados (string)
   const [acionadosSet, setAcionadosSet] = useState<Set<string>>(new Set());
@@ -129,107 +141,267 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
       : 'bg-sev3-incident text-white';
   };
 
+  const truncateText = (text: string, maxLength: number) => {
+    return text.length > maxLength ? text.substring(0, maxLength) + '...' : text;
+  };
+
+  const toggleRowExpansion = (alertId: string) => {
+    setExpandedRows(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(alertId)) {
+        newSet.delete(alertId);
+      } else {
+        newSet.add(alertId);
+      }
+      return newSet;
+    });
+  };
+
   return (
-    <Card className="bg-panel-bg border-border">
-      <CardHeader />
-      <CardContent>
-        <div className="overflow-x-auto">
-          <Table>
-            <TableHeader>
-              <TableRow className="border-border hover:bg-hover-bg">
-                <TableHead className="text-muted-foreground">Chamado</TableHead>
-                <TableHead className="text-muted-foreground">Classificação</TableHead>
-                <TableHead className="text-muted-foreground">Equipe</TableHead>
-                <TableHead className="text-muted-foreground">Status</TableHead>
-                <TableHead className="text-muted-foreground">Abertura</TableHead>
-                <TableHead className="text-muted-foreground w-[10px] max-w-[150px]">Título</TableHead>
-                <TableHead className="text-muted-foreground">Severidade</TableHead>
-                <TableHead className="text-muted-foreground">Acionado</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {loading ? (
-                <TableRow>
-                  <TableCell colSpan={8} className="text-center py-8">
-                    Carregando dados...
-                  </TableCell>
-                </TableRow>
-              ) : alertData.length === 0 ? (
-                <TableRow>
-                  <TableCell colSpan={8} className="text-center py-8 text-muted-foreground">
-                    Nenhum dado disponível
-                  </TableCell>
-                </TableRow>
-              ) : (
-                alertData.map((alert) => {
-                  const isAcionado = acionadosSet.has(alert.numeroChamado.toString());
-                  return (
-                    <TableRow
-                      key={alert.id}
-                      className="border-border hover:bg-hover-bg transition-colors"
-                    >
-                      <TableCell className="font-medium">{alert.numeroChamado}</TableCell>
-                      <TableCell>{alert.classificacao}</TableCell>
-                      <TableCell>{alert.equipe}</TableCell>
-                      <TableCell>{alert.status}</TableCell>
-                      <TableCell>
-                        {alert.abertura
-                          ? new Date(alert.abertura).toLocaleString('pt-BR')
-                          : '-'}
-                      </TableCell>
-                      <TableCell>
+    <TooltipProvider>
+      <Card className="bg-panel-bg border-border">
+        <CardHeader />
+        <CardContent>
+          {/* Layout para Mobile (oculto em desktop) */}
+          <div className="block lg:hidden space-y-4">
+            {loading ? (
+              <div className="text-center py-8">
+                <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary mb-4"></div>
+                <p>Carregando dados...</p>
+              </div>
+            ) : alertData.length === 0 ? (
+              <div className="text-center py-8 text-muted-foreground">
+                Nenhum dado disponível
+              </div>
+            ) : (
+              alertData.map((alert) => {
+                const isAcionado = acionadosSet.has(alert.numeroChamado.toString());
+                const isExpanded = expandedRows.has(alert.id);
+                
+                return (
+                  <Card key={alert.id} className="bg-secondary border-border">
+                    <CardContent className="p-4">
+                      <div className="flex items-center justify-between mb-3">
                         <div className="flex items-center gap-2">
-                          <span className="break-words max-w-xs">{alert.titulo}</span>
-                          {alert.classificacao.toLowerCase().includes('incidente') && (
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => handleIncidentClick(alert)}
-                              className="p-1 h-auto hover:bg-hover-bg"
-                              title="Iniciar processo de crise"
-                            >
-                              <ExternalLink className="h-3 w-3" />
-                            </Button>
-                          )}
+                          <Badge variant="outline" className="text-xs">
+                            #{alert.numeroChamado}
+                          </Badge>
+                          <Badge className={getSeverityColor(alert.severidade)}>
+                            {alert.severidade}
+                          </Badge>
                         </div>
-                      </TableCell>
-                      <TableCell>
-                        <Badge className={getSeverityColor(alert.severidade)}>
-                          {alert.severidade}
-                        </Badge>
-                      </TableCell>
-                      <TableCell>
                         <Button
-                          variant={isAcionado ? "default" : "outline"}
+                          variant="ghost"
                           size="sm"
-                          onClick={() => !isAcionado && handleAcknowledgment(alert)}
-                          disabled={isAcionado}
-                          className={`${isAcionado
-                              ? 'bg-success text-white hover:bg-success/90'
-                              : 'border-border hover:bg-hover-bg'
-                            }`}
+                          onClick={() => toggleRowExpansion(alert.id)}
+                          className="h-6 w-6 p-0"
                         >
-                          {isAcionado ? (
-                            <Check className="h-4 w-4" />
-                          ) : (
-                            <AlertTriangle className="h-4 w-4" />
-                          )}
+                          {isExpanded ? <EyeOff className="h-3 w-3" /> : <Eye className="h-3 w-3" />}
                         </Button>
+                      </div>
+                      
+                      <div className="space-y-2">
+                        <div>
+                          <p className="text-sm font-medium">
+                            {truncateText(alert.titulo, isExpanded ? 200 : 60)}
+                          </p>
+                        </div>
+                        
+                        <div className="flex items-center justify-between text-xs text-muted-foreground">
+                          <span>{alert.equipe}</span>
+                          <span>{alert.status}</span>
+                        </div>
+                        
+                        {isExpanded && (
+                          <div className="mt-3 space-y-2 text-xs">
+                            <div className="grid grid-cols-2 gap-2">
+                              <div>
+                                <span className="text-muted-foreground">Classificação:</span>
+                                <p className="font-medium">{alert.classificacao}</p>
+                              </div>
+                              <div>
+                                <span className="text-muted-foreground">Abertura:</span>
+                                <p className="font-medium">
+                                  {alert.abertura
+                                    ? new Date(alert.abertura).toLocaleString('pt-BR')
+                                    : '-'}
+                                </p>
+                              </div>
+                            </div>
+                          </div>
+                        )}
+                        
+                        <div className="flex items-center justify-between pt-3">
+                          <div className="flex items-center gap-2">
+                            {alert.classificacao.toLowerCase().includes('incidente') && (
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => handleIncidentClick(alert)}
+                                className="h-7 px-2 text-xs"
+                              >
+                                <ExternalLink className="h-3 w-3 mr-1" />
+                                Crise
+                              </Button>
+                            )}
+                          </div>
+                          
+                          <Button
+                            variant={isAcionado ? "default" : "outline"}
+                            size="sm"
+                            onClick={() => !isAcionado && handleAcknowledgment(alert)}
+                            disabled={isAcionado}
+                            className={`h-7 px-3 text-xs ${
+                              isAcionado
+                                ? 'bg-success text-white hover:bg-success/90'
+                                : 'border-border hover:bg-hover-bg'
+                            }`}
+                          >
+                            {isAcionado ? (
+                              <>
+                                <Check className="h-3 w-3 mr-1" />
+                                Acionado
+                              </>
+                            ) : (
+                              <>
+                                <AlertTriangle className="h-3 w-3 mr-1" />
+                                Acionar
+                              </>
+                            )}
+                          </Button>
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+                );
+              })
+            )}
+          </div>
+
+          {/* Layout para Desktop (oculto em mobile) */}
+          <div className="hidden lg:block">
+            <div className="overflow-hidden rounded-lg border border-border">
+              <Table>
+                <TableHeader>
+                  <TableRow className="border-border hover:bg-hover-bg">
+                    <TableHead className="text-muted-foreground w-[100px]">Chamado</TableHead>
+                    <TableHead className="text-muted-foreground w-[150px]">Classificação</TableHead>
+                    <TableHead className="text-muted-foreground w-[120px]">Equipe</TableHead>
+                    <TableHead className="text-muted-foreground w-[100px]">Status</TableHead>
+                    <TableHead className="text-muted-foreground w-[120px]">Abertura</TableHead>
+                    <TableHead className="text-muted-foreground min-w-[200px]">Título</TableHead>
+                    <TableHead className="text-muted-foreground w-[120px]">Severidade</TableHead>
+                    <TableHead className="text-muted-foreground w-[100px]">Acionado</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {loading ? (
+                    <TableRow>
+                      <TableCell colSpan={8} className="text-center py-8">
+                        Carregando dados...
                       </TableCell>
                     </TableRow>
-                  );
-                })
-              )}
-            </TableBody>
-          </Table>
-        </div>
+                  ) : alertData.length === 0 ? (
+                    <TableRow>
+                      <TableCell colSpan={8} className="text-center py-8 text-muted-foreground">
+                        Nenhum dado disponível
+                      </TableCell>
+                    </TableRow>
+                  ) : (
+                    alertData.map((alert) => {
+                      const isAcionado = acionadosSet.has(alert.numeroChamado.toString());
+                      return (
+                        <TableRow
+                          key={alert.id}
+                          className="border-border hover:bg-hover-bg transition-colors"
+                        >
+                          <TableCell className="font-medium">{alert.numeroChamado}</TableCell>
+                          <TableCell>
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <span className="truncate block max-w-[140px]">
+                                  {alert.classificacao}
+                                </span>
+                              </TooltipTrigger>
+                              <TooltipContent>
+                                <p className="max-w-xs">{alert.classificacao}</p>
+                              </TooltipContent>
+                            </Tooltip>
+                          </TableCell>
+                          <TableCell>{alert.equipe}</TableCell>
+                          <TableCell>{alert.status}</TableCell>
+                          <TableCell className="text-sm">
+                            {alert.abertura
+                              ? new Date(alert.abertura).toLocaleDateString('pt-BR')
+                              : '-'}
+                          </TableCell>
+                          <TableCell>
+                            <div className="flex items-center gap-2">
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <span className="truncate block max-w-[180px]">
+                                    {alert.titulo}
+                                  </span>
+                                </TooltipTrigger>
+                                <TooltipContent>
+                                  <p className="max-w-md">{alert.titulo}</p>
+                                </TooltipContent>
+                              </Tooltip>
+                              {alert.classificacao.toLowerCase().includes('incidente') && (
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() => handleIncidentClick(alert)}
+                                  className="p-1 h-auto hover:bg-hover-bg flex-shrink-0"
+                                  title="Iniciar processo de crise"
+                                >
+                                  <ExternalLink className="h-3 w-3" />
+                                </Button>
+                              )}
+                            </div>
+                          </TableCell>
+                          <TableCell>
+                            <Badge className={getSeverityColor(alert.severidade)}>
+                              {alert.severidade}
+                            </Badge>
+                          </TableCell>
+                          <TableCell>
+                            <Button
+                              variant={isAcionado ? "default" : "outline"}
+                              size="sm"
+                              onClick={() => !isAcionado && handleAcknowledgment(alert)}
+                              disabled={isAcionado}
+                              className={`${isAcionado
+                                  ? 'bg-success text-white hover:bg-success/90'
+                                  : 'border-border hover:bg-hover-bg'
+                                }`}
+                            >
+                              {isAcionado ? (
+                                <Check className="h-4 w-4" />
+                              ) : (
+                                <AlertTriangle className="h-4 w-4" />
+                              )}
+                            </Button>
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })
+                  )}
+                </TableBody>
+              </Table>
+            </div>
+          </div>
 
-        <CrisisProcessDialog
-          open={crisisDialogOpen}
-          onOpenChange={setCrisisDialogOpen}
-          incident={selectedIncident}
-        />
-      </CardContent>
-    </Card>
+          {/* Remova este bloco e adicione o CrisisProcessDialog do seu código original */}
+          {/* 
+          <CrisisProcessDialog
+            open={crisisDialogOpen}
+            onOpenChange={setCrisisDialogOpen}
+            incident={selectedIncident}
+          />
+          */}
+        </CardContent>
+      </Card>
+    </TooltipProvider>
   );
 };
