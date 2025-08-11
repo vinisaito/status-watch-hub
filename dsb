@@ -1,414 +1,452 @@
-import React, { useState, useEffect, useCallback, memo } from 'react';
+import { useState, useEffect } from 'react';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
-import { Textarea } from '@/components/ui/textarea';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Trash2, Plus, MessageSquare, Clock, User, AlertTriangle } from 'lucide-react';
-import { useToast } from '@/hooks/use-toast';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Trash2, Plus, Webhook } from 'lucide-react';
+import { toast } from '@/hooks/use-toast';
 
-interface ShiftNote {
-  id: string;
-  author: string;
-  message: string;
-  timestamp: string;
-  priority: 'normal' | 'important';
+interface WebhookConfigProps {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
 }
 
-const formatTimestamp = (timestamp: string) => {
-  try {
-    const date = new Date(timestamp);
-    return date.toLocaleString('pt-BR', {
-      day: '2-digit',
-      month: '2-digit',
-      hour: '2-digit',
-      minute: '2-digit',
-    });
-  } catch {
-    return timestamp || '';
+interface WebhookEntry {
+  url: string;
+  tipo_evento?: string;
+  ativo?: boolean;
+  criado_por?: string;
+  criado_em?: string;
+}
+
+// Agora armazenamos os webhooks agrupados por time/grupo:
+// { [grupo: string]: WebhookEntry[] }
+type WebhooksByGroup = Record<string, WebhookEntry[]>;
+
+const API_BASE = "https://f6ffk8e9fe.execute-api.us-east-1.amazonaws.com/prod/webhook";
+
+// Busca todos os grupos existentes
+async function fetchAllGroups(): Promise<string[]> {
+  const res = await fetch(API_BASE, { method: 'GET', headers: { 'Content-Type': 'application/json' } });
+  if (!res.ok) {
+    const txt = await res.text();
+    throw new Error(txt || 'Falha ao carregar grupos');
   }
-};
+  const json = await res.json();
+  return json.grupos || [];
+}
 
-const ShiftNoteItem = memo(({ note, onRemoveNote }: { note: ShiftNote; onRemoveNote: (id: string) => void }) => {
-  return (
-    <div className={`group relative border rounded-xl p-5 backdrop-blur-sm transition-all duration-300 hover:shadow-lg hover:scale-[1.02] ${
-      note.priority === 'important' 
-        ? 'border-warning/50 bg-gradient-to-br from-warning/10 via-warning/5 to-transparent shadow-warning/20' 
-        : 'border-border/60 bg-gradient-to-br from-card/80 via-card/60 to-transparent hover:border-primary/30'
-    }`}>
-      <div className="flex items-start justify-between gap-4">
-        <div className="flex-1 space-y-3">
-          <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-            <div className="flex items-center gap-2 text-sm font-medium text-foreground">
-              <div className="w-8 h-8 bg-gradient-to-br from-primary/20 to-primary/10 rounded-full flex items-center justify-center">
-                <User className="h-4 w-4 text-primary" />
-              </div>
-              <span>{note.author}</span>
-            </div>
-            <div className="flex items-center gap-2 text-sm text-muted-foreground">
-              <Clock className="h-4 w-4" />
-              <span>{formatTimestamp(note.timestamp)}</span>
-            </div>
-            {note.priority === 'important' && (
-              <span className="inline-flex items-center gap-1 text-xs px-3 py-1 bg-gradient-to-r from-warning to-warning/80 text-warning-foreground rounded-full font-semibold shadow-sm">
-                <AlertTriangle className="h-3 w-3" />
-                IMPORTANTE
-              </span>
-            )}
-          </div>
-          <div className="pl-10">
-            <p className="text-foreground whitespace-pre-wrap break-words leading-relaxed">{note.message}</p>
-          </div>
-        </div>
-        <Button
-          variant="ghost"
-          size="icon"
-          onClick={() => onRemoveNote(note.id)}
-          className="text-muted-foreground hover:text-destructive hover:bg-destructive/10 hover:scale-110 transition-all duration-200 rounded-xl opacity-0 group-hover:opacity-100"
-          aria-label="Remover recado"
-        >
-          <Trash2 className="h-4 w-4" />
-        </Button>
-      </div>
-    </div>
-  );
-});
-
-const ShiftNoteList = ({ notes, onRemoveNote }: { notes: ShiftNote[]; onRemoveNote: (id: string) => void }) => {
-  if (!notes || notes.length === 0) {
-    return (
-      <div className="text-center py-16">
-        <div className="w-16 h-16 bg-gradient-to-br from-muted/50 to-muted/30 rounded-full flex items-center justify-center mx-auto mb-4">
-          <MessageSquare className="h-8 w-8 text-muted-foreground" />
-        </div>
-        <p className="text-muted-foreground font-medium">Nenhum recado no turno atual</p>
-        <p className="text-sm text-muted-foreground/70 mt-1">Adicione o primeiro recado para começar</p>
-      </div>
-    );
+// Busca os webhooks de um grupo específico
+async function fetchWebhooksFromApi(grupo: string): Promise<{ grupo_id: string; webhooks: WebhookEntry[] }> {
+  const res = await fetch(`${API_BASE}?grupo_id=${encodeURIComponent(grupo)}`, {
+    method: 'GET',
+    headers: { 'Content-Type': 'application/json' },
+  });
+  if (!res.ok) {
+    const txt = await res.text();
+    throw new Error(txt || 'Falha ao carregar webhooks do servidor');
   }
-  return <div className="space-y-4">{notes.map((note) => <ShiftNoteItem key={note.id} note={note} onRemoveNote={onRemoveNote} />)}</div>;
-};
+  return res.json();
+}
 
-const ShiftNoteForm = ({
-  authorName,
-  setAuthorName,
-  newNote,
-  setNewNote,
-  isImportant,
-  setIsImportant,
-  onAddNote,
-}: {
-  authorName: string;
-  setAuthorName: (val: string) => void;
-  newNote: string;
-  setNewNote: (val: string) => void;
-  isImportant: boolean;
-  setIsImportant: (val: boolean) => void;
-  onAddNote: () => void;
-}) => {
-  return (
-    <div className="relative border border-border/60 rounded-2xl p-6 bg-gradient-to-br from-card via-card/90 to-card/80 backdrop-blur-sm shadow-lg">
-      {/* Gradient overlay */}
-      <div className="absolute inset-0 bg-gradient-to-br from-primary/5 via-transparent to-secondary/5 rounded-2xl pointer-events-none" />
-      
-      <div className="relative space-y-6">
-        <div className="text-center mb-6">
-          <div className="flex items-center justify-center gap-3 mb-2">
-            <div className="w-10 h-10 bg-gradient-to-br from-primary to-primary/80 rounded-xl flex items-center justify-center shadow-lg">
-              <MessageSquare className="h-5 w-5 text-primary-foreground" />
-            </div>
-            <h2 className="text-2xl font-bold bg-gradient-to-r from-primary to-primary/80 bg-clip-text text-transparent">
-              Recados do Turno
-            </h2>
-          </div>
-          <p className="text-sm text-muted-foreground">Compartilhe informações importantes com o próximo turno</p>
-        </div>
-
-        <div className="grid gap-6">
-          <div className="space-y-2">
-            <Label htmlFor="author-name" className="text-sm font-semibold text-foreground">Seu Nome</Label>
-            <Input
-              id="author-name"
-              value={authorName}
-              onChange={(e) => setAuthorName(e.target.value)}
-              placeholder="Digite seu nome"
-              className="bg-background/80 border-border/60 focus:border-primary/50 transition-all duration-200 rounded-xl"
-            />
-          </div>
-          
-          <div className="space-y-2">
-            <Label htmlFor="note-message" className="text-sm font-semibold text-foreground">Recado</Label>
-            <Textarea
-              id="note-message"
-              value={newNote}
-              onChange={(e) => setNewNote(e.target.value)}
-              placeholder="Digite o recado para o próximo turno..."
-              className="bg-background/80 border-border/60 focus:border-primary/50 transition-all duration-200 rounded-xl min-h-[120px] resize-none"
-            />
-          </div>
-          
-          <div className="flex flex-col sm:flex-row items-center justify-between gap-4 pt-2">
-            <div className="flex items-center gap-3 self-start sm:self-center">
-              <div className="relative">
-                <input
-                  type="checkbox"
-                  id="important-checkbox"
-                  checked={isImportant}
-                  onChange={(e) => setIsImportant(e.target.checked)}
-                  className="h-5 w-5 rounded-md border-border/60 text-warning focus:ring-warning/20 transition-all duration-200"
-                />
-              </div>
-              <Label htmlFor="important-checkbox" className="text-sm font-medium cursor-pointer flex items-center gap-2">
-                <span>Marcar como importante</span>
-                {isImportant && <AlertTriangle className="h-4 w-4 text-warning" />}
-              </Label>
-            </div>
-            
-            <Button 
-              onClick={onAddNote} 
-              className="w-full sm:w-auto bg-gradient-to-r from-primary to-primary/90 hover:from-primary/90 hover:to-primary text-primary-foreground shadow-lg hover:shadow-xl hover:scale-105 transition-all duration-200 rounded-xl px-6"
-            >
-              <Plus className="h-4 w-4 mr-2" />
-              Adicionar Recado
-            </Button>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-};
-
-const API_URL = 'https://f6ffk8e9fe.execute-api.us-east-1.amazonaws.com/prod/recadosturno';
-
-// POST/DELETE unchanged (assuming backend works)
-async function postShiftNote(nome: string, recado: string, importante: boolean) {
-  const response = await fetch(API_URL, {
+async function addOrUpdateWebhookApi(payload: {
+  grupo_id: string;
+  url: string;
+  tipo_evento?: string;
+  usuario: string;
+}): Promise<{ message: string; webhooks: WebhookEntry[] }> {
+  const res = await fetch(`${API_BASE}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ nome, recado, importante }),
+    body: JSON.stringify(payload),
   });
-  if (!response.ok) {
-    const errorData = await response.text();
-    console.error('POST error:', response.status, errorData);
-    throw new Error(JSON.parse(errorData || '{}').error || 'Erro ao salvar recado');
+  if (!res.ok) {
+    const txt = await res.text();
+    throw new Error(txt || 'Erro ao adicionar webhook');
   }
-  return response.json();
+  return res.json();
 }
 
-async function deleteShiftNote(key: string) {
-  const response = await fetch(API_URL, {
+async function removeWebhookApi(payload: {
+  grupo_id: string;
+  url: string;
+  tipo_evento?: string;
+}): Promise<{ message: string; webhooks: WebhookEntry[] }> {
+  const res = await fetch(`${API_BASE}`, {
     method: 'DELETE',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ key }),
+    body: JSON.stringify(payload),
   });
-  if (!response.ok) {
-    const errorData = await response.text();
-    console.error('DELETE error:', response.status, errorData);
-    throw new Error(JSON.parse(errorData || '{}').error || 'Erro ao remover recado');
+  if (!res.ok) {
+    const txt = await res.text();
+    throw new Error(txt || 'Erro ao remover webhook');
   }
-  return response.json();
+  return res.json();
 }
 
-// Robust GET + normalization
-async function getShiftNotes(): Promise<ShiftNote[]> {
-  const response = await fetch(API_URL, { method: 'GET' });
+export const WebhookConfig = ({ open, onOpenChange }: WebhookConfigProps) => {
+  // webhooks agrupados por grupo/time
+  const [webhooksByGroup, setWebhooksByGroup] = useState<WebhooksByGroup>({});
+  const [crisisWebhook, setCrisisWebhook] = useState('');
+  const [newTeam, setNewTeam] = useState(''); // para novo grupo (time)
+  const [newWebhook, setNewWebhook] = useState('');
+  const [loadingGroups, setLoadingGroups] = useState<string[]>([]);
+  const [isSaving, setIsSaving] = useState(false);
 
-  if (!response.ok) {
-    const txt = await response.text();
-    console.error('GET error:', response.status, txt);
-    throw new Error(txt || 'Erro ao carregar recados');
-  }
-
-  // read text then parse safely
-  const text = await response.text();
-  let parsed: any = null;
-  if (!text) {
-    parsed = null;
-  } else {
-    try {
-      parsed = JSON.parse(text);
-    } catch (err) {
-      console.error('Erro ao parsear JSON do GET:', err, 'texto:', text);
-      throw new Error('Resposta inválida do servidor');
-    }
-  }
-
-  // normalize to array
-  let rawNotes: any[] = [];
-  if (parsed == null) {
-    rawNotes = [];
-  } else if (Array.isArray(parsed)) {
-    rawNotes = parsed;
-  } else if (parsed.notes && Array.isArray(parsed.notes)) {
-    rawNotes = parsed.notes;
-  } else if (parsed.recados && Array.isArray(parsed.recados)) {
-    rawNotes = parsed.recados;
-  } else if (parsed && (parsed.nome || parsed.recado || parsed.key)) {
-    // single object returned
-    rawNotes = [parsed];
-  } else {
-    // unknown shape
-    console.warn('Formato inesperado do payload GET:', parsed);
-    rawNotes = [];
-  }
-
-  // map to ShiftNote
-  return rawNotes.map((item: any, idx: number) => ({
-    id: item.key || item.id || item.Key || `note-${idx}`,
-    author: item.nome || item.author || '',
-    message: item.recado || item.message || '',
-    timestamp: item.timestamp || item.ts || new Date().toISOString(),
-    priority: item.importante ? 'important' : 'normal',
-  }));
-}
-
-export const ShiftNotes = () => {
-  const { toast } = useToast();
-  const [notes, setNotes] = useState<ShiftNote[]>([]);
-  const [newNote, setNewNote] = useState('');
-  const [authorName, setAuthorName] = useState('');
-  const [isImportant, setIsImportant] = useState(false);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  const loadNotes = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const fetchedNotes = await getShiftNotes();
-      setNotes(fetchedNotes);
-    } catch (err: any) {
-      console.error('Erro ao carregar recados:', err);
-      setError(err.message || 'Erro ao carregar recados');
-      toast({
-        title: 'Erro',
-        description: err.message || 'Não foi possível carregar os recados.',
-        variant: 'destructive',
-      });
-    } finally {
-      setLoading(false);
-    }
-  }, [toast]);
-
+  // Ao abrir o modal, carregar grupos + webhooks
   useEffect(() => {
-    loadNotes();
+    if (!open) return;
 
-    const savedAuthor = localStorage.getItem('shiftNotesAuthor');
-    if (savedAuthor) setAuthorName(savedAuthor);
-  }, [loadNotes]);
+    // Limpa dados antigos ao abrir
+    setWebhooksByGroup({});
 
-  useEffect(() => {
-    if (authorName) {
-      localStorage.setItem('shiftNotesAuthor', authorName);
+    // Carrega webhook de crise do localStorage
+    const savedCrisisWebhook = localStorage.getItem('crisisWebhook');
+    if (savedCrisisWebhook) {
+      setCrisisWebhook(savedCrisisWebhook);
     }
-  }, [authorName]);
 
-  const addNote = useCallback(async () => {
-    if (!newNote.trim() || !authorName.trim()) {
+    const loadAll = async () => {
+      try {
+        const grupos = await fetchAllGroups();
+
+        if (grupos.length === 0) {
+          toast({ title: "Nenhum grupo encontrado", description: "Não existem grupos com webhooks configurados." });
+          return;
+        }
+
+        // Para cada grupo, buscar os webhooks
+        setLoadingGroups(grupos);
+        const allWebhooks: WebhooksByGroup = {};
+        await Promise.all(
+          grupos.map(async (grupo) => {
+            try {
+              const data = await fetchWebhooksFromApi(grupo);
+              allWebhooks[grupo] = data.webhooks.filter(w => w.ativo);
+            } catch (err: any) {
+              toast({
+                title: "Erro ao carregar grupo",
+                description: `Falha ao carregar webhooks do grupo ${grupo}: ${err.message}`,
+                variant: "destructive",
+              });
+              allWebhooks[grupo] = [];
+            }
+          })
+        );
+        setWebhooksByGroup(allWebhooks);
+      } catch (e: any) {
+        toast({
+          title: "Erro ao carregar grupos",
+          description: e.message || "Falha ao carregar grupos",
+          variant: "destructive",
+        });
+      } finally {
+        setLoadingGroups([]);
+      }
+    };
+
+    loadAll();
+  }, [open]);
+
+  // Adiciona ou atualiza um webhook em um grupo específico
+  const addWebhook = async () => {
+    if (!newTeam.trim() || !newWebhook.trim()) {
       toast({
-        title: 'Campos obrigatórios',
-        description: 'Preencha seu nome e a mensagem do recado.',
-        variant: 'destructive',
+        title: "Campos obrigatórios",
+        description: "Preencha o nome da equipe e a URL do webhook",
+        variant: "destructive",
       });
       return;
     }
-    try {
-      const data = await postShiftNote(authorName.trim(), newNote.trim(), isImportant);
-      const note: ShiftNote = {
-        id: data.key,
-        author: authorName.trim(),
-        message: newNote.trim(),
-        timestamp: data.timestamp,
-        priority: isImportant ? 'important' : 'normal',
-      };
-      setNotes((prev) => [note, ...prev]);
-      setNewNote('');
-      setIsImportant(false);
-      toast({ title: 'Recado adicionado!', description: 'O recado foi salvo com sucesso.' });
-    } catch (error: any) {
-      toast({
-        title: 'Erro',
-        description: error.message || 'Não foi possível salvar o recado.',
-        variant: 'destructive',
-      });
-    }
-  }, [newNote, authorName, isImportant, toast]);
 
-  const removeNote = useCallback(async (noteId: string) => {
-    try {
-      await deleteShiftNote(noteId);
-      setNotes((prev) => prev.filter((note) => note.id !== noteId));
-      toast({ title: 'Recado removido.', variant: 'destructive' });
-    } catch (error: any) {
+    if (!newWebhook.startsWith('https://chat.googleapis.com/')) {
       toast({
-        title: 'Erro',
-        description: error.message || 'Não foi possível remover o recado.',
-        variant: 'destructive',
+        title: "URL inválida",
+        description: "A URL deve ser um webhook válido do Google Chat",
+        variant: "destructive",
       });
+      return;
     }
-  }, [toast]);
+
+    const teamKey = newTeam.trim();
+    const webhookUrl = newWebhook.trim();
+
+    // Otimista
+    const optimistic = {
+      ...webhooksByGroup,
+      [teamKey]: [...(webhooksByGroup[teamKey] || []), { url: webhookUrl, ativo: true }],
+    };
+    setWebhooksByGroup(optimistic);
+
+    setNewTeam('');
+    setNewWebhook('');
+
+    toast({
+      title: "Salvando...",
+      description: `Tentando adicionar webhook para ${teamKey}`,
+    });
+
+    try {
+      setIsSaving(true);
+      const result = await addOrUpdateWebhookApi({
+        grupo_id: teamKey,
+        url: webhookUrl,
+        tipo_evento: 'default',
+        usuario: 'admin',
+      });
+
+      // Atualiza webhooks do grupo com retorno da API
+      setWebhooksByGroup(prev => ({
+        ...prev,
+        [teamKey]: result.webhooks.filter(w => w.ativo),
+      }));
+
+      toast({
+        title: "Webhook adicionado",
+        description: `Webhook configurado para a equipe ${teamKey}`,
+      });
+    } catch (e: any) {
+      // Rollback
+      setWebhooksByGroup(prev => {
+        const filtered = (prev[teamKey] || []).filter(w => w.url !== webhookUrl);
+        return { ...prev, [teamKey]: filtered };
+      });
+      toast({
+        title: "Erro",
+        description: e.message || "Falha ao adicionar webhook",
+        variant: "destructive",
+      });
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  // Remove um webhook do grupo
+  const removeWebhook = async (team: string, url: string) => {
+    const groupWebhooks = webhooksByGroup[team] || [];
+    if (!groupWebhooks.find(w => w.url === url)) return;
+
+    // Otimista
+    setWebhooksByGroup(prev => ({
+      ...prev,
+      [team]: prev[team].filter(w => w.url !== url),
+    }));
+
+    try {
+      setIsSaving(true);
+      await removeWebhookApi({
+        grupo_id: team,
+        url,
+        tipo_evento: 'default',
+      });
+      toast({
+        title: "Webhook removido",
+        description: `Webhook da equipe ${team} foi removido`,
+      });
+    } catch (e: any) {
+      // Rollback
+      setWebhooksByGroup(prev => ({
+        ...prev,
+        [team]: [...prev[team], { url, ativo: true }],
+      }));
+      toast({
+        title: "Erro",
+        description: e.message || "Falha ao remover webhook",
+        variant: "destructive",
+      });
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  // Save Crisis Webhook remains as your original code (no changes)
+  const saveCrisisWebhook = async () => {
+    const urlTrimmed = crisisWebhook.trim();
+
+    if (!urlTrimmed) {
+      toast({ title: "Campo vazio", description: "Informe a URL do webhook de crise", variant: "destructive" });
+      return;
+    }
+    if (!urlTrimmed.startsWith('https://chat.googleapis.com/')) {
+      toast({ title: "URL inválida", description: "Use um webhook válido do Google Chat", variant: "destructive" });
+      return;
+    }
+
+    // Se a URL atual é igual a já salva, não salvar de novo
+    if (urlTrimmed === localStorage.getItem('crisisWebhook')) {
+      toast({ title: "Sem alterações", description: "A URL do webhook de crise não foi modificada.", variant: "default" });
+      return;
+    }
+
+    try {
+      setIsSaving(true);
+      await addOrUpdateWebhookApi({
+        grupo_id: 'crise',
+        url: urlTrimmed,
+        tipo_evento: 'crise',
+        usuario: 'admin',
+      });
+      localStorage.setItem('crisisWebhook', urlTrimmed);
+      setCrisisWebhook(urlTrimmed);
+      toast({ title: "Webhook de crise salvo", description: "Configuração salva com sucesso" });
+    } catch (e: any) {
+      toast({ title: "Erro", description: e.message || "Falha ao salvar webhook de crise", variant: "destructive" });
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const isCrisisSaveDisabled =
+    isSaving ||
+    !crisisWebhook.trim() ||
+    crisisWebhook.trim() === localStorage.getItem('crisisWebhook');
 
   return (
-    <div className="max-w-4xl w-full mx-auto p-6 space-y-8">
-      <ShiftNoteForm
-        authorName={authorName}
-        setAuthorName={setAuthorName}
-        newNote={newNote}
-        setNewNote={setNewNote}
-        isImportant={isImportant}
-        setIsImportant={setIsImportant}
-        onAddNote={addNote}
-      />
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent
+        className="bg-panel-bg border-border w-[90vw] max-w-[700px] mx-auto min-h-[50vh] max-h-[90vh] overflow-y-auto py-6 sm:py-8 lg:py-12 px-4 sm:px-6 lg:px-10">
+        <DialogHeader>
+          <DialogTitle className="text-white text-2xl text-center w-full flex justify-center items-center gap-2">
+            <Webhook className="h-5 w-5 text-white" />
+            Configuração de Webhooks
+          </DialogTitle>
 
-      <div className="space-y-6">
-        <div className="flex items-center justify-between gap-4 pb-2">
-          <div className="flex items-center gap-3">
-            <div className="w-8 h-8 bg-gradient-to-br from-secondary/30 to-secondary/20 rounded-lg flex items-center justify-center">
-              <MessageSquare className="h-4 w-4 text-secondary-foreground" />
+        </DialogHeader>
+
+
+        {/* Adicionar novo webhook */}
+        <div className="border border-border rounded-lg p-4 bg-background/50 space-y-4">
+          <CardTitle className="text-primary text-lg text-center w-full flex justify-center items-center gap-2">
+            Cadastre o Webhook do Grupo
+          </CardTitle>
+          <div className="flex flex-col md:flex-row md:space-x-4 space-y-4 md:space-y-0">
+            <div className="flex-1">
+              <Label htmlFor="team-name">Nome do Grupo</Label>
+              <Input
+                id="team-name"
+                value={newTeam}
+                onChange={(e) => setNewTeam(e.target.value)}
+                placeholder="Ex: NOC, SOC, Infraestrutura"
+                className="bg-background border-border"
+              />
             </div>
-            <h3 className="text-xl font-bold text-foreground">Recados Ativos</h3>
-            <span className="text-sm text-muted-foreground bg-muted/50 px-2 py-1 rounded-full">
-              {notes.length} {notes.length === 1 ? 'recado' : 'recados'}
-            </span>
+            <div className="flex-1">
+              <Label htmlFor="webhook-url">URL do Webhook</Label>
+              <Input
+                id="webhook-url"
+                value={newWebhook}
+                onChange={(e) => setNewWebhook(e.target.value)}
+                placeholder="https://chat.googleapis.com/v1/spaces/..."
+                className="bg-background border-border"
+              />
+            </div>
           </div>
-          <div className="flex items-center gap-2">
-            <Button 
-              onClick={loadNotes} 
-              variant="outline"
-              size="sm"
-              className="hidden sm:inline-flex hover:bg-primary/10 hover:border-primary/30 transition-all duration-200"
-            >
-              <Clock className="h-4 w-4 mr-2" />
-              Atualizar
-            </Button>
-          </div>
+          <Button
+            onClick={addWebhook}
+            className="w-full"
+            disabled={isSaving || !newTeam.trim() || !newWebhook.trim()}
+          >
+            <Plus className="h-4 w-4 mr-2" />
+            Adicionar Webhook
+          </Button>
         </div>
 
-        {loading ? (
-          <div className="text-center py-12">
-            <div className="w-12 h-12 bg-gradient-to-br from-primary/20 to-primary/10 rounded-full flex items-center justify-center mx-auto mb-4 animate-pulse">
-              <Clock className="h-6 w-6 text-primary" />
-            </div>
-            <p className="text-muted-foreground font-medium">Carregando recados...</p>
-          </div>
-        ) : error ? (
-          <div className="text-center py-12">
-            <div className="w-12 h-12 bg-destructive/10 rounded-full flex items-center justify-center mx-auto mb-4">
-              <AlertTriangle className="h-6 w-6 text-destructive" />
-            </div>
-            <p className="text-destructive font-medium">Ocorreu um erro ao carregar os recados</p>
-            <Button 
-              onClick={loadNotes} 
-              variant="outline" 
-              size="sm" 
-              className="mt-3"
-            >
-              Tentar novamente
-            </Button>
-          </div>
-        ) : (
-          <ShiftNoteList notes={notes} onRemoveNote={removeNote} />
-        )}
-      </div>
-    </div>
+        {/* Seção explicativa */}
+        <Card className="bg-background/30 border-border">
+          <CardHeader>
+            <CardTitle className="text-sm text-muted-foreground text-center">
+              Como obter um Webhook do Google Chat
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <ol className="text-sm text-muted-foreground space-y-1 list-decimal list-inside">
+              <li>Acesse o Google Chat e entre no espaço desejado</li>
+              <li>Clique no nome do espaço → "Gerenciar webhooks"</li>
+              <li>Verifique se ja não há um webhook criado</li>
+              <li>Caso ja tenha, Copie a URL gerada e cole aqui</li>
+              <li>Caso não tenha, clique em "Adicionar Webhook"</li>
+              <li>Definida o nome, Copie a URL gerada e cole aqui</li>
+            </ol>
+          </CardContent>
+        </Card>
+
+
+        <div className="space-y-4">
+          <Card className="bg-background/20 border border-border shadow-sm">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-primary text-lg text-center w-full flex justify-center items-center gap-2">
+                Webhooks Cadastrados
+              </CardTitle>
+            </CardHeader>
+
+            <CardContent className="space-y-3 px-4 pb-4">
+              {loadingGroups.length > 0 && (
+                <div className="text-center text-xs text-muted-foreground">
+                  Carregando grupos: {loadingGroups.join(", ")}
+                </div>
+              )}
+
+              {Object.keys(webhooksByGroup).length === 0 && loadingGroups.length === 0 && (
+                <div className="text-center text-sm text-muted-foreground">
+                  Nenhum webhook configurado
+                </div>
+              )}
+
+              {Object.entries(webhooksByGroup).map(([group, hooks]) => (
+                <div
+                  key={group}
+                  className="flex items-center justify-between bg-background/40 border border-border rounded-md px-3 py-2"
+                >
+                  <span className="text-sm text-foreground">{group}</span>
+                  <span className="text-xs text-muted-foreground">
+                    {hooks.length > 0 ? '✔️ Cadastrado' : '—'}
+                  </span>
+                </div>
+              ))}
+
+
+            </CardContent>
+          </Card>
+
+          {/* Seção Webhook de Crise */}
+          <Card className="bg-background/30 border-border">
+            <CardHeader>
+              <CardTitle className="text-sm text-muted-foreground">Webhook de Crise</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-2">
+                <Label htmlFor="crisis-webhook">URL do Webhook de Crise</Label>
+                <Input
+                  id="crisis-webhook"
+                  value={crisisWebhook}
+                  onChange={(e) => setCrisisWebhook(e.target.value)}
+                  placeholder="https://chat.googleapis.com/v1/spaces/..."
+                  className="bg-background border-border"
+                  disabled={isSaving}
+                />
+                <p className="text-xs text-muted-foreground">
+                  Esse webhook será usado para notificações específicas de processos de crise.
+                </p>
+                <Button onClick={saveCrisisWebhook} disabled={isCrisisSaveDisabled} className="mt-2">
+                  Salvar Webhook de Crise
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+
+        <div className="flex justify-end pt-4">
+          <Button
+            variant="outline"
+            onClick={() => onOpenChange(false)}
+            className="border-border hover:bg-hover-bg"
+            disabled={isSaving}
+          >
+            Fechar
+          </Button>
+        </div>
+      </DialogContent>
+    </Dialog>
   );
 };
