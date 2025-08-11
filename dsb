@@ -1,10 +1,231 @@
-    <div className="min-h-screen flex bg-background text-foreground">
+import { useState } from 'react';
+import {
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle
+} from '@/components/ui/card';
+import { Badge } from '@/components/ui/badge';
+import {
+  ChevronRight,
+  ChevronDown,
+  Clock,
+  User,
+  MapPin
+} from 'lucide-react';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription
+} from '@/components/ui/dialog';
+import { Button } from '@/components/ui/button';
 
-      {/* Conteúdo principal */}
-      <div className="flex-1 flex flex-col">
-        {/* Header */}
-        <div className="bg-dashboard-bg border-b border-border p-6 text-center">
-          <h1 className="text-3xl font-bold mb-2" style={{ color: '#4a90e2' }}>
-            PAINEL CIOPS - MONITORAÇÃO
-          </h1>
-        </div>
+interface CriticalIncident {
+  id: string;
+  incident: string;
+  operator: string;
+  room: string;
+  timeline: string;
+  status: 'ongoing' | 'resolved' | 'escalated';
+  startTime: string;
+  description: string;
+}
+
+export const CriticalIncidents = () => {
+  const [expandedIncidentId, setExpandedIncidentId] = useState<string | null>(null);
+  const [selectedIncident, setSelectedIncident] = useState<CriticalIncident | null>(null);
+
+  const criticalIncidents: CriticalIncident[] = [
+    {
+      id: 'ci-001',
+      incident: 'Falha de conectividade Datacenter SP',
+      operator: 'João Silva',
+      room: 'NOC-01',
+      timeline: '45 min',
+      status: 'ongoing',
+      startTime: '14:30',
+      description: 'Problemas de conectividade detectados no datacenter principal de São Paulo, afetando múltiplos serviços.'
+    },
+    {
+      id: 'ci-002',
+      incident: 'Queda de energia na sede RJ',
+      operator: 'Maria Souza',
+      room: 'NOC-02',
+      timeline: '30 min',
+      status: 'escalated',
+      startTime: '15:10',
+      description: 'Interrupção elétrica afetando equipamentos de rede e servidores locais no Rio de Janeiro.'
+    }
+  ];
+
+  const getStatusColor = (status: string) => {
+    switch (status) {
+      case 'ongoing':
+        return 'bg-yellow-500 text-black';
+      case 'resolved':
+        return 'bg-green-600 text-white';
+      case 'escalated':
+        return 'bg-red-600 text-white';
+      default:
+        return 'bg-muted text-muted-foreground';
+    }
+  };
+
+  const getStatusText = (status: string) => {
+    switch (status) {
+      case 'ongoing':
+        return 'Em Andamento';
+      case 'resolved':
+        return 'Resolvido';
+      case 'escalated':
+        return 'Escalado';
+      default:
+        return 'Desconhecido';
+    }
+  };
+
+  const toggleExpanded = (id: string) => {
+    setExpandedIncidentId(prevId => (prevId === id ? null : id));
+  };
+
+  const openModal = (incident: CriticalIncident) => {
+    setSelectedIncident(incident);
+  };
+
+  const closeModal = () => {
+    setSelectedIncident(null);
+  };
+
+  return (
+    <>
+      <Card className="bg-panel-bg border-border shadow-lg rounded-xl">
+        <CardHeader className="flex flex-row items-center justify-between">
+          <CardTitle className="text-primary flex items-center gap-2">
+            <div className="w-3 h-3 bg-destructive rounded-full animate-pulse" />
+            Incidentes Críticos em Andamento
+          </CardTitle>
+        </CardHeader>
+
+        <CardContent className="space-y-4">
+          {criticalIncidents.map((incident) => (
+            <div
+              key={incident.id}
+              className="border border-border rounded-lg p-4 bg-background/50 shadow-sm hover:shadow-md transition-shadow duration-200"
+            >
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-4 flex-1">
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    onClick={() => toggleExpanded(incident.id)}
+                    className="p-1 h-8 w-8 hover:bg-muted rounded-full"
+                  >
+                    {expandedIncidentId === incident.id ? (
+                      <ChevronDown className="h-5 w-5 text-muted-foreground" />
+                    ) : (
+                      <ChevronRight className="h-5 w-5 text-muted-foreground" />
+                    )}
+                  </Button>
+
+                  <div className="flex-1">
+                    <h4 className="font-semibold text-foreground text-base">
+                      {incident.incident}
+                    </h4>
+
+                    <div className="flex flex-wrap items-center gap-4 mt-2 text-sm text-muted-foreground">
+                      <div className="flex items-center gap-1">
+                        <User className="h-4 w-4" />
+                        {incident.operator}
+                      </div>
+                      <div className="flex items-center gap-1">
+                        <MapPin className="h-4 w-4" />
+                        {incident.room}
+                      </div>
+                      <div className="flex items-center gap-1">
+                        <Clock className="h-4 w-4" />
+                        {incident.timeline}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-3 ml-4">
+                  <span className="text-sm text-muted-foreground whitespace-nowrap">
+                    Início: <span className="font-semibold">{incident.startTime}</span>
+                  </span>
+                  <Badge className={getStatusColor(incident.status)}>
+                    {getStatusText(incident.status)}
+                  </Badge>
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    className="hover:bg-muted transition-all"
+                    onClick={() => openModal(incident)}
+                  >
+                    Ver detalhes
+                  </Button>
+                </div>
+              </div>
+
+              {expandedIncidentId === incident.id && (
+                <div className="mt-4 pt-4 border-t border-border animate-fade-in">
+                  <p className="text-sm text-muted-foreground leading-relaxed">
+                    {incident.description}
+                  </p>
+                </div>
+              )}
+            </div>
+          ))}
+
+          {criticalIncidents.length === 0 && (
+            <div className="text-center py-8 text-muted-foreground">
+              Nenhum incidente crítico em andamento
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Modal */}
+      <Dialog open={!!selectedIncident} onOpenChange={closeModal}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle className="text-xl">{selectedIncident?.incident}</DialogTitle>
+            <DialogDescription>
+              Detalhes completos do incidente.
+            </DialogDescription>
+          </DialogHeader>
+
+          {selectedIncident && (
+            <div className="space-y-4 py-4 text-sm">
+              <div className="flex items-center gap-2 text-muted-foreground">
+                <User className="h-4 w-4" />
+                Operador: <span className="font-semibold text-foreground">{selectedIncident.operator}</span>
+              </div>
+              <div className="flex items-center gap-2 text-muted-foreground">
+                <MapPin className="h-4 w-4" />
+                Sala: <span className="font-semibold text-foreground">{selectedIncident.room}</span>
+              </div>
+              <div className="flex items-center gap-2 text-muted-foreground">
+                <Clock className="h-4 w-4" />
+                Início: <span className="font-semibold text-foreground">{selectedIncident.startTime}</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <Badge className={getStatusColor(selectedIncident.status)}>
+                  {getStatusText(selectedIncident.status)}
+                </Badge>
+              </div>
+              <div className="mt-4">
+                <h4 className="font-semibold text-foreground mb-1">Descrição</h4>
+                <p className="text-muted-foreground leading-relaxed">
+                  {selectedIncident.description}
+                </p>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+    </>
+  );
+};
