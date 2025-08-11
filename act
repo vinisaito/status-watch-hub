@@ -1,0 +1,235 @@
+import { useState, useEffect } from 'react';
+import { Check, AlertTriangle, ExternalLink } from 'lucide-react';
+import { Card, CardContent, CardHeader } from '@/components/ui/card';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { toast } from '@/hooks/use-toast';
+import { AlertData } from './Dashboard';
+import { CrisisProcessDialog } from './CrisisProcessDialog';
+
+interface ActionTableProps {
+  alertData: AlertData[];
+  onUpdateAcknowledgment: (alertId: string, acknowledged: boolean) => void;
+  loading: boolean;
+}
+
+export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: ActionTableProps) => {
+  const [selectedIncident, setSelectedIncident] = useState<AlertData | null>(null);
+  const [crisisDialogOpen, setCrisisDialogOpen] = useState(false);
+
+  // Estado que guarda os numeros chamados já acionados (string)
+  const [acionadosSet, setAcionadosSet] = useState<Set<string>>(new Set());
+
+  // Busca os incidentes acionados no DynamoDB via API
+  useEffect(() => {
+    const fetchAcionados = async () => {
+      try {
+        const res = await fetch('https://f6ffk8e9fe.execute-api.us-east-1.amazonaws.com/prod/chatacionados');
+        if (!res.ok) throw new Error(`Erro ao buscar acionados: ${res.status}`);
+        const data: { numeroChamado: string }[] = await res.json();
+        setAcionadosSet(new Set(data.map(item => item.numeroChamado.toString())));
+      } catch (error) {
+        console.error(error);
+        toast({
+          title: 'Erro ao buscar acionados',
+          description: 'Não foi possível carregar os incidentes acionados',
+          variant: 'destructive',
+        });
+      }
+    };
+    fetchAcionados();
+  }, []);
+
+  const handleAcknowledgment = async (alert: AlertData) => {
+    try {
+      const webhooks = JSON.parse(localStorage.getItem('webhooks') || '{}');
+      const teamWebhook = webhooks[alert.equipe];
+
+      if (!teamWebhook) {
+        toast({
+          title: "Webhook não configurado",
+          description: `Configure o webhook para a equipe ${alert.equipe}`,
+          variant: "destructive",
+        });
+        return;
+      }
+
+      // Enviar mensagem para Google Chat
+      const message = {
+        cards: [
+          {
+            header: {
+              title: "🚨 Acionamento de Alerta",
+            },
+            sections: [
+              {
+                widgets: [
+                  { keyValue: { topLabel: "<b>Classificação</b>", content: alert.classificacao } },
+                  { keyValue: { topLabel: "Nº Chamado", content: alert.numeroChamado } },
+                  { keyValue: { topLabel: "Equipe", content: alert.equipe } },
+                  { keyValue: { topLabel: "Severidade", content: alert.severidade } },
+                  { keyValue: { topLabel: "Título", content: alert.titulo } },
+                  { keyValue: { topLabel: "Abertura", content: alert.abertura } },
+                ],
+              },
+            ],
+          },
+        ],
+      };
+
+      await fetch(teamWebhook, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(message),
+      });
+
+      // Chamada para marcar como acionado no DynamoDB
+      const res = await fetch('https://f6ffk8e9fe.execute-api.us-east-1.amazonaws.com/prod/chatacionados', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ numeroChamado: alert.numeroChamado.toString() }),
+      });
+
+      if (!res.ok) {
+        const errorData = await res.json();
+        throw new Error(errorData.message || 'Erro ao marcar como acionado');
+      }
+
+      // Atualiza localmente o estado dos acionados com novo Set (usando string)
+      setAcionadosSet(prev => new Set([...prev, alert.numeroChamado.toString()]));
+
+      // Atualiza estado do alerta para UI
+      onUpdateAcknowledgment(alert.id, true);
+
+      toast({
+        title: "Alerta acionado com sucesso",
+        description: `Mensagem enviada para a equipe ${alert.equipe}`,
+      });
+    } catch (error: any) {
+      console.error('Erro ao acionar:', error);
+      toast({
+        title: "Erro ao acionar alerta",
+        description: error.message || "Não foi possível concluir o acionamento",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const handleIncidentClick = (alert: AlertData) => {
+    if (alert.classificacao.toLowerCase().includes('incidente')) {
+      setSelectedIncident(alert);
+      setCrisisDialogOpen(true);
+    }
+  };
+
+  const getSeverityColor = (severity: string) => {
+    return severity.includes('4')
+      ? 'bg-sev4-incident text-white'
+      : 'bg-sev3-incident text-white';
+  };
+
+  return (
+    <Card className="bg-panel-bg border-border">
+      <CardHeader />
+      <CardContent>
+        <div className="overflow-x-auto">
+          <Table>
+            <TableHeader>
+              <TableRow className="border-border hover:bg-hover-bg">
+                <TableHead className="text-muted-foreground">Chamado</TableHead>
+                <TableHead className="text-muted-foreground">Classificação</TableHead>
+                <TableHead className="text-muted-foreground">Equipe</TableHead>
+                <TableHead className="text-muted-foreground">Status</TableHead>
+                <TableHead className="text-muted-foreground">Abertura</TableHead>
+                <TableHead className="text-muted-foreground w-[10px] max-w-[150px]">Título</TableHead>
+                <TableHead className="text-muted-foreground">Severidade</TableHead>
+                <TableHead className="text-muted-foreground">Acionado</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {loading ? (
+                <TableRow>
+                  <TableCell colSpan={8} className="text-center py-8">
+                    Carregando dados...
+                  </TableCell>
+                </TableRow>
+              ) : alertData.length === 0 ? (
+                <TableRow>
+                  <TableCell colSpan={8} className="text-center py-8 text-muted-foreground">
+                    Nenhum dado disponível
+                  </TableCell>
+                </TableRow>
+              ) : (
+                alertData.map((alert) => {
+                  const isAcionado = acionadosSet.has(alert.numeroChamado.toString());
+                  return (
+                    <TableRow
+                      key={alert.id}
+                      className="border-border hover:bg-hover-bg transition-colors"
+                    >
+                      <TableCell className="font-medium">{alert.numeroChamado}</TableCell>
+                      <TableCell>{alert.classificacao}</TableCell>
+                      <TableCell>{alert.equipe}</TableCell>
+                      <TableCell>{alert.status}</TableCell>
+                      <TableCell>
+                        {alert.abertura
+                          ? new Date(alert.abertura).toLocaleString('pt-BR')
+                          : '-'}
+                      </TableCell>
+                      <TableCell>
+                        <div className="flex items-center gap-2">
+                          <span className="break-words max-w-xs">{alert.titulo}</span>
+                          {alert.classificacao.toLowerCase().includes('incidente') && (
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => handleIncidentClick(alert)}
+                              className="p-1 h-auto hover:bg-hover-bg"
+                              title="Iniciar processo de crise"
+                            >
+                              <ExternalLink className="h-3 w-3" />
+                            </Button>
+                          )}
+                        </div>
+                      </TableCell>
+                      <TableCell>
+                        <Badge className={getSeverityColor(alert.severidade)}>
+                          {alert.severidade}
+                        </Badge>
+                      </TableCell>
+                      <TableCell>
+                        <Button
+                          variant={isAcionado ? "default" : "outline"}
+                          size="sm"
+                          onClick={() => !isAcionado && handleAcknowledgment(alert)}
+                          disabled={isAcionado}
+                          className={`${isAcionado
+                              ? 'bg-success text-white hover:bg-success/90'
+                              : 'border-border hover:bg-hover-bg'
+                            }`}
+                        >
+                          {isAcionado ? (
+                            <Check className="h-4 w-4" />
+                          ) : (
+                            <AlertTriangle className="h-4 w-4" />
+                          )}
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  );
+                })
+              )}
+            </TableBody>
+          </Table>
+        </div>
+
+        <CrisisProcessDialog
+          open={crisisDialogOpen}
+          onOpenChange={setCrisisDialogOpen}
+          incident={selectedIncident}
+        />
+      </CardContent>
+    </Card>
+  );
+};
