@@ -1,318 +1,200 @@
 import { useState } from 'react';
-import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle
-} from '@/components/ui/card';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import {
-  ChevronRight,
-  ChevronDown,
-  Clock,
-  User,
-  MapPin,
-  AlertTriangle,
-  TrendingUp
-} from 'lucide-react';
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogDescription
-} from '@/components/ui/dialog';
+import { ChevronDown, ChevronRight, Calendar, User, AlertCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 
-interface CriticalIncident {
+interface RDM {
   id: string;
-  incident: string;
-  operator: string;
-  room: string;
-  timeline: string;
-  status: 'ongoing' | 'resolved' | 'escalated';
-  startTime: string;
+  rdmNumber: string;
+  title: string;
+  responsible: string;
+  status: 'open' | 'in_progress' | 'pending' | 'done';
+  priority: 'high' | 'medium' | 'low';
+  startDate: string;
+  endDate?: string;
   description: string;
-  priority: 'high' | 'critical';
+  team: string;
 }
 
-export const CriticalIncidents = () => {
-  const [expandedIncidentId, setExpandedIncidentId] = useState<string | null>(null);
-  const [selectedIncident, setSelectedIncident] = useState<CriticalIncident | null>(null);
+export const RDMTracker = () => {
+  const [expandedRDM, setExpandedRDM] = useState<string | null>(null);
 
-  const criticalIncidents: CriticalIncident[] = [
+  // Mock data - replace with real API data
+  const rdms: RDM[] = [
     {
-      id: 'ci-001',
-      incident: 'Falha de conectividade Datacenter SP',
-      operator: 'João Silva',
-      room: 'NOC-01',
-      timeline: '45 min',
-      status: 'ongoing',
-      startTime: '14:30',
-      priority: 'critical',
-      description: 'Problemas de conectividade detectados no datacenter principal de São Paulo, afetando múltiplos serviços. A equipe de infraestrutura está investigando possíveis falhas nos switches de core.'
-    },
-    {
-      id: 'ci-002',
-      incident: 'Queda de energia na sede RJ',
-      operator: 'Maria Souza',
-      room: 'NOC-02',
-      timeline: '30 min',
-      status: 'escalated',
-aneiro. Geradores de backup ativados, mas alguns serviços permanecem indisponíveis.'
-    },
-    {
-      id: 'ci-003',
-      incident: 'Degradação de performance API Gateway',
-      operator: 'Carlos Lima',
-      room: 'NOC-01',
-      timeline: '15 min',
-      status: 'ongoing',
-      startTime: '15:45',
+      id: 'rdm-001',
+      rdmNumber: 'RDM-2024-001',
+      title: 'Atualização Sistema Monitoramento',
+      responsible: 'Equipe Infra',
+      status: 'in_progress',
       priority: 'high',
-      description: 'Alta latência detectada no API Gateway principal. Tempo de resposta aumentou em 300% nas últimas duas horas.'
+      startDate: '14:00',
+      endDate: '16:00',
+      description: 'Atualização planejada do sistema de monitoramento principal com novas funcionalidades.',
+      team: 'Infraestrutura'
+    },
+    {
+      id: 'rdm-002',
+      rdmNumber: 'RDM-2024-002',
+      title: 'Implementação Backup Redundante',
+      responsible: 'Equipe Cloud',
+      status: 'pending',
+      priority: 'medium',
+      startDate: '18:00',
+      endDate: '19:00',
+      description: 'Implementação de sistema de backup redundante para maior segurança dos dados.',
+      team: 'Cloud'
+    },
+    {
+      id: 'rdm-003',
+      rdmNumber: 'RDM-2024-003',
+      title: 'Migração Servidores Cloud',
+      responsible: 'Equipe SysAdmin',
+      status: 'open',
+      priority: 'high',
+      startDate: '20:00',
+      endDate: '24:00',
+      description: 'Migração de servidores para nova infraestrutura em nuvem.',
+      team: 'SysAdmin'
     }
   ];
 
-  const getStatusBadgeClass = (status: string) => {
+  const getStatusColor = (status: string) => {
     switch (status) {
-      case 'ongoing':
-        return 'bg-status-ongoing text-status-ongoing-foreground hover:bg-status-ongoing/90 border-0 font-semibold';
-      case 'resolved':
-        return 'bg-status-resolved text-status-resolved-foreground hover:bg-status-resolved/90 border-0 font-semibold';
-      case 'escalated':
-        return 'bg-status-escalated text-status-escalated-foreground hover:bg-status-escalated/90 border-0 font-semibold';
+      case 'open':
+        return 'bg-info text-white';
+      case 'in_progress':
+        return 'bg-warning text-black';
+      case 'pending':
+        return 'bg-sev3-incident text-white';
+      case 'done':
+        return 'bg-success text-white';
       default:
-        return 'bg-muted text-muted-foreground border-0';
+        return 'bg-muted text-muted-foreground';
     }
   };
 
   const getStatusText = (status: string) => {
     switch (status) {
-      case 'ongoing':
-        return 'Em Andamento';
-      case 'resolved':
-        return 'Resolvido';
-      case 'escalated':
-        return 'Escalado';
+      case 'open':
+        return 'Aberta';
+      case 'in_progress':
+        return 'Em Progresso';
+      case 'pending':
+        return 'Pendente';
+      case 'done':
+        return 'Finalizada';
       default:
         return 'Desconhecido';
     }
   };
 
-  const getPriorityIcon = (priority: string) => {
-    if (priority === 'critical') {
-      return <AlertTriangle className="h-4 w-4 text-status-escalated" />;
+  const getPriorityColor = (priority: string) => {
+    switch (priority) {
+      case 'high':
+        return 'text-destructive';
+      case 'medium':
+        return 'text-warning';
+      case 'low':
+        return 'text-success';
+      default:
+        return 'text-muted-foreground';
     }
-    return <TrendingUp className="h-4 w-4 text-status-ongoing" />;
   };
 
-  const toggleExpanded = (id: string) => {
-    setExpandedIncidentId(prevId => (prevId === id ? null : id));
-  };
-
-  const openModal = (incident: CriticalIncident) => {
-    setSelectedIncident(incident);
-  };
-
-  const closeModal = () => {
-    setSelectedIncident(null);
+  const getPriorityText = (priority: string) => {
+    switch (priority) {
+      case 'high':
+        return 'Alta';
+      case 'medium':
+        return 'Média';
+      case 'low':
+        return 'Baixa';
+      default:
+        return 'Normal';
+    }
   };
 
   return (
-    <>
-      <Card className="gradient-card border-panel-border shadow-card rounded-2xl overflow-hidden transition-smooth hover:shadow-hover">
-        <CardHeader className="bg-gradient-to-r from-panel-bg to-background p-6 border-b border-panel-border">
-          <CardTitle className="text-primary flex items-center gap-3 text-xl font-bold">
-            <div className="relative">
-              <div className="w-3 h-3 bg-status-escalated rounded-full animate-pulse-glow" />
-              <div className="absolute inset-0 w-3 h-3 bg-status-escalated rounded-full animate-ping opacity-30" />
-            </div>
-            Incidentes Críticos em Andamento
-            <Badge variant="secondary" className="ml-auto text-xs px-2 py-1">
-              {criticalIncidents.length} ativo{criticalIncidents.length !== 1 ? 's' : ''}
-            </Badge>
-          </CardTitle>
-        </CardHeader>
-
-        <CardContent className="p-6 space-y-4">
-          {criticalIncidents.map((incident, index) => (
-            <div
-              key={incident.id}
-              className="group relative border border-panel-border rounded-xl p-5 bg-card gradient-card shadow-card hover:shadow-hover transition-smooth animate-fade-in"
-              style={{ animationDelay: `${index * 100}ms` }}
-            >
-              {/* Priority indicator bar */}
-              <div 
-                className={`absolute left-0 top-0 bottom-0 w-1 rounded-l-xl ${
-                  incident.priority === 'critical' 
-                    ? 'bg-gradient-to-b from-status-escalated to-status-escalated/70' 
-                    : 'bg-gradient-to-b from-status-ongoing to-status-ongoing/70'
-                }`} 
-              />
-
-              <div className="flex flex-col lg:flex-row lg:items-center gap-4">
-                {/* Left section - Expand button and main info */}
-                <div className="flex items-start gap-4 flex-1 min-w-0">
+    <Card className="bg-panel-bg border-border">
+      <CardHeader>
+        <CardTitle className="text-primary flex items-center gap-2">
+          <Calendar className="h-5 w-5" />
+          Acompanhamento de RDMs
+        </CardTitle>
+      </CardHeader>
+      <CardContent>
+        <div className="space-y-4">
+          {rdms.map((rdm) => (
+            <div key={rdm.id} className="border border-border rounded-lg p-4 bg-background/50">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-4 flex-1">
                   <Button
                     variant="ghost"
                     size="sm"
-                    onClick={() => toggleExpanded(incident.id)}
-                    className="flex-shrink-0 p-2 h-9 w-9 hover:bg-hover-bg rounded-full group-hover:bg-hover-bg transition-bounce"
+                    onClick={() => 
+                      setExpandedRDM(
+                        expandedRDM === rdm.id ? null : rdm.id
+                      )
+                    }
+                    className="p-1 h-auto hover:bg-hover-bg"
                   >
-                    {expandedIncidentId === incident.id ? (
-                      <ChevronDown className="h-4 w-4 text-muted-foreground transition-smooth" />
+                    {expandedRDM === rdm.id ? (
+                      <ChevronDown className="h-4 w-4" />
                     ) : (
-                      <ChevronRight className="h-4 w-4 text-muted-foreground transition-smooth" />
+                      <ChevronRight className="h-4 w-4" />
                     )}
                   </Button>
-
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 mb-2">
-                      {getPriorityIcon(incident.priority)}
-                      <h4 className="font-bold text-foreground text-base lg:text-lg leading-tight">
-                        {incident.incident}
-                      </h4>
+                  
+                  <div className="flex-1">
+                    <div className="flex items-center gap-2 mb-1">
+                      <h4 className="font-semibold text-foreground">{rdm.rdmNumber}</h4>
+                      <span className="text-sm text-muted-foreground">-</span>
+                      <span className="text-sm font-medium">{rdm.title}</span>
                     </div>
-
-                    <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3 text-sm text-muted-foreground">
-                      <div className="flex items-center gap-2">
-                        <User className="h-4 w-4 flex-shrink-0" />
-                        <span className="truncate">{incident.operator}</span>
+                    <div className="flex items-center gap-4 text-sm text-muted-foreground">
+                      <div className="flex items-center gap-1">
+                        <User className="h-3 w-3" />
+                        {rdm.responsible}
                       </div>
-                      <div className="flex items-center gap-2">
-                        <MapPin className="h-4 w-4 flex-shrink-0" />
-                        <span className="truncate">{incident.room}</span>
+                      <div className="flex items-center gap-1">
+                        <Calendar className="h-3 w-3" />
+                        {rdm.startDate} {rdm.endDate && `- ${rdm.endDate}`}
                       </div>
-                      <div className="flex items-center gap-2">
-                        <Clock className="h-4 w-4 flex-shrink-0" />
-                        <span className="font-medium">{incident.timeline}</span>
+                      <div className="flex items-center gap-1">
+                        <AlertCircle className={`h-3 w-3 ${getPriorityColor(rdm.priority)}`} />
+                        <span className={getPriorityColor(rdm.priority)}>
+                          {getPriorityText(rdm.priority)}
+                        </span>
                       </div>
                     </div>
                   </div>
                 </div>
-
-                {/* Right section - Status and actions */}
-                <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3 lg:gap-4 flex-shrink-0">
-                  <div className="text-sm text-muted-foreground whitespace-nowrap">
-                    Início: <span className="font-bold text-foreground">{incident.startTime}</span>
-                  </div>
-                  
-                  <div className="flex items-center gap-3">
-                    <Badge className={`${getStatusBadgeClass(incident.status)} shadow-sm`}>
-                      {getStatusText(incident.status)}
-                    </Badge>
-                    
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="hover:bg-primary hover:text-primary-foreground transition-smooth border-primary/20 text-xs font-semibold px-4"
-                      onClick={() => openModal(incident)}
-                    >
-                      Ver detalhes
-                    </Button>
-                  </div>
+                
+                <div className="flex items-center gap-2">
+                  <span className="text-sm text-muted-foreground">{rdm.team}</span>
+                  <Badge className={getStatusColor(rdm.status)}>
+                    {getStatusText(rdm.status)}
+                  </Badge>
                 </div>
               </div>
-
-              {/* Expanded content */}
-              {expandedIncidentId === incident.id && (
-                <div className="mt-6 pt-4 border-t border-panel-border animate-slide-down">
-                  <div className="bg-muted/30 rounded-lg p-4">
-                    <h5 className="font-semibold text-foreground mb-2 text-sm">Descrição Detalhada</h5>
-                    <p className="text-sm text-muted-foreground leading-relaxed">
-                      {incident.description}
-                    </p>
-                  </div>
+              
+              {expandedRDM === rdm.id && (
+                <div className="mt-4 pt-4 border-t border-border">
+                  <p className="text-sm text-muted-foreground">{rdm.description}</p>
                 </div>
               )}
             </div>
           ))}
-
-          {criticalIncidents.length === 0 && (
-            <div className="text-center py-12">
-              <div className="w-16 h-16 bg-muted/30 rounded-full flex items-center justify-center mx-auto mb-4">
-                <AlertTriangle className="h-8 w-8 text-muted-foreground" />
-              </div>
-              <h3 className="text-lg font-semibold text-foreground mb-2">Nenhum incidente crítico</h3>
-              <p className="text-muted-foreground">Todos os sistemas estão operando normalmente</p>
+          
+          {rdms.length === 0 && (
+            <div className="text-center py-8 text-muted-foreground">
+              Nenhuma RDM em andamento
             </div>
           )}
-        </CardContent>
-      </Card>
-
-      {/* Enhanced Modal */}
-      <Dialog open={!!selectedIncident} onOpenChange={closeModal}>
-        <DialogContent className="max-w-3xl gradient-card border-panel-border shadow-glow">
-          <DialogHeader className="border-b border-panel-border pb-4">
-            <div className="flex items-center gap-3">
-              {selectedIncident && getPriorityIcon(selectedIncident.priority)}
-              <DialogTitle className="text-2xl font-bold">
-                {selectedIncident?.incident}
-              </DialogTitle>
-            </div>
-            <DialogDescription className="text-base text-muted-foreground">
-              Detalhes completos do incidente crítico e informações de status.
-            </DialogDescription>
-          </DialogHeader>
-
-          {selectedIncident && (
-            <div className="py-6">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
-                <div className="space-y-4">
-                  <div className="bg-muted/20 rounded-lg p-4">
-                    <h4 className="font-semibold text-foreground mb-3 flex items-center gap-2">
-                      <User className="h-4 w-4" />
-                      Informações do Operador
-                    </h4>
-                    <div className="space-y-2 text-sm">
-                      <div>
-                        <span className="text-muted-foreground">Nome:</span>
-                        <span className="font-semibold text-foreground ml-2">{selectedIncident.operator}</span>
-                      </div>
-                      <div>
-                        <span className="text-muted-foreground">Sala:</span>
-                        <span className="font-semibold text-foreground ml-2">{selectedIncident.room}</span>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="space-y-4">
-                  <div className="bg-muted/20 rounded-lg p-4">
-                    <h4 className="font-semibold text-foreground mb-3 flex items-center gap-2">
-                      <Clock className="h-4 w-4" />
-                      Timeline do Incidente
-                    </h4>
-                    <div className="space-y-2 text-sm">
-                      <div>
-                        <span className="text-muted-foreground">Início:</span>
-                        <span className="font-semibold text-foreground ml-2">{selectedIncident.startTime}</span>
-                      </div>
-                      <div>
-                        <span className="text-muted-foreground">Duração:</span>
-                        <span className="font-semibold text-foreground ml-2">{selectedIncident.timeline}</span>
-                      </div>
-                      <div className="mt-3">
-                        <Badge className={getStatusBadgeClass(selectedIncident.status)}>
-                          {getStatusText(selectedIncident.status)}
-                        </Badge>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              <div className="bg-muted/20 rounded-lg p-4">
-                <h4 className="font-semibold text-foreground mb-3">Descrição Completa</h4>
-                <p className="text-muted-foreground leading-relaxed">
-                  {selectedIncident.description}
-                </p>
-              </div>
-            </div>
-          )}
-        </DialogContent>
-      </Dialog>
-    </>
+        </div>
+      </CardContent>
+    </Card>
   );
 };
