@@ -3,7 +3,7 @@ import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Trash2, Plus, MessageSquare, Clock, User } from 'lucide-react';
+import { Trash2, Plus, MessageSquare, Clock, User, RefreshCw, AlertTriangle } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 
 interface ShiftNote {
@@ -30,33 +30,44 @@ const formatTimestamp = (timestamp: string) => {
 
 const ShiftNoteItem = memo(({ note, onRemoveNote }: { note: ShiftNote; onRemoveNote: (id: string) => void }) => {
   return (
-    <div className={`border rounded-lg p-4 bg-background/50 transition-all duration-300 ${note.priority === 'important' ? 'border-warning/50 bg-warning/5' : 'border-border'}`}>
-      <div className="flex items-start justify-between gap-4">
-        <div className="flex-1">
-          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 mb-2">
-            <div className="flex items-center gap-1 text-sm text-muted-foreground">
-              <User className="h-3 w-3" />
-              <span className="font-medium">{note.author}</span>
+    <div className={`group relative overflow-hidden rounded-xl border backdrop-blur-sm transition-all duration-300 animate-fade-in hover:shadow-elevated hover:scale-[1.02] ${
+      note.priority === 'important' 
+        ? 'border-warning/30 bg-important-gradient shadow-soft' 
+        : 'border-border/50 bg-note-gradient shadow-soft'
+    }`}>
+      <div className="p-4 sm:p-6">
+        <div className="flex items-start justify-between gap-4">
+          <div className="flex-1 min-w-0">
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-2 mb-3">
+              <div className="flex items-center gap-2 text-sm font-medium text-foreground/80">
+                <User className="h-4 w-4 text-primary" />
+                <span className="truncate max-w-32 sm:max-w-none">{note.author}</span>
+              </div>
+              <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                <Clock className="h-4 w-4" />
+                <span className="whitespace-nowrap">{formatTimestamp(note.timestamp)}</span>
+              </div>
+              {note.priority === 'important' && (
+                <div className="flex items-center gap-1.5 px-3 py-1 bg-warning text-warning-foreground rounded-full text-xs font-semibold shadow-sm">
+                  <AlertTriangle className="h-3 w-3" />
+                  IMPORTANTE
+                </div>
+              )}
             </div>
-            <div className="flex items-center gap-1 text-sm text-muted-foreground">
-              <Clock className="h-3 w-3" />
-              <span>{formatTimestamp(note.timestamp)}</span>
-            </div>
-            {note.priority === 'important' && (
-              <span className="text-xs px-2 py-0.5 bg-warning text-black rounded-full font-semibold">IMPORTANTE</span>
-            )}
+            <p className="text-foreground leading-relaxed whitespace-pre-wrap break-words text-sm sm:text-base">
+              {note.message}
+            </p>
           </div>
-          <p className="text-foreground whitespace-pre-wrap break-words">{note.message}</p>
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={() => onRemoveNote(note.id)}
+            className="text-muted-foreground hover:text-destructive hover:bg-destructive/10 shrink-0 opacity-60 group-hover:opacity-100 transition-opacity duration-200"
+            aria-label="Remover recado"
+          >
+            <Trash2 className="h-4 w-4" />
+          </Button>
         </div>
-        <Button
-          variant="ghost"
-          size="icon"
-          onClick={() => onRemoveNote(note.id)}
-          className="text-destructive hover:text-destructive hover:bg-destructive/10 shrink-0"
-          aria-label="Remover recado"
-        >
-          <Trash2 className="h-4 w-4" />
-        </Button>
       </div>
     </div>
   );
@@ -64,9 +75,24 @@ const ShiftNoteItem = memo(({ note, onRemoveNote }: { note: ShiftNote; onRemoveN
 
 const ShiftNoteList = ({ notes, onRemoveNote }: { notes: ShiftNote[]; onRemoveNote: (id: string) => void }) => {
   if (!notes || notes.length === 0) {
-    return <div className="text-center py-10 text-muted-foreground">Nenhum recado no turno atual.</div>;
+    return (
+      <div className="text-center py-12 animate-fade-in">
+        <MessageSquare className="h-12 w-12 text-muted-foreground/40 mx-auto mb-4" />
+        <p className="text-muted-foreground text-lg">Nenhum recado no turno atual</p>
+        <p className="text-muted-foreground/60 text-sm mt-1">Seja o primeiro a deixar um recado!</p>
+      </div>
+    );
   }
-  return <div className="space-y-3">{notes.map((note) => <ShiftNoteItem key={note.id} note={note} onRemoveNote={onRemoveNote} />)}</div>;
+
+  return (
+    <div className="space-y-4 max-h-[60vh] overflow-y-auto pr-2 scrollbar-thin scrollbar-thumb-border scrollbar-track-transparent">
+      {notes.map((note, index) => (
+        <div key={note.id} style={{ animationDelay: `${index * 100}ms` }}>
+          <ShiftNoteItem note={note} onRemoveNote={onRemoveNote} />
+        </div>
+      ))}
+    </div>
+  );
 };
 
 const ShiftNoteForm = ({
@@ -77,6 +103,7 @@ const ShiftNoteForm = ({
   isImportant,
   setIsImportant,
   onAddNote,
+  loading,
 }: {
   authorName: string;
   setAuthorName: (val: string) => void;
@@ -85,50 +112,74 @@ const ShiftNoteForm = ({
   isImportant: boolean;
   setIsImportant: (val: boolean) => void;
   onAddNote: () => void;
+  loading: boolean;
 }) => {
   return (
-    <div className="border border-border rounded-lg p-4 bg-background/30">
-      <div className="space-y-4">
-        <div>
-          <div className="flex items-center gap-2 text-primary text-xl font-semibold">
-            <MessageSquare className="h-5 w-5" />
-            <h2>Recados do Turno</h2>
+    <div className="relative overflow-hidden rounded-xl border border-border/50 bg-card backdrop-blur-sm shadow-elevated">
+      <div className="p-6 space-y-6">
+        <div className="flex items-center gap-3">
+          <div className="p-2 rounded-lg bg-primary/10">
+            <MessageSquare className="h-6 w-6 text-primary" />
           </div>
-          <Label htmlFor="author-name">Seu Nome</Label>
-          <Input
-            id="author-name"
-            value={authorName}
-            onChange={(e) => setAuthorName(e.target.value)}
-            placeholder="Digite seu nome"
-            className="bg-background border-border"
-          />
+          <div>
+            <h2 className="text-xl font-semibold text-foreground">Recados do Turno</h2>
+            <p className="text-sm text-muted-foreground">Deixe informações importantes para o próximo turno</p>
+          </div>
         </div>
-        <div>
-          <Label htmlFor="note-message">Recado</Label>
+
+        <div className="grid gap-4 sm:grid-cols-2">
+          <div className="space-y-2">
+            <Label htmlFor="author-name" className="text-sm font-medium">
+              Seu Nome
+            </Label>
+            <Input
+              id="author-name"
+              value={authorName}
+              onChange={(e) => setAuthorName(e.target.value)}
+              placeholder="Digite seu nome"
+              className="bg-background/50 border-border/50 focus:bg-background transition-colors"
+            />
+          </div>
+        </div>
+
+        <div className="space-y-2">
+          <Label htmlFor="note-message" className="text-sm font-medium">
+            Mensagem do Recado
+          </Label>
           <Textarea
             id="note-message"
             value={newNote}
             onChange={(e) => setNewNote(e.target.value)}
             placeholder="Digite o recado para o próximo turno..."
-            className="bg-background border-border min-h-[100px]"
+            className="bg-background/50 border-border/50 focus:bg-background transition-colors min-h-[120px] resize-none"
+            rows={4}
           />
         </div>
-        <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
-          <div className="flex items-center gap-2 self-start sm:self-center">
+
+        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 pt-2">
+          <div className="flex items-center gap-3">
             <input
               type="checkbox"
               id="important-checkbox"
               checked={isImportant}
               onChange={(e) => setIsImportant(e.target.checked)}
-              className="h-4 w-4 rounded border-border text-primary focus:ring-primary"
+              className="h-4 w-4 rounded border-border/50 text-primary focus:ring-primary/20 focus:ring-2"
             />
-            <Label htmlFor="important-checkbox" className="text-sm font-normal cursor-pointer">
+            <Label htmlFor="important-checkbox" className="text-sm font-medium cursor-pointer select-none">
               Marcar como importante
             </Label>
           </div>
-          <Button onClick={onAddNote} className="w-full sm:w-auto bg-primary hover:bg-primary/90">
-            <Plus className="h-4 w-4 mr-2" />
-            Adicionar Recado
+          <Button 
+            onClick={onAddNote} 
+            disabled={loading || !newNote.trim() || !authorName.trim()}
+            className="w-full sm:w-auto bg-primary hover:bg-primary-hover text-primary-foreground shadow-sm disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200"
+          >
+            {loading ? (
+              <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
+            ) : (
+              <Plus className="h-4 w-4 mr-2" />
+            )}
+            {loading ? 'Adicionando...' : 'Adicionar Recado'}
           </Button>
         </div>
       </div>
@@ -138,7 +189,6 @@ const ShiftNoteForm = ({
 
 const API_URL = 'https://f6ffk8e9fe.execute-api.us-east-1.amazonaws.com/prod/recadosturno';
 
-// POST/DELETE unchanged (assuming backend works)
 async function postShiftNote(nome: string, recado: string, importante: boolean) {
   const response = await fetch(API_URL, {
     method: 'POST',
@@ -167,7 +217,6 @@ async function deleteShiftNote(key: string) {
   return response.json();
 }
 
-// Robust GET + normalization
 async function getShiftNotes(): Promise<ShiftNote[]> {
   const response = await fetch(API_URL, { method: 'GET' });
 
@@ -177,7 +226,6 @@ async function getShiftNotes(): Promise<ShiftNote[]> {
     throw new Error(txt || 'Erro ao carregar recados');
   }
 
-  // read text then parse safely
   const text = await response.text();
   let parsed: any = null;
   if (!text) {
@@ -191,7 +239,6 @@ async function getShiftNotes(): Promise<ShiftNote[]> {
     }
   }
 
-  // normalize to array
   let rawNotes: any[] = [];
   if (parsed == null) {
     rawNotes = [];
@@ -202,15 +249,12 @@ async function getShiftNotes(): Promise<ShiftNote[]> {
   } else if (parsed.recados && Array.isArray(parsed.recados)) {
     rawNotes = parsed.recados;
   } else if (parsed && (parsed.nome || parsed.recado || parsed.key)) {
-    // single object returned
     rawNotes = [parsed];
   } else {
-    // unknown shape
     console.warn('Formato inesperado do payload GET:', parsed);
     rawNotes = [];
   }
 
-  // map to ShiftNote
   return rawNotes.map((item: any, idx: number) => ({
     id: item.key || item.id || item.Key || `note-${idx}`,
     author: item.nome || item.author || '',
@@ -227,6 +271,7 @@ export const ShiftNotes = () => {
   const [authorName, setAuthorName] = useState('');
   const [isImportant, setIsImportant] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [addingNote, setAddingNote] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const loadNotes = useCallback(async () => {
@@ -270,6 +315,8 @@ export const ShiftNotes = () => {
       });
       return;
     }
+    
+    setAddingNote(true);
     try {
       const data = await postShiftNote(authorName.trim(), newNote.trim(), isImportant);
       const note: ShiftNote = {
@@ -282,13 +329,19 @@ export const ShiftNotes = () => {
       setNotes((prev) => [note, ...prev]);
       setNewNote('');
       setIsImportant(false);
-      toast({ title: 'Recado adicionado!', description: 'O recado foi salvo com sucesso.' });
+      toast({ 
+        title: 'Recado adicionado!', 
+        description: 'O recado foi salvo com sucesso.',
+        variant: 'default'
+      });
     } catch (error: any) {
       toast({
         title: 'Erro',
         description: error.message || 'Não foi possível salvar o recado.',
         variant: 'destructive',
       });
+    } finally {
+      setAddingNote(false);
     }
   }, [newNote, authorName, isImportant, toast]);
 
@@ -296,7 +349,11 @@ export const ShiftNotes = () => {
     try {
       await deleteShiftNote(noteId);
       setNotes((prev) => prev.filter((note) => note.id !== noteId));
-      toast({ title: 'Recado removido.', variant: 'destructive' });
+      toast({ 
+        title: 'Recado removido', 
+        description: 'O recado foi removido com sucesso.',
+        variant: 'destructive' 
+      });
     } catch (error: any) {
       toast({
         title: 'Erro',
@@ -307,34 +364,57 @@ export const ShiftNotes = () => {
   }, [toast]);
 
   return (
-    <div className="max-w-3xl w-full mx-auto p-4 space-y-6">
-      <ShiftNoteForm
-        authorName={authorName}
-        setAuthorName={setAuthorName}
-        newNote={newNote}
-        setNewNote={setNewNote}
-        isImportant={isImportant}
-        setIsImportant={setIsImportant}
-        onAddNote={addNote}
-      />
+    <div className="min-h-screen bg-gradient-to-br from-background via-background to-muted/20 p-4 sm:p-6 lg:p-8">
+      <div className="max-w-4xl mx-auto space-y-8">
+        <ShiftNoteForm
+          authorName={authorName}
+          setAuthorName={setAuthorName}
+          newNote={newNote}
+          setNewNote={setNewNote}
+          isImportant={isImportant}
+          setIsImportant={setIsImportant}
+          onAddNote={addNote}
+          loading={addingNote}
+        />
 
-      <div className="space-y-4">
-        <div className="flex items-center justify-between gap-4">
-          <h3 className="text-lg font-semibold">Recados</h3>
-          <div className="flex items-center gap-2">
-            <Button onClick={loadNotes} className="hidden sm:inline-flex">Atualizar</Button>
+        <div className="space-y-6">
+          <div className="flex items-center justify-between gap-4">
+            <div>
+              <h3 className="text-2xl font-semibold text-foreground">Recados Ativos</h3>
+              <p className="text-muted-foreground text-sm mt-1">
+                {notes.length > 0 ? `${notes.length} recado${notes.length > 1 ? 's' : ''}` : 'Nenhum recado'}
+              </p>
+            </div>
+            <Button 
+              onClick={loadNotes} 
+              variant="outline"
+              size="sm"
+              disabled={loading}
+              className="shrink-0 border-border/50 hover:bg-muted/50"
+            >
+              <RefreshCw className={`h-4 w-4 mr-2 ${loading ? 'animate-spin' : ''}`} />
+              Atualizar
+            </Button>
           </div>
+
+          {loading && !addingNote ? (
+            <div className="text-center py-12 animate-fade-in">
+              <RefreshCw className="h-8 w-8 text-primary mx-auto mb-4 animate-spin" />
+              <p className="text-muted-foreground">Carregando recados...</p>
+            </div>
+          ) : error ? (
+            <div className="text-center py-12 animate-fade-in">
+              <AlertTriangle className="h-12 w-12 text-destructive/60 mx-auto mb-4" />
+              <p className="text-destructive text-lg font-medium">Erro ao carregar recados</p>
+              <p className="text-muted-foreground text-sm mt-1">Tente novamente em alguns instantes</p>
+              <Button onClick={loadNotes} variant="outline" className="mt-4">
+                Tentar novamente
+              </Button>
+            </div>
+          ) : (
+            <ShiftNoteList notes={notes} onRemoveNote={removeNote} />
+          )}
         </div>
-
-        {loading ? (
-          <div className="text-center py-8 text-muted-foreground">Carregando recados...</div>
-        ) : error ? (
-          <div className="text-center py-8 text-destructive">
-            Ocorreu um erro ao carregar os recados.
-          </div>
-        ) : (
-          <ShiftNoteList notes={notes} onRemoveNote={removeNote} />
-        )}
       </div>
     </div>
   );
