@@ -4,7 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Trash2, Plus, Webhook } from 'lucide-react';
+import { Trash2, Plus, Webhook, Users, AlertTriangle, CheckCircle2, Clock, ExternalLink } from 'lucide-react';
 import { toast } from '@/hooks/use-toast';
 
 interface WebhookConfigProps {
@@ -304,144 +304,225 @@ export const WebhookConfig = ({ open, onOpenChange }: WebhookConfigProps) => {
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent
-        className="bg-panel-bg border-border w-[90vw] max-w-[700px] mx-auto min-h-[50vh] max-h-[90vh] overflow-y-auto py-6 sm:py-8 lg:py-12 px-4 sm:px-6 lg:px-10">
-        <DialogHeader>
-          <DialogTitle className="text-white text-2xl text-center w-full flex justify-center items-center gap-2">
-            <Webhook className="h-5 w-5 text-white" />
+      <DialogContent className="webhook-glass w-[95vw] max-w-[800px] mx-auto min-h-[60vh] max-h-[90vh] overflow-y-auto py-8 px-6 animate-scale-in">
+        <DialogHeader className="space-y-4 mb-6">
+          <DialogTitle className="text-foreground text-3xl font-bold text-center flex justify-center items-center gap-3">
+            <div className="p-3 rounded-2xl webhook-button-primary">
+              <Webhook className="h-6 w-6" />
+            </div>
             Configuração de Webhooks
           </DialogTitle>
-
+          <p className="text-muted-foreground text-center max-w-md mx-auto">
+            Configure e gerencie os webhooks do Google Chat para suas equipes
+          </p>
         </DialogHeader>
 
+        <div className="space-y-8">
+          {/* Adicionar novo webhook */}
+          <Card className="webhook-card animate-slide-up" style={{ animationDelay: '0.1s' }}>
+            <CardHeader className="pb-4">
+              <CardTitle className="text-xl font-semibold text-foreground flex items-center gap-2">
+                <Users className="h-5 w-5 text-primary" />
+                Cadastrar Novo Webhook
+              </CardTitle>
+              <p className="text-sm text-muted-foreground">
+                Adicione um novo webhook para uma equipe específica
+              </p>
+            </CardHeader>
+            <CardContent className="space-y-6">
+              <div className="grid md:grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="team-name" className="text-sm font-medium text-foreground">Nome da Equipe</Label>
+                  <Input
+                    id="team-name"
+                    value={newTeam}
+                    onChange={(e) => setNewTeam(e.target.value)}
+                    placeholder="Ex: NOC, SOC, Infraestrutura"
+                    className="webhook-input"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="webhook-url" className="text-sm font-medium text-foreground">URL do Webhook</Label>
+                  <Input
+                    id="webhook-url"
+                    value={newWebhook}
+                    onChange={(e) => setNewWebhook(e.target.value)}
+                    placeholder="https://chat.googleapis.com/v1/spaces/..."
+                    className="webhook-input"
+                  />
+                </div>
+              </div>
+              <Button
+                onClick={addWebhook}
+                className="w-full webhook-button-primary"
+                disabled={isSaving || !newTeam.trim() || !newWebhook.trim()}
+                size="lg"
+              >
+                <Plus className="h-5 w-5 mr-2" />
+                {isSaving ? 'Salvando...' : 'Adicionar Webhook'}
+              </Button>
+            </CardContent>
+          </Card>
 
-        {/* Adicionar novo webhook */}
-        <div className="border border-border rounded-lg p-4 bg-background/50 space-y-4">
-          <CardTitle className="text-primary text-lg text-center w-full flex justify-center items-center gap-2">
-            Cadastre o Webhook do Grupo
-          </CardTitle>
-          <div className="flex flex-col md:flex-row md:space-x-4 space-y-4 md:space-y-0">
-            <div className="flex-1">
-              <Label htmlFor="team-name">Nome do Grupo</Label>
-              <Input
-                id="team-name"
-                value={newTeam}
-                onChange={(e) => setNewTeam(e.target.value)}
-                placeholder="Ex: NOC, SOC, Infraestrutura"
-                className="bg-background border-border"
-              />
-            </div>
-            <div className="flex-1">
-              <Label htmlFor="webhook-url">URL do Webhook</Label>
-              <Input
-                id="webhook-url"
-                value={newWebhook}
-                onChange={(e) => setNewWebhook(e.target.value)}
-                placeholder="https://chat.googleapis.com/v1/spaces/..."
-                className="bg-background border-border"
-              />
-            </div>
-          </div>
-          <Button
-            onClick={addWebhook}
-            className="w-full"
-            disabled={isSaving || !newTeam.trim() || !newWebhook.trim()}
-          >
-            <Plus className="h-4 w-4 mr-2" />
-            Adicionar Webhook
-          </Button>
-        </div>
-
-        {/* Seção explicativa */}
-        <Card className="bg-background/30 border-border">
-          <CardHeader>
-            <CardTitle className="text-sm text-muted-foreground text-center">
-              Como obter um Webhook do Google Chat
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <ol className="text-sm text-muted-foreground space-y-1 list-decimal list-inside">
-              <li>Acesse o Google Chat e entre no espaço desejado</li>
-              <li>Clique no nome do espaço → "Gerenciar webhooks"</li>
-              <li>Verifique se ja não há um webhook criado</li>
-              <li>Caso ja tenha, Copie a URL gerada e cole aqui</li>
-              <li>Caso não tenha, clique em "Adicionar Webhook"</li>
-              <li>Definida o nome, Copie a URL gerada e cole aqui</li>
-            </ol>
-          </CardContent>
-        </Card>
-
-
-        <div className="space-y-4">
-          <Card className="bg-background/20 border border-border shadow-sm">
-            <CardHeader className="pb-2">
-              <CardTitle className="text-primary text-lg text-center w-full flex justify-center items-center gap-2">
-                Webhooks Cadastrados
+          {/* Seção explicativa */}
+          <Card className="webhook-card animate-slide-up" style={{ animationDelay: '0.2s' }}>
+            <CardHeader className="pb-4">
+              <CardTitle className="text-lg font-semibold text-foreground flex items-center gap-2">
+                <ExternalLink className="h-5 w-5 text-primary" />
+                Como obter um Webhook do Google Chat
               </CardTitle>
             </CardHeader>
+            <CardContent>
+              <ol className="space-y-3 text-sm text-muted-foreground">
+                <li className="flex items-start gap-3">
+                  <span className="flex-shrink-0 w-6 h-6 bg-primary/20 text-primary rounded-full flex items-center justify-center text-xs font-semibold">1</span>
+                  Acesse o Google Chat e entre no espaço desejado
+                </li>
+                <li className="flex items-start gap-3">
+                  <span className="flex-shrink-0 w-6 h-6 bg-primary/20 text-primary rounded-full flex items-center justify-center text-xs font-semibold">2</span>
+                  Clique no nome do espaço → "Gerenciar webhooks"
+                </li>
+                <li className="flex items-start gap-3">
+                  <span className="flex-shrink-0 w-6 h-6 bg-primary/20 text-primary rounded-full flex items-center justify-center text-xs font-semibold">3</span>
+                  Verifique se já existe um webhook criado
+                </li>
+                <li className="flex items-start gap-3">
+                  <span className="flex-shrink-0 w-6 h-6 bg-primary/20 text-primary rounded-full flex items-center justify-center text-xs font-semibold">4</span>
+                  Se já existir, copie a URL. Caso contrário, clique em "Adicionar Webhook"
+                </li>
+                <li className="flex items-start gap-3">
+                  <span className="flex-shrink-0 w-6 h-6 bg-primary/20 text-primary rounded-full flex items-center justify-center text-xs font-semibold">5</span>
+                  Defina o nome, copie a URL gerada e cole aqui
+                </li>
+              </ol>
+            </CardContent>
+          </Card>
 
-            <CardContent className="space-y-3 px-4 pb-4">
+          {/* Webhooks Cadastrados */}
+          <Card className="webhook-card animate-slide-up" style={{ animationDelay: '0.3s' }}>
+            <CardHeader className="pb-4">
+              <CardTitle className="text-xl font-semibold text-foreground flex items-center gap-2">
+                <CheckCircle2 className="h-5 w-5 text-primary" />
+                Webhooks Cadastrados
+                <span className="ml-auto text-sm font-normal text-muted-foreground">
+                  {Object.keys(webhooksByGroup).length} {Object.keys(webhooksByGroup).length === 1 ? 'equipe' : 'equipes'}
+                </span>
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
               {loadingGroups.length > 0 && (
-                <div className="text-center text-xs text-muted-foreground">
+                <div className="flex items-center justify-center py-8 text-muted-foreground">
+                  <Clock className="h-5 w-5 mr-2 animate-spin" />
                   Carregando grupos: {loadingGroups.join(", ")}
                 </div>
               )}
 
               {Object.keys(webhooksByGroup).length === 0 && loadingGroups.length === 0 && (
-                <div className="text-center text-sm text-muted-foreground">
-                  Nenhum webhook configurado
+                <div className="text-center py-12">
+                  <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-muted/20 flex items-center justify-center">
+                    <Webhook className="h-8 w-8 text-muted-foreground" />
+                  </div>
+                  <p className="text-muted-foreground text-lg font-medium">Nenhum webhook configurado</p>
+                  <p className="text-sm text-muted-foreground mt-1">
+                    Configure o primeiro webhook para começar
+                  </p>
                 </div>
               )}
 
-              {Object.entries(webhooksByGroup).map(([group, hooks]) => (
-                <div
-                  key={group}
-                  className="flex items-center justify-between bg-background/40 border border-border rounded-md px-3 py-2"
-                >
-                  <span className="text-sm text-foreground">{group}</span>
-                  <span className="text-xs text-muted-foreground">
-                    {hooks.length > 0 ? '✔️ Cadastrado' : '—'}
-                  </span>
-                </div>
-              ))}
-
-
+              <div className="grid gap-3">
+                {Object.entries(webhooksByGroup).map(([group, hooks], index) => (
+                  <div
+                    key={group}
+                    className="flex items-center justify-between p-4 rounded-xl border border-border/50 bg-background/50 hover:bg-background/70 transition-all duration-200 group animate-fade-in"
+                    style={{ animationDelay: `${0.1 * index}s` }}
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className="p-2 rounded-lg bg-primary/10">
+                        <Users className="h-4 w-4 text-primary" />
+                      </div>
+                      <div>
+                        <span className="font-medium text-foreground">{group}</span>
+                        <div className="text-xs text-muted-foreground">
+                          {hooks.length} {hooks.length === 1 ? 'webhook' : 'webhooks'}
+                        </div>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      {hooks.length > 0 ? (
+                        <span className="webhook-status-active">
+                          ✓ Ativo
+                        </span>
+                      ) : (
+                        <span className="webhook-status-inactive">
+                          Inativo
+                        </span>
+                      )}
+                      {hooks.length > 0 && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => removeWebhook(group, hooks[0].url)}
+                          className="opacity-0 group-hover:opacity-100 transition-opacity text-destructive hover:text-destructive hover:bg-destructive/10"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
             </CardContent>
           </Card>
 
-          {/* Seção Webhook de Crise */}
-          <Card className="bg-background/30 border-border">
-            <CardHeader>
-              <CardTitle className="text-sm text-muted-foreground">Webhook de Crise</CardTitle>
+          {/* Webhook de Crise */}
+          <Card className="webhook-card border-destructive/20 animate-slide-up" style={{ animationDelay: '0.4s' }}>
+            <CardHeader className="pb-4">
+              <CardTitle className="text-lg font-semibold text-foreground flex items-center gap-2">
+                <AlertTriangle className="h-5 w-5 text-destructive" />
+                Webhook de Crise
+              </CardTitle>
+              <p className="text-sm text-muted-foreground">
+                Webhook especial para notificações críticas e situações de emergência
+              </p>
             </CardHeader>
-            <CardContent>
+            <CardContent className="space-y-4">
               <div className="space-y-2">
-                <Label htmlFor="crisis-webhook">URL do Webhook de Crise</Label>
+                <Label htmlFor="crisis-webhook" className="text-sm font-medium text-foreground">URL do Webhook de Crise</Label>
                 <Input
                   id="crisis-webhook"
                   value={crisisWebhook}
                   onChange={(e) => setCrisisWebhook(e.target.value)}
                   placeholder="https://chat.googleapis.com/v1/spaces/..."
-                  className="bg-background border-border"
+                  className="webhook-input"
                   disabled={isSaving}
                 />
-                <p className="text-xs text-muted-foreground">
-                  Esse webhook será usado para notificações específicas de processos de crise.
-                </p>
-                <Button onClick={saveCrisisWebhook} disabled={isCrisisSaveDisabled} className="mt-2">
-                  Salvar Webhook de Crise
-                </Button>
               </div>
+              <div className="flex items-start gap-2 p-3 rounded-lg bg-destructive/5 border border-destructive/20">
+                <AlertTriangle className="h-4 w-4 text-destructive mt-0.5 flex-shrink-0" />
+                <p className="text-xs text-muted-foreground">
+                  <strong>Importante:</strong> Este webhook será usado exclusivamente para notificações de processos críticos e situações de emergência.
+                </p>
+              </div>
+              <Button 
+                onClick={saveCrisisWebhook} 
+                disabled={isCrisisSaveDisabled} 
+                className="w-full"
+                variant="destructive"
+                size="lg"
+              >
+                {isSaving ? 'Salvando...' : 'Salvar Webhook de Crise'}
+              </Button>
             </CardContent>
           </Card>
         </div>
 
-        <div className="flex justify-end pt-4">
+        <div className="flex justify-end pt-6 mt-8 border-t border-border/30">
           <Button
             variant="outline"
             onClick={() => onOpenChange(false)}
-            className="border-border hover:bg-hover-bg"
+            className="webhook-button-secondary px-8"
             disabled={isSaving}
+            size="lg"
           >
             Fechar
           </Button>
