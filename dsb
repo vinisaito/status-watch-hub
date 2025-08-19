@@ -1,421 +1,474 @@
-import React, { useState, useEffect, useCallback, memo } from 'react';
+
+import { useState, useEffect } from 'react';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Badge } from '@/components/ui/badge';
+import {
+  ChevronDown,
+  ChevronRight,
+  Calendar,
+  User,
+  AlertCircle,
+  Clock,
+  CheckCircle2,
+  AlertTriangle,
+  Circle,
+  Settings,
+  XCircle,
+  RotateCcw,
+  Play,
+  Star
+} from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { Textarea } from '@/components/ui/textarea';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { Trash2, Plus, MessageSquare, Clock, User, RefreshCw, AlertTriangle } from 'lucide-react';
-import { useToast } from '@/hooks/use-toast';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription
+} from '@/components/ui/dialog';
+import { format } from "date-fns";
+import { ptBR } from "date-fns/locale";
 
-interface ShiftNote {
+interface RDM {
   id: string;
-  author: string;
-  message: string;
-  timestamp: string;
-  priority: 'normal' | 'important';
+  numero_rdm: number;
+  descricao_rdm_user: string;
+  executor: string;
+  status_rdm: string;
+  impacto: string;
+  risco: string;
+  ambiente: string;
+  requisitante: string;
+  ["gerente requisitante"]: string;
+  depto_gerencia_requisitante: string;
+  origem: string;
+  warroom_preventivo: string;
+  ic_rdm: string;
+  tipo_rdm: 'Urgente' | 'Padrão' | 'Normal' | 'Informativa';
+  data_inicio_programacao: string;
+  data_fim_programacao?: string;
+  description: string;
+  grupo_executor: string;
+  area_principal_afetada;
+  ["duração da Programação"]?: string;
 }
 
-const formatTimestamp = (timestamp: string) => {
-  try {
-    const date = new Date(timestamp);
-    return date.toLocaleString('pt-BR', {
-      day: '2-digit',
-      month: '2-digit',
-      hour: '2-digit',
-      minute: '2-digit',
+const formatDateRange = (start, end) => {
+  if (!start) return "";
+
+  const startDate = new Date(start);
+  const endDate = end ? new Date(end) : null;
+
+  const format = (date) =>
+    date.toLocaleString("pt-BR", {
+      day: "2-digit",
+      month: "2-digit",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
     });
-  } catch {
-    return timestamp || '';
-  }
+
+  return endDate ? `${format(startDate)} - ${format(endDate)}` : format(startDate);
 };
 
-const ShiftNoteItem = memo(({ note, onRemoveNote }: { note: ShiftNote; onRemoveNote: (id: string) => void }) => {
-  return (
-    <div className={`group relative overflow-hidden rounded-xl border backdrop-blur-sm transition-all duration-300 animate-fade-in hover:shadow-elevated hover:scale-[1.02] ${
-      note.priority === 'important' 
-        ? 'border-warning/30 bg-important-gradient shadow-soft' 
-        : 'border-border/50 bg-note-gradient shadow-soft'
-    }`}>
-      <div className="p-4 sm:p-6">
-        <div className="flex items-start justify-between gap-4">
-          <div className="flex-1 min-w-0">
-            <div className="flex flex-wrap items-center gap-x-4 gap-y-2 mb-3">
-              <div className="flex items-center gap-2 text-sm font-medium text-foreground/80">
-                <User className="h-4 w-4 text-primary" />
-                <span className="truncate max-w-32 sm:max-w-none">{note.author}</span>
-              </div>
-              <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                <Clock className="h-4 w-4" />
-                <span className="whitespace-nowrap">{formatTimestamp(note.timestamp)}</span>
-              </div>
-              {note.priority === 'important' && (
-                <div className="flex items-center gap-1.5 px-3 py-1 bg-warning text-warning-foreground rounded-full text-xs font-semibold shadow-sm">
-                  <AlertTriangle className="h-3 w-3" />
-                  IMPORTANTE
-                </div>
-              )}
-            </div>
-            <p className="text-foreground leading-relaxed whitespace-pre-wrap break-words text-sm sm:text-base">
-              {note.message}
-            </p>
-          </div>
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={() => onRemoveNote(note.id)}
-            className="text-muted-foreground hover:text-destructive hover:bg-destructive/10 shrink-0 opacity-60 group-hover:opacity-100 transition-opacity duration-200"
-            aria-label="Remover recado"
-          >
-            <Trash2 className="h-4 w-4" />
-          </Button>
-        </div>
-      </div>
-    </div>
-  );
-});
-
-const ShiftNoteList = ({ notes, onRemoveNote }: { notes: ShiftNote[]; onRemoveNote: (id: string) => void }) => {
-  if (!notes || notes.length === 0) {
-    return (
-      <div className="text-center py-12 animate-fade-in">
-        <MessageSquare className="h-12 w-12 text-muted-foreground/40 mx-auto mb-4" />
-        <p className="text-muted-foreground text-lg">Nenhum recado no turno atual</p>
-        <p className="text-muted-foreground/60 text-sm mt-1">Seja o primeiro a deixar um recado!</p>
-      </div>
-    );
-  }
-
-  return (
-    <div className="space-y-4 max-h-[50vh] overflow-y-auto pr-2 scrollbar-thin scrollbar-thumb-border scrollbar-track-transparent">
-      {notes.map((note, index) => (
-        <div key={note.id} style={{ animationDelay: `${index * 100}ms` }}>
-          <ShiftNoteItem note={note} onRemoveNote={onRemoveNote} />
-        </div>
-      ))}
-    </div>
-  );
-};
-
-const ShiftNoteForm = ({
-  authorName,
-  setAuthorName,
-  newNote,
-  setNewNote,
-  isImportant,
-  setIsImportant,
-  onAddNote,
-  loading,
-}: {
-  authorName: string;
-  setAuthorName: (val: string) => void;
-  newNote: string;
-  setNewNote: (val: string) => void;
-  isImportant: boolean;
-  setIsImportant: (val: boolean) => void;
-  onAddNote: () => void;
-  loading: boolean;
-}) => {
-  return (
-    <div className="relative overflow-hidden rounded-xl border border-border/50 bg-card backdrop-blur-sm shadow-elevated">
-      <div className="p-6 space-y-6">
-        <div className="flex items-center gap-3">
-          <div className="p-2 rounded-lg bg-primary/10">
-            <MessageSquare className="h-6 w-6 text-primary" />
-          </div>
-          <div>
-            <h2 className="text-xl font-semibold text-foreground">Recados do Turno</h2>
-            <p className="text-sm text-muted-foreground">Deixe informações importantes para o próximo turno</p>
-          </div>
-        </div>
-
-        <div className="grid gap-4 sm:grid-cols-2">
-          <div className="space-y-2">
-            <Label htmlFor="author-name" className="text-sm font-medium">
-              Seu Nome
-            </Label>
-            <Input
-              id="author-name"
-              value={authorName}
-              onChange={(e) => setAuthorName(e.target.value)}
-              placeholder="Digite seu nome"
-              className="bg-background/50 border-border/50 focus:bg-background transition-colors"
-            />
-          </div>
-        </div>
-
-        <div className="space-y-2">
-          <Label htmlFor="note-message" className="text-sm font-medium">
-            Mensagem do Recado
-          </Label>
-          <Textarea
-            id="note-message"
-            value={newNote}
-            onChange={(e) => setNewNote(e.target.value)}
-            placeholder="Digite o recado para o próximo turno..."
-            className="bg-background/50 border-border/50 focus:bg-background transition-colors min-h-[120px] resize-none"
-            rows={4}
-          />
-        </div>
-
-        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 pt-2">
-          <div className="flex items-center gap-3">
-            <input
-              type="checkbox"
-              id="important-checkbox"
-              checked={isImportant}
-              onChange={(e) => setIsImportant(e.target.checked)}
-              className="h-4 w-4 rounded border-border/50 text-primary focus:ring-primary/20 focus:ring-2"
-            />
-            <Label htmlFor="important-checkbox" className="text-sm font-medium cursor-pointer select-none">
-              Marcar como importante
-            </Label>
-          </div>
-          <Button 
-            onClick={onAddNote} 
-            disabled={loading || !newNote.trim() || !authorName.trim()}
-            className="w-full sm:w-auto bg-primary hover:bg-primary-hover text-primary-foreground shadow-sm disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200"
-          >
-            {loading ? (
-              <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
-            ) : (
-              <Plus className="h-4 w-4 mr-2" />
-            )}
-            {loading ? 'Adicionando...' : 'Adicionar Recado'}
-          </Button>
-        </div>
-      </div>
-    </div>
-  );
-};
-
-const API_URL = 'https://f6ffk8e9fe.execute-api.us-east-1.amazonaws.com/prod/recadosturno';
-
-async function postShiftNote(nome: string, recado: string, importante: boolean) {
-  const response = await fetch(API_URL, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ nome, recado, importante }),
-  });
-  if (!response.ok) {
-    const errorData = await response.text();
-    console.error('POST error:', response.status, errorData);
-    throw new Error(JSON.parse(errorData || '{}').error || 'Erro ao salvar recado');
-  }
-  return response.json();
-}
-
-async function deleteShiftNote(key: string) {
-  const response = await fetch(API_URL, {
-    method: 'DELETE',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ key }),
-  });
-  if (!response.ok) {
-    const errorData = await response.text();
-    console.error('DELETE error:', response.status, errorData);
-    throw new Error(JSON.parse(errorData || '{}').error || 'Erro ao remover recado');
-  }
-  return response.json();
-}
-
-async function getShiftNotes(): Promise<ShiftNote[]> {
-  const response = await fetch(API_URL, { method: 'GET' });
-
-  if (!response.ok) {
-    const txt = await response.text();
-    console.error('GET error:', response.status, txt);
-    throw new Error(txt || 'Erro ao carregar recados');
-  }
-
-  const text = await response.text();
-  let parsed: any = null;
-  if (!text) {
-    parsed = null;
-  } else {
-    try {
-      parsed = JSON.parse(text);
-    } catch (err) {
-      console.error('Erro ao parsear JSON do GET:', err, 'texto:', text);
-      throw new Error('Resposta inválida do servidor');
-    }
-  }
-
-  let rawNotes: any[] = [];
-  if (parsed == null) {
-    rawNotes = [];
-  } else if (Array.isArray(parsed)) {
-    rawNotes = parsed;
-  } else if (parsed.notes && Array.isArray(parsed.notes)) {
-    rawNotes = parsed.notes;
-  } else if (parsed.recados && Array.isArray(parsed.recados)) {
-    rawNotes = parsed.recados;
-  } else if (parsed && (parsed.nome || parsed.recado || parsed.key)) {
-    rawNotes = [parsed];
-  } else {
-    console.warn('Formato inesperado do payload GET:', parsed);
-    rawNotes = [];
-  }
-
-  return rawNotes.map((item: any, idx: number) => ({
-    id: item.key || item.id || item.Key || `note-${idx}`,
-    author: item.nome || item.author || '',
-    message: item.recado || item.message || '',
-    timestamp: item.timestamp || item.ts || new Date().toISOString(),
-    priority: item.importante ? 'important' : 'normal',
-  }));
-}
-
-export const ShiftNotes = () => {
-  const { toast } = useToast();
-  const [notes, setNotes] = useState<ShiftNote[]>([]);
-  const [newNote, setNewNote] = useState('');
-  const [authorName, setAuthorName] = useState('');
-  const [isImportant, setIsImportant] = useState(false);
-  const [loading, setLoading] = useState(false);
-  const [addingNote, setAddingNote] = useState(false);
+export const RDMTracker = () => {
+  const [expandedRDM, setExpandedRDM] = useState<string | null>(null);
+  const [selectedRDM, setSelectedRDM] = useState<RDM | null>(null);
+  const [rdms, setRdms] = useState<RDM[]>([]);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const loadNotes = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const fetchedNotes = await getShiftNotes();
-      setNotes(fetchedNotes);
-    } catch (err: any) {
-      console.error('Erro ao carregar recados:', err);
-      setError(err.message || 'Erro ao carregar recados');
-      toast({
-        title: 'Erro',
-        description: err.message || 'Não foi possível carregar os recados.',
-        variant: 'destructive',
-      });
-    } finally {
-      setLoading(false);
-    }
-  }, [toast]);
+  // 🔹 Substitua pela URL do seu API Gateway
+  const API_URL = "https://f6ffk8e9fe.execute-api.us-east-1.amazonaws.com/prod/acompanhamentordms";
 
   useEffect(() => {
-    loadNotes();
+    const fetchRDMs = async () => {
+      try {
+        setLoading(true);
+        const response = await fetch(API_URL);
+        if (!response.ok) {
+          throw new Error(`Erro ${response.status}: Não foi possível carregar as RDMs`);
+        }
+        const data = await response.json();
+        setRdms(data); // 🔹 Assume que sua Lambda retorna um array de RDMs
+      } catch (err: any) {
+        setError(err.message || "Erro desconhecido");
+      } finally {
+        setLoading(false);
+      }
+    };
 
-    const savedAuthor = localStorage.getItem('shiftNotesAuthor');
-    if (savedAuthor) setAuthorName(savedAuthor);
-  }, [loadNotes]);
+    fetchRDMs();
+  }, []);
 
-  useEffect(() => {
-    if (authorName) {
-      localStorage.setItem('shiftNotesAuthor', authorName);
-    }
-  }, [authorName]);
+  const getStatusBadgeClass = (status_rdm: string) => {
+    switch (status_rdm) {
+      case 'Aberta':
+      case 'Aprovada':
+        return 'bg-green-500/90 text-white border-green-400/50 shadow-md';
 
-  const addNote = useCallback(async () => {
-    if (!newNote.trim() || !authorName.trim()) {
-      toast({
-        title: 'Campos obrigatórios',
-        description: 'Preencha seu nome e a mensagem do recado.',
-        variant: 'destructive',
-      });
-      return;
-    }
-    
-    setAddingNote(true);
-    try {
-      const data = await postShiftNote(authorName.trim(), newNote.trim(), isImportant);
-      const note: ShiftNote = {
-        id: data.key,
-        author: authorName.trim(),
-        message: newNote.trim(),
-        timestamp: data.timestamp,
-        priority: isImportant ? 'important' : 'normal',
-      };
-      setNotes((prev) => [note, ...prev]);
-      setNewNote('');
-      setIsImportant(false);
-      toast({ 
-        title: 'Recado adicionado!', 
-        description: 'O recado foi salvo com sucesso.',
-        variant: 'default'
-      });
-    } catch (error: any) {
-      toast({
-        title: 'Erro',
-        description: error.message || 'Não foi possível salvar o recado.',
-        variant: 'destructive',
-      });
-    } finally {
-      setAddingNote(false);
-    }
-  }, [newNote, authorName, isImportant, toast]);
+      case 'Cancelada':
+      case 'Rejeitada':
+        return 'bg-red-500/90 text-white border-red-400/50 shadow-md';
 
-  const removeNote = useCallback(async (noteId: string) => {
-    try {
-      await deleteShiftNote(noteId);
-      setNotes((prev) => prev.filter((note) => note.id !== noteId));
-      toast({ 
-        title: 'Recado removido', 
-        description: 'O recado foi removido com sucesso.',
-        variant: 'destructive' 
-      });
-    } catch (error: any) {
-      toast({
-        title: 'Erro',
-        description: error.message || 'Não foi possível remover o recado.',
-        variant: 'destructive',
-      });
+      case 'Em aprovação':
+      case 'Em aprovação - Comitê':
+        return 'bg-yellow-400/80 text-white border-yellow-300/50 shadow-md';
+
+      case 'Em implantação':
+        return 'bg-blue-500/90 text-white border-blue-400/50 shadow-md';
+
+      case 'Implantada':
+      case 'Fechada':
+        return 'bg-green-700/90 text-white border-green-600/50 shadow-md';
+
+      case 'Plano de volta em execução':
+      case 'Recuada':
+        return 'bg-orange-500/90 text-white border-orange-400/50 shadow-md';
+
+      default:
+        return 'bg-muted text-muted-foreground';
     }
-  }, [toast]);
+  };
+
+  const getStatusText = (status_rdm: string) => {
+    switch (status_rdm) {
+      case 'Aberta':
+        return 'Aberta';
+      case 'Aprovada':
+        return 'Aprovada';
+      case 'Cancelada':
+        return 'Cancelada';
+      case 'Em aprovação':
+        return 'Em aprovação';
+      case 'Em aprovação - Comitê':
+        return 'Em aprovação - Comitê';
+      case 'Em implantação':
+        return 'Em implantação';
+      case 'Fechada':
+        return 'Fechada';
+      case 'Implantada':
+        return 'Implantada';
+      case 'Plano de volta em execução':
+        return 'Plano de volta em execução';
+      case 'Recuada':
+        return 'Recuada';
+      case 'Rejeitada':
+        return 'Rejeitada';
+      default:
+        return 'Desconhecido';
+    }
+  };
+
+  const getStatusIcon = (status_rdm: string) => {
+    switch (status_rdm) {
+      case 'Aberta':
+        return <Play className="h-4 w-4 animate-pulse" />;
+      case 'Aprovada':
+        return <Star className="h-4 w-4 animate-bounce" />;
+
+      case 'Cancelada':
+      case 'Rejeitada':
+        return <XCircle className="h-4 w-4" />;
+
+      case 'Em implantação':
+        return <Settings className="h-4 w-4 animate-spin" />;
+
+      case 'Em aprovação':
+      case 'Em aprovação - Comitê':
+        return <Clock className="h-4 w-4 animate-bounce" />;
+
+      case 'Implantada':
+      case 'Fechada':
+        return <CheckCircle2 className="h-4 w-4" />;
+
+      case 'Plano de volta em execução':
+      case 'Recuada':
+        return <RotateCcw className="h-4 w-4" />;
+
+      default:
+        return <Circle className="h-4 w-4" />;
+    }
+  };
+
+  const getPriorityIcon = (tipo_rdm: string) => {
+    switch (tipo_rdm) {
+      case 'Urgente':
+        return <AlertTriangle className="h-4 w-4 text-status-escalated" />;
+      case 'Padrão':
+      case 'Normal':
+        return <AlertCircle className="h-4 w-4 text-status-ongoing" />;
+      case 'Informativa':
+        return <Circle className="h-4 w-4 text-status-resolved" />;
+      default:
+        return <Circle className="h-4 w-4 text-muted-foreground" />;
+    }
+  };
+
+  const getPriorityColor = (tipo_rdm: string) => {
+    switch (tipo_rdm) {
+      case 'Urgente':
+        return 'text-status-escalated';
+      case 'Padrão':
+      case 'Normal':
+        return 'text-status-ongoing';
+      case 'Informativa':
+        return 'text-status-resolved';
+      default:
+        return 'text-muted-foreground';
+    }
+  };
+
+  const getPriorityText = (tipo_rdm: string) => {
+    switch (tipo_rdm) {
+      case 'high':
+        return 'Alta';
+      case 'medium':
+        return 'Média';
+      case 'low':
+        return 'Baixa';
+      default:
+        return 'Normal';
+    }
+  };
+
+  const toggleExpanded = (id: string) => {
+    setExpandedRDM(prev => prev === id ? null : id);
+  };
+
+  const openModal = (rdm: RDM) => {
+    setSelectedRDM(rdm);
+  };
+
+  const closeModal = () => {
+    setSelectedRDM(null);
+  };
+
+  const activeRDMs = rdms.filter(rdm => rdm.status_rdm !== 'done').length;
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-background via-background to-muted/20 p-4 sm:p-6 lg:p-8">
-      <div className="max-w-4xl mx-auto space-y-8">
-        <ShiftNoteForm
-          authorName={authorName}
-          setAuthorName={setAuthorName}
-          newNote={newNote}
-          setNewNote={setNewNote}
-          isImportant={isImportant}
-          setIsImportant={setIsImportant}
-          onAddNote={addNote}
-          loading={addingNote}
-        />
+    <>
+      <Card className="gradient-card shadow-card border-panel-border transition-smooth hover:shadow-hover">
+        <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3">
+          <CardTitle className="text-primary flex items-center gap-3 text-xl font-bold">
+            <div className="relative">
+              <Calendar className="h-6 w-6" />
+              {activeRDMs > 0 && (
+                <div className="absolute -top-1 -right-1 w-3 h-3 bg-status-ongoing rounded-full animate-pulse-glow border border-background" />
+              )}
+            </div>
+            <span>Acompanhamento de RDMs</span>
+            {activeRDMs > 0 && (
+              <Badge variant="outline" className="ml-2 px-1 py-1 bg-status-ongoing/10 text-status-ongoing border-status-ongoing/30">
+                {activeRDMs} ativas
+              </Badge>
+            )}
+          </CardTitle>
+          <Button
+            variant="secondary"
+            size="sm"
+            className="mr-2"
+            onClick={() => console.log("Abrir modal de adicionar RDM")}
+          >
+            Adicionar RDM
+          </Button>
+        </CardHeader>
 
-        <div className="space-y-6">
-          <div className="flex items-center justify-between gap-4">
-            <div>
-              <h3 className="text-2xl font-semibold text-foreground">Recados Ativos</h3>
-              <p className="text-muted-foreground text-sm mt-1">
-                {notes.length > 0 ? `${notes.length} recado${notes.length > 1 ? 's' : ''}` : 'Nenhum recado'}
+        <CardContent className="space-y-3 max-h-[75vh] overflow-y-auto pr-2">
+          {loading && (
+            <div className="text-center py-8 text-muted-foreground">
+              Carregando RDMs...
+            </div>
+          )}
+
+          {error && (
+            <div className="text-center py-8 text-red-500">
+              {error}
+            </div>
+          )}
+
+          {!loading && !error && rdms.map((rdm, index) => (
+
+            <div
+              key={rdm.id}
+              className="group relative border border-panel-border rounded-xl p-4 bg-background/60 hover:bg-hover-bg/50 transition-smooth shadow-sm hover:shadow-card animate-fade-in"
+              style={{ animationDelay: `${index * 100}ms` }}
+            >
+              {/* Priority indicator */}
+              <div className={`absolute left-0 top-4 bottom-4 w-1 rounded-r-lg transition-smooth ${rdm.tipo_rdm === 'Urgente' ? 'bg-status-escalated' :
+                rdm.tipo_rdm === 'Normal' || rdm.tipo_rdm === 'Padrão' || rdm.tipo_rdm === 'Informativa' ? 'bg-status-ongoing' :
+                  'bg-status-resolved'
+                }`} />
+
+              <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 ml-4 flex-wrap">
+                {/* Status and actions */}
+                <div className="flex items-center gap-3 lg:ml-4 justify-between lg:justify-end">
+                  <div className="flex items-center gap-2">
+                    <span className="font-mono text-sm bg-accent/30 px-2 py-1 rounded-md text-accent-foreground font-semibold">
+                      {rdm.numero_rdm}
+                    </span>
+                    <span className="text-sm text-foreground font-medium hidden md:inline break-words max-w-[250px]">
+                      {rdm.descricao_rdm_user}
+                    </span>
+                    <span className="text-sm text-muted-foreground font-medium hidden md:inline">
+                      {rdm.grupo_executor}
+                    </span>
+                    <Badge className={`${getStatusBadgeClass(rdm.status_rdm)} flex items-center gap-1.5 px-3 py-1`}>
+                      {getStatusIcon(rdm.status_rdm)}
+                      {getStatusText(rdm.status_rdm)}
+                    </Badge>
+                  </div>
+
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="hover:bg-accent/50 transition-smooth border-border ml-4"
+                    onClick={() => openModal(rdm)}
+                  >
+                    Detalhes
+                  </Button>
+                </div>
+              </div>
+            </div>
+
+          ))}
+
+          {!loading && !error && rdms.length === 0 && (
+            <div className="text-center py-12 animate-fade-in">
+              <Calendar className="h-12 w-12 text-muted-foreground mx-auto mb-4 opacity-50" />
+              <p className="text-muted-foreground text-lg font-medium">
+                Nenhuma RDM em andamento
+              </p>
+              <p className="text-muted-foreground/70 text-sm mt-1">
+                Todas as mudanças planejadas foram finalizadas
               </p>
             </div>
-            <Button 
-              onClick={loadNotes} 
-              variant="outline"
-              size="sm"
-              disabled={loading}
-              className="shrink-0 border-border/50 hover:bg-muted/50"
-            >
-              <RefreshCw className={`h-4 w-4 mr-2 ${loading ? 'animate-spin' : ''}`} />
-              Atualizar
-            </Button>
-          </div>
-
-          {loading && !addingNote ? (
-            <div className="text-center py-12 animate-fade-in">
-              <RefreshCw className="h-8 w-8 text-primary mx-auto mb-4 animate-spin" />
-              <p className="text-muted-foreground">Carregando recados...</p>
-            </div>
-          ) : error ? (
-            <div className="text-center py-12 animate-fade-in">
-              <AlertTriangle className="h-12 w-12 text-destructive/60 mx-auto mb-4" />
-              <p className="text-destructive text-lg font-medium">Erro ao carregar recados</p>
-              <p className="text-muted-foreground text-sm mt-1">Tente novamente em alguns instantes</p>
-              <Button onClick={loadNotes} variant="outline" className="mt-4">
-                Tentar novamente
-              </Button>
-            </div>
-          ) : (
-            <ShiftNoteList notes={notes} onRemoveNote={removeNote} />
           )}
-        </div>
-      </div>
-    </div>
+        </CardContent>
+      </Card>
+
+      {/* Modal */}
+      <Dialog open={!!selectedRDM} onOpenChange={closeModal}>
+        <DialogContent className="max-w-2xl gradient-card">
+          <DialogHeader>
+            <DialogTitle className="text-xl flex items-center gap-3">
+              <div className="p-2 rounded-lg bg-primary/10">
+                <Calendar className="h-5 w-5 text-primary" />
+              </div>
+              {selectedRDM?.numero_rdm} - {selectedRDM?.descricao_rdm_user}
+            </DialogTitle>
+          </DialogHeader>
+
+          {selectedRDM && (
+            <div className="space-y-6 py-4">
+              {/* Status and Priority */}
+              <div className="flex flex-wrap items-center gap-4">
+                <Badge className={`${getStatusBadgeClass(selectedRDM.status_rdm)} flex items-center gap-2 px-3 py-2`}>
+                  {getStatusIcon(selectedRDM.status_rdm)}
+                  {getStatusText(selectedRDM.status_rdm)}
+                </Badge>
+                <div className="flex items-center gap-2">
+                  {getPriorityIcon(selectedRDM.tipo_rdm)}
+                  <span className={`font-semibold ${getPriorityColor(selectedRDM.tipo_rdm)}`}>
+                    Prioridade {getPriorityText(selectedRDM.tipo_rdm)}
+                  </span>
+                </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => console.log("Abrir modal de adicionar RDM")}
+                  className="ml-4"
+                >
+                  Enviar no Chat
+                </Button>
+              </div>
+
+              {/* Details Grid */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div className="space-y-4">
+                  <div className="flex items-center gap-3 p-3 bg-accent/10 rounded-lg border border-accent/20">
+                    <User className="h-5 w-5 text-primary" />
+                    <div>
+                      <p className="text-sm text-muted-foreground">Responsável</p>
+                      <p className="font-semibold text-foreground">{selectedRDM.executor}</p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-3 p-3 bg-accent/10 rounded-lg border border-accent/20">
+                    <Settings className="h-5 w-5 text-primary" />
+                    <div>
+                      <p className="text-sm text-muted-foreground">Equipe</p>
+                      <p className="font-semibold text-foreground">{selectedRDM.grupo_executor}</p>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="space-y-4">
+                  <div className="flex items-center gap-3 p-3 bg-accent/10 rounded-lg border border-accent/20">
+                    <Calendar className="h-5 w-5 text-primary" />
+                    <div>
+                      <p className="text-sm text-muted-foreground">Janela de Execução</p>
+                      <p className="font-semibold text-foreground">
+                       {formatDateRange(selectedRDM.data_inicio_programacao, selectedRDM.data_fim_programacao)}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-3 p-3 bg-accent/10 rounded-lg border border-accent/20">
+                    <Clock className="h-5 w-5 text-primary" />
+                    <div>
+                      <p className="text-sm text-muted-foreground">Duração Estimada</p>
+                      <p className="font-semibold text-foreground">{selectedRDM["duração da Programação"] || 'N/A'} Horas</p>                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Description */}
+              <div className="max-w-3xl w-full max-h-[20vh] overflow-y-auto mx-auto">
+                <h4 className="font-semibold text-foreground mb-4 flex items-center gap-2 text-lg">
+                  <AlertCircle className="h-4 w-4" />
+                  Mais informações
+                </h4>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <span className="font-medium text-foreground">Ambiente:</span>
+                    <span className="text-muted-foreground ml-1">{selectedRDM.ambiente}</span>
+                  </div>
+                  <div>
+                    <span className="font-medium text-foreground">Origem:</span>
+                    <span className="text-muted-foreground ml-1">{selectedRDM.origem}</span>
+                  </div>
+                  <div>
+                    <span className="font-medium text-foreground">Impacto:</span>
+                    <span className="text-muted-foreground ml-1">{selectedRDM.impacto}</span>
+                  </div>
+                  <div>
+                    <span className="font-medium text-foreground">Risco:</span>
+                    <span className="text-muted-foreground ml-1">{selectedRDM.risco}</span>
+                  </div>
+                  <div>
+                    <span className="font-medium text-foreground">Requisitante:</span>
+                    <span className="text-muted-foreground ml-1">{selectedRDM.requisitante}</span>
+                  </div>
+                  <div>
+                    <span className="font-medium text-foreground">Área Principal:</span>
+                    <span className="text-muted-foreground ml-1">{selectedRDM.area_principal_afetada}</span>
+                  </div>
+                  <div>
+                    <span className="font-medium text-foreground">War Room Preventivo:</span>
+                    <span className="text-muted-foreground ml-1">{selectedRDM.warroom_preventivo}</span>
+                  </div>
+                  <div>
+                    <span className="font-medium text-foreground">IC</span>
+                    <span className="text-muted-foreground ml-1">{selectedRDM.ic_rdm}</span>
+                  </div>
+                </div>
+              </div>
+
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+    </>
   );
 };
