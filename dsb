@@ -1,0 +1,474 @@
+
+import { useState, useEffect } from 'react';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Badge } from '@/components/ui/badge';
+import {
+  ChevronDown,
+  ChevronRight,
+  Calendar,
+  User,
+  AlertCircle,
+  Clock,
+  CheckCircle2,
+  AlertTriangle,
+  Circle,
+  Settings,
+  XCircle,
+  RotateCcw,
+  Play,
+  Star
+} from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription
+} from '@/components/ui/dialog';
+import { format } from "date-fns";
+import { ptBR } from "date-fns/locale";
+
+interface RDM {
+  id: string;
+  numero_rdm: number;
+  descricao_rdm_user: string;
+  executor: string;
+  status_rdm: string;
+  impacto: string;
+  risco: string;
+  ambiente: string;
+  requisitante: string;
+  ["gerente requisitante"]: string;
+  depto_gerencia_requisitante: string;
+  origem: string;
+  warroom_preventivo: string;
+  ic_rdm: string;
+  tipo_rdm: 'Urgente' | 'Padrão' | 'Normal' | 'Informativa';
+  data_inicio_programacao: string;
+  data_fim_programacao?: string;
+  description: string;
+  grupo_executor: string;
+  area_principal_afetada;
+  ["duração da Programação"]?: string;
+}
+
+const formatDateRange = (start, end) => {
+  if (!start) return "";
+
+  const startDate = new Date(start);
+  const endDate = end ? new Date(end) : null;
+
+  const format = (date) =>
+    date.toLocaleString("pt-BR", {
+      day: "2-digit",
+      month: "2-digit",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+
+  return endDate ? `${format(startDate)} - ${format(endDate)}` : format(startDate);
+};
+
+export const RDMTracker = () => {
+  const [expandedRDM, setExpandedRDM] = useState<string | null>(null);
+  const [selectedRDM, setSelectedRDM] = useState<RDM | null>(null);
+  const [rdms, setRdms] = useState<RDM[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  // 🔹 Substitua pela URL do seu API Gateway
+  const API_URL = "https://f6ffk8e9fe.execute-api.us-east-1.amazonaws.com/prod/acompanhamentordms";
+
+  useEffect(() => {
+    const fetchRDMs = async () => {
+      try {
+        setLoading(true);
+        const response = await fetch(API_URL);
+        if (!response.ok) {
+          throw new Error(`Erro ${response.status}: Não foi possível carregar as RDMs`);
+        }
+        const data = await response.json();
+        setRdms(data); // 🔹 Assume que sua Lambda retorna um array de RDMs
+      } catch (err: any) {
+        setError(err.message || "Erro desconhecido");
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchRDMs();
+  }, []);
+
+  const getStatusBadgeClass = (status_rdm: string) => {
+    switch (status_rdm) {
+      case 'Aberta':
+      case 'Aprovada':
+        return 'bg-green-500/90 text-white border-green-400/50 shadow-md';
+
+      case 'Cancelada':
+      case 'Rejeitada':
+        return 'bg-red-500/90 text-white border-red-400/50 shadow-md';
+
+      case 'Em aprovação':
+      case 'Em aprovação - Comitê':
+        return 'bg-yellow-400/80 text-white border-yellow-300/50 shadow-md';
+
+      case 'Em implantação':
+        return 'bg-blue-500/90 text-white border-blue-400/50 shadow-md';
+
+      case 'Implantada':
+      case 'Fechada':
+        return 'bg-green-700/90 text-white border-green-600/50 shadow-md';
+
+      case 'Plano de volta em execução':
+      case 'Recuada':
+        return 'bg-orange-500/90 text-white border-orange-400/50 shadow-md';
+
+      default:
+        return 'bg-muted text-muted-foreground';
+    }
+  };
+
+  const getStatusText = (status_rdm: string) => {
+    switch (status_rdm) {
+      case 'Aberta':
+        return 'Aberta';
+      case 'Aprovada':
+        return 'Aprovada';
+      case 'Cancelada':
+        return 'Cancelada';
+      case 'Em aprovação':
+        return 'Em aprovação';
+      case 'Em aprovação - Comitê':
+        return 'Em aprovação - Comitê';
+      case 'Em implantação':
+        return 'Em implantação';
+      case 'Fechada':
+        return 'Fechada';
+      case 'Implantada':
+        return 'Implantada';
+      case 'Plano de volta em execução':
+        return 'Plano de volta em execução';
+      case 'Recuada':
+        return 'Recuada';
+      case 'Rejeitada':
+        return 'Rejeitada';
+      default:
+        return 'Desconhecido';
+    }
+  };
+
+  const getStatusIcon = (status_rdm: string) => {
+    switch (status_rdm) {
+      case 'Aberta':
+        return <Play className="h-4 w-4 animate-pulse" />;
+      case 'Aprovada':
+        return <Star className="h-4 w-4 animate-bounce" />;
+
+      case 'Cancelada':
+      case 'Rejeitada':
+        return <XCircle className="h-4 w-4" />;
+
+      case 'Em implantação':
+        return <Settings className="h-4 w-4 animate-spin" />;
+
+      case 'Em aprovação':
+      case 'Em aprovação - Comitê':
+        return <Clock className="h-4 w-4 animate-bounce" />;
+
+      case 'Implantada':
+      case 'Fechada':
+        return <CheckCircle2 className="h-4 w-4" />;
+
+      case 'Plano de volta em execução':
+      case 'Recuada':
+        return <RotateCcw className="h-4 w-4" />;
+
+      default:
+        return <Circle className="h-4 w-4" />;
+    }
+  };
+
+  const getPriorityIcon = (tipo_rdm: string) => {
+    switch (tipo_rdm) {
+      case 'Urgente':
+        return <AlertTriangle className="h-4 w-4 text-status-escalated" />;
+      case 'Padrão':
+      case 'Normal':
+        return <AlertCircle className="h-4 w-4 text-status-ongoing" />;
+      case 'Informativa':
+        return <Circle className="h-4 w-4 text-status-resolved" />;
+      default:
+        return <Circle className="h-4 w-4 text-muted-foreground" />;
+    }
+  };
+
+  const getPriorityColor = (tipo_rdm: string) => {
+    switch (tipo_rdm) {
+      case 'Urgente':
+        return 'text-status-escalated';
+      case 'Padrão':
+      case 'Normal':
+        return 'text-status-ongoing';
+      case 'Informativa':
+        return 'text-status-resolved';
+      default:
+        return 'text-muted-foreground';
+    }
+  };
+
+  const getPriorityText = (tipo_rdm: string) => {
+    switch (tipo_rdm) {
+      case 'high':
+        return 'Alta';
+      case 'medium':
+        return 'Média';
+      case 'low':
+        return 'Baixa';
+      default:
+        return 'Normal';
+    }
+  };
+
+  const toggleExpanded = (id: string) => {
+    setExpandedRDM(prev => prev === id ? null : id);
+  };
+
+  const openModal = (rdm: RDM) => {
+    setSelectedRDM(rdm);
+  };
+
+  const closeModal = () => {
+    setSelectedRDM(null);
+  };
+
+  const activeRDMs = rdms.filter(rdm => rdm.status_rdm !== 'done').length;
+
+  return (
+    <>
+      <Card className="gradient-card shadow-card border-panel-border transition-smooth hover:shadow-hover">
+        <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3">
+          <CardTitle className="text-primary flex items-center gap-3 text-xl font-bold">
+            <div className="relative">
+              <Calendar className="h-6 w-6" />
+              {activeRDMs > 0 && (
+                <div className="absolute -top-1 -right-1 w-3 h-3 bg-status-ongoing rounded-full animate-pulse-glow border border-background" />
+              )}
+            </div>
+            <span>Acompanhamento de RDMs</span>
+            {activeRDMs > 0 && (
+              <Badge variant="outline" className="ml-2 px-1 py-1 bg-status-ongoing/10 text-status-ongoing border-status-ongoing/30">
+                {activeRDMs} ativas
+              </Badge>
+            )}
+          </CardTitle>
+          <Button
+            variant="secondary"
+            size="sm"
+            className="mr-2"
+            onClick={() => console.log("Abrir modal de adicionar RDM")}
+          >
+            Adicionar RDM
+          </Button>
+        </CardHeader>
+
+        <CardContent className="space-y-3 max-h-[75vh] overflow-y-auto pr-2">
+          {loading && (
+            <div className="text-center py-8 text-muted-foreground">
+              Carregando RDMs...
+            </div>
+          )}
+
+          {error && (
+            <div className="text-center py-8 text-red-500">
+              {error}
+            </div>
+          )}
+
+          {!loading && !error && rdms.map((rdm, index) => (
+
+            <div
+              key={rdm.id}
+              className="group relative border border-panel-border rounded-xl p-4 bg-background/60 hover:bg-hover-bg/50 transition-smooth shadow-sm hover:shadow-card animate-fade-in"
+              style={{ animationDelay: `${index * 100}ms` }}
+            >
+              {/* Priority indicator */}
+              <div className={`absolute left-0 top-4 bottom-4 w-1 rounded-r-lg transition-smooth ${rdm.tipo_rdm === 'Urgente' ? 'bg-status-escalated' :
+                rdm.tipo_rdm === 'Normal' || rdm.tipo_rdm === 'Padrão' || rdm.tipo_rdm === 'Informativa' ? 'bg-status-ongoing' :
+                  'bg-status-resolved'
+                }`} />
+
+              <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 ml-4 flex-wrap">
+                {/* Status and actions */}
+                <div className="flex items-center gap-3 lg:ml-4 justify-between lg:justify-end">
+                  <div className="flex items-center gap-2">
+                    <span className="font-mono text-sm bg-accent/30 px-2 py-1 rounded-md text-accent-foreground font-semibold">
+                      {rdm.numero_rdm}
+                    </span>
+                    <span className="text-sm text-foreground font-medium hidden md:inline break-words max-w-[250px]">
+                      {rdm.descricao_rdm_user}
+                    </span>
+                    <span className="text-sm text-muted-foreground font-medium hidden md:inline">
+                      {rdm.grupo_executor}
+                    </span>
+                    <Badge className={`${getStatusBadgeClass(rdm.status_rdm)} flex items-center gap-1.5 px-3 py-1`}>
+                      {getStatusIcon(rdm.status_rdm)}
+                      {getStatusText(rdm.status_rdm)}
+                    </Badge>
+                  </div>
+
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="hover:bg-accent/50 transition-smooth border-border ml-4"
+                    onClick={() => openModal(rdm)}
+                  >
+                    Detalhes
+                  </Button>
+                </div>
+              </div>
+            </div>
+
+          ))}
+
+          {!loading && !error && rdms.length === 0 && (
+            <div className="text-center py-12 animate-fade-in">
+              <Calendar className="h-12 w-12 text-muted-foreground mx-auto mb-4 opacity-50" />
+              <p className="text-muted-foreground text-lg font-medium">
+                Nenhuma RDM em andamento
+              </p>
+              <p className="text-muted-foreground/70 text-sm mt-1">
+                Todas as mudanças planejadas foram finalizadas
+              </p>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Modal */}
+      <Dialog open={!!selectedRDM} onOpenChange={closeModal}>
+        <DialogContent className="max-w-2xl gradient-card">
+          <DialogHeader>
+            <DialogTitle className="text-xl flex items-center gap-3">
+              <div className="p-2 rounded-lg bg-primary/10">
+                <Calendar className="h-5 w-5 text-primary" />
+              </div>
+              {selectedRDM?.numero_rdm} - {selectedRDM?.descricao_rdm_user}
+            </DialogTitle>
+          </DialogHeader>
+
+          {selectedRDM && (
+            <div className="space-y-6 py-4">
+              {/* Status and Priority */}
+              <div className="flex flex-wrap items-center gap-4">
+                <Badge className={`${getStatusBadgeClass(selectedRDM.status_rdm)} flex items-center gap-2 px-3 py-2`}>
+                  {getStatusIcon(selectedRDM.status_rdm)}
+                  {getStatusText(selectedRDM.status_rdm)}
+                </Badge>
+                <div className="flex items-center gap-2">
+                  {getPriorityIcon(selectedRDM.tipo_rdm)}
+                  <span className={`font-semibold ${getPriorityColor(selectedRDM.tipo_rdm)}`}>
+                    Prioridade {getPriorityText(selectedRDM.tipo_rdm)}
+                  </span>
+                </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => console.log("Abrir modal de adicionar RDM")}
+                  className="ml-4"
+                >
+                  Enviar no Chat
+                </Button>
+              </div>
+
+              {/* Details Grid */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div className="space-y-4">
+                  <div className="flex items-center gap-3 p-3 bg-accent/10 rounded-lg border border-accent/20">
+                    <User className="h-5 w-5 text-primary" />
+                    <div>
+                      <p className="text-sm text-muted-foreground">Responsável</p>
+                      <p className="font-semibold text-foreground">{selectedRDM.executor}</p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-3 p-3 bg-accent/10 rounded-lg border border-accent/20">
+                    <Settings className="h-5 w-5 text-primary" />
+                    <div>
+                      <p className="text-sm text-muted-foreground">Equipe</p>
+                      <p className="font-semibold text-foreground">{selectedRDM.grupo_executor}</p>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="space-y-4">
+                  <div className="flex items-center gap-3 p-3 bg-accent/10 rounded-lg border border-accent/20">
+                    <Calendar className="h-5 w-5 text-primary" />
+                    <div>
+                      <p className="text-sm text-muted-foreground">Janela de Execução</p>
+                      <p className="font-semibold text-foreground">
+                       {formatDateRange(selectedRDM.data_inicio_programacao, selectedRDM.data_fim_programacao)}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-3 p-3 bg-accent/10 rounded-lg border border-accent/20">
+                    <Clock className="h-5 w-5 text-primary" />
+                    <div>
+                      <p className="text-sm text-muted-foreground">Duração Estimada</p>
+                      <p className="font-semibold text-foreground">{selectedRDM["duração da Programação"] || 'N/A'} Horas</p>                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Description */}
+              <div className="max-w-3xl w-full max-h-[20vh] overflow-y-auto mx-auto">
+                <h4 className="font-semibold text-foreground mb-4 flex items-center gap-2 text-lg">
+                  <AlertCircle className="h-4 w-4" />
+                  Mais informações
+                </h4>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <span className="font-medium text-foreground">Ambiente:</span>
+                    <span className="text-muted-foreground ml-1">{selectedRDM.ambiente}</span>
+                  </div>
+                  <div>
+                    <span className="font-medium text-foreground">Origem:</span>
+                    <span className="text-muted-foreground ml-1">{selectedRDM.origem}</span>
+                  </div>
+                  <div>
+                    <span className="font-medium text-foreground">Impacto:</span>
+                    <span className="text-muted-foreground ml-1">{selectedRDM.impacto}</span>
+                  </div>
+                  <div>
+                    <span className="font-medium text-foreground">Risco:</span>
+                    <span className="text-muted-foreground ml-1">{selectedRDM.risco}</span>
+                  </div>
+                  <div>
+                    <span className="font-medium text-foreground">Requisitante:</span>
+                    <span className="text-muted-foreground ml-1">{selectedRDM.requisitante}</span>
+                  </div>
+                  <div>
+                    <span className="font-medium text-foreground">Área Principal:</span>
+                    <span className="text-muted-foreground ml-1">{selectedRDM.area_principal_afetada}</span>
+                  </div>
+                  <div>
+                    <span className="font-medium text-foreground">War Room Preventivo:</span>
+                    <span className="text-muted-foreground ml-1">{selectedRDM.warroom_preventivo}</span>
+                  </div>
+                  <div>
+                    <span className="font-medium text-foreground">IC</span>
+                    <span className="text-muted-foreground ml-1">{selectedRDM.ic_rdm}</span>
+                  </div>
+                </div>
+              </div>
+
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+    </>
+  );
+};
