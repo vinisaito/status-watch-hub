@@ -10,12 +10,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { SidebarProvider } from '@/components/ui/sidebar';
 import { toast } from '@/hooks/use-toast';
-import { MonitoringCards } from './MonitoringCards';
 import { ActionTable } from './ActionTable';
-import { CriticalIncidents } from './CriticalIncidents';
-import { RDMTracker } from './RDMTracker';
-import { ShiftNotes } from './ShiftNotes';
-import { WebhookConfig } from './WebhookConfig';
 import {
   Sheet,
   SheetContent
@@ -51,7 +46,7 @@ const Dashboard = () => {
       }
 
       const data = await response.json();
-      console.log("data from API:", data);
+      console.log("Raw data from API:", data);
 
       // Se a API já retorna array
       const apiData = Array.isArray(data)
@@ -64,17 +59,30 @@ const Dashboard = () => {
         throw new Error("Nenhum dado encontrado");
       }
 
-      const transformedData: AlertData[] = apiData.map((item: any, index: number) => ({
-        id: `alert-${index}`,
-        tipo_chamado: item.tipo_chamado || 'N/A',
-        chamado: item.chamado || 'N/A',
-        grupo_chamado: item.grupo_chamado || 'N/A',
-        status_chamado: item.status_chamado || 'N/A',
-        abertura_chamado: item.dat_abertura_chamado || 'N/A',
-        resumo_chamado: item.resumo_chamado || 'Título não disponível',
-        severidade_chamado: item.severidade_chamado || 'N/A',
-        acionado: false,
-      }));
+      console.log("Sample API item:", apiData[0]); // Debug: vamos ver a estrutura
+
+      const transformedData: AlertData[] = apiData.map((item: any, index: number) => {
+        // Log para debug específico da data
+        console.log("Processing date field:", {
+          dat_abertura_chamado: item.dat_abertura_chamado,
+          abertura_chamado: item.abertura_chamado,
+          data_abertura: item.data_abertura,
+          type: typeof item.dat_abertura_chamado
+        });
+
+        return {
+          id: `alert-${index}`,
+          tipo_chamado: item.tipo_chamado || 'N/A',
+          chamado: item.chamado || 'N/A',
+          grupo_chamado: item.grupo_chamado || 'N/A',
+          status_chamado: item.status_chamado || 'N/A',
+          // Melhor tratamento do campo de data - evita 'N/A' que causa invalid date
+          abertura_chamado: item.dat_abertura_chamado || item.abertura_chamado || item.data_abertura || '',
+          resumo_chamado: item.resumo_chamado || 'Título não disponível',
+          severidade_chamado: item.severidade_chamado || 'N/A',
+          acionado: false,
+        };
+      });
 
       setAlertData(transformedData);
 
@@ -93,8 +101,6 @@ const Dashboard = () => {
       setLoading(false);
     }
   };
-
-
 
   const playAlertSound = () => {
     const audio = new Audio('data:audio/wav;base64,UklGRnoGAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQoGAACBhYqFbF1fdJivrJBhNjVgodDbq2EcBj+a2/LDciUFLIHO8tiJNwgZaLvt559NEAxQp+PwtmMcBjiR1/LMeSwFJHfH8N2QQAoUXrTp66hVFApGn+Dqu2sgBDR+w/PCaWEbEBOa5rWgdyoEKAA=');
@@ -194,12 +200,11 @@ const Dashboard = () => {
         <div className="flex-1 bg-dashboard-bg">
           <div className="container mx-auto p-6 max-w-7xl">
             <div className="space-y-8">
-              {/* Cards */}
+              {/* Cards - Temporariamente removido */}
               <div className="text-center">
-                <MonitoringCards
-                  alertData={alertData}
-                  onFilterSelect={(filterKey) => setFilter(prev => prev === filterKey ? null : filterKey)}
-                />
+                <div className="bg-card rounded-lg p-4 mb-4">
+                  <p className="text-muted-foreground">Monitoring Cards - Em desenvolvimento</p>
+                </div>
               </div>
 
               {/* Table */}
@@ -274,18 +279,14 @@ const Dashboard = () => {
           style={{ width: '50vw', maxWidth: '1000px' }}
         >
           <div className="mt-4">
-            {activeSection === 'incidents' && <CriticalIncidents />}
-            {activeSection === 'rdm' && <RDMTracker />}
-            {activeSection === 'notes' && <ShiftNotes />}
+            <div className="p-4 bg-card rounded-lg">
+              <p className="text-muted-foreground">Funcionalidades em desenvolvimento</p>
+            </div>
           </div>
         </SheetContent>
       </Sheet>
 
-      {/* Webhook Config Modal */}
-      <WebhookConfig
-        open={showWebhookConfig}
-        onOpenChange={setShowWebhookConfig}
-      />
+      {/* Webhook Config - Temporariamente removido */}
     </div>
   );
 
