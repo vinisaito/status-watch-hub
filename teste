@@ -163,14 +163,14 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
   // Função para formatar o status "Acionado"
   const formatAcionadoStatus = (acionado: string) => {
     if (!acionado) return { text: '-', isOk: false };
-    
+
     const upperAcionado = acionado.toUpperCase();
     if (upperAcionado === 'OK') {
       return { text: 'ACIONADO', isOk: true };
     } else if (upperAcionado === 'NOK') {
       return { text: 'NÃO ACIONADO', isOk: false };
     }
-    
+
     return { text: acionado, isOk: false };
   };
 
@@ -369,21 +369,38 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
     setChamadoModalOpen(true);
   };
 
-  const getStatusBadgeClass = (acionado: boolean) =>
-    acionado
+  const getStatusBadgeClass = (chat: boolean) =>
+    chat
       ? 'bg-green-500/90 text-white border-green-400/50 shadow-md'
       : 'bg-red-500/90 text-white border-red-400/50 shadow-md';
 
-  const getStatusIcon = (acionado: boolean) =>
-    acionado ? <Check className="h-4 w-4" /> : <XCircle className="h-4 w-4" />;
+  const getStatusIcon = (chat: boolean) =>
+    chat ? <Check className="h-4 w-4" /> : <XCircle className="h-4 w-4" />;
 
-  const getStatusText = (acionado: boolean) => {
-    return acionado ? 'Acionado' : 'Não Acionado';
+  const getStatusText = (chat: boolean) => {
+    return chat ? 'ACIONADO VIA CHAT' : 'NÃO ACIONADO VIA CHAT';
   };
+
+
+  const getStatusBadgeClass1 = (acionado: string) =>
+    acionado === 'OK'
+      ? 'bg-green-500/90 text-white border-green-400/50 shadow-md'
+      : 'bg-red-500/90 text-white border-red-400/50 shadow-md';
+
+  const getStatusIcon1 = (acionado: string) =>
+    acionado === 'OK'
+      ? <Check className="h-4 w-4" />
+      : <XCircle className="h-4 w-4" />;
+
+  const getStatusText1 = (acionado: string) =>
+    acionado === 'OK'
+      ? 'REGISTRADO ACIONAMENTO (SDM)'
+      : 'NÃO REGISTRADO ACIONAMENTO (SDM)';
 
   const handlePageChange = (page: number) => {
     setCurrentPage(page);
   };
+
 
   return (
     <TooltipProvider>
@@ -545,8 +562,8 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
                   <TableHeader>
                     <TableRow className="border-border hover:bg-hover-bg">
                       <TableHead className="text-muted-foreground min-w-[80px]">
-                        <Button 
-                          variant="ghost" 
+                        <Button
+                          variant="ghost"
                           className="h-auto p-0 font-medium text-muted-foreground hover:text-foreground text-xs"
                           onClick={() => handleSort('chamado')}
                         >
@@ -555,8 +572,8 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
                         </Button>
                       </TableHead>
                       <TableHead className="text-muted-foreground min-w-[100px]">
-                        <Button 
-                          variant="ghost" 
+                        <Button
+                          variant="ghost"
                           className="h-auto p-0 font-medium text-muted-foreground hover:text-foreground text-xs"
                           onClick={() => handleSort('tipo_chamado')}
                         >
@@ -565,8 +582,8 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
                         </Button>
                       </TableHead>
                       <TableHead className="text-muted-foreground min-w-[90px]">
-                        <Button 
-                          variant="ghost" 
+                        <Button
+                          variant="ghost"
                           className="h-auto p-0 font-medium text-muted-foreground hover:text-foreground text-xs"
                           onClick={() => handleSort('grupo_chamado')}
                         >
@@ -575,8 +592,8 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
                         </Button>
                       </TableHead>
                       <TableHead className="text-muted-foreground min-w-[80px]">
-                        <Button 
-                          variant="ghost" 
+                        <Button
+                          variant="ghost"
                           className="h-auto p-0 font-medium text-muted-foreground hover:text-foreground text-xs"
                           onClick={() => handleSort('status_chamado')}
                         >
@@ -585,8 +602,8 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
                         </Button>
                       </TableHead>
                       <TableHead className="text-muted-foreground min-w-[100px]">
-                        <Button 
-                          variant="ghost" 
+                        <Button
+                          variant="ghost"
                           className="h-auto p-0 font-medium text-muted-foreground hover:text-foreground text-xs"
                           onClick={() => handleSort('abertura_chamado')}
                         >
@@ -595,8 +612,8 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
                         </Button>
                       </TableHead>
                       <TableHead className="text-muted-foreground min-w-[150px] max-w-[200px]">
-                        <Button 
-                          variant="ghost" 
+                        <Button
+                          variant="ghost"
                           className="h-auto p-0 font-medium text-muted-foreground hover:text-foreground text-xs"
                           onClick={() => handleSort('resumo_chamado')}
                         >
@@ -605,8 +622,8 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
                         </Button>
                       </TableHead>
                       <TableHead className="text-muted-foreground min-w-[90px]">
-                        <Button 
-                          variant="ghost" 
+                        <Button
+                          variant="ghost"
                           className="h-auto p-0 font-medium text-muted-foreground hover:text-foreground text-xs"
                           onClick={() => handleSort('severidade_chamado')}
                         >
@@ -615,8 +632,8 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
                         </Button>
                       </TableHead>
                       <TableHead className="text-muted-foreground min-w-[100px]">
-                        <Button 
-                          variant="ghost" 
+                        <Button
+                          variant="ghost"
                           className="h-auto p-0 font-medium text-muted-foreground hover:text-foreground text-xs"
                           onClick={() => handleSort('acionado')}
                         >
@@ -840,9 +857,12 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
                         {selectedIncident.tipo_chamado}
                       </Badge>
                       {selectedIncident && (
-                        <Badge className={`${formatAcionadoStatus(selectedIncident.acionado).isOk ? 'bg-green-500' : 'bg-red-500'} text-white`}>
-                          {formatAcionadoStatus(selectedIncident.acionado).text}
-                        </Badge>
+                      <Badge
+                        className={`${getStatusBadgeClass1(selectedIncident.acionado)} flex items-center gap-2 px-3 py-2`}
+                      >
+                        {getStatusIcon1(selectedIncident.acionado)}
+                        {getStatusText1(selectedIncident.acionado)}
+                      </Badge>
                       )}
                     </div>
                   )}
@@ -856,14 +876,14 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
                     <div className="flex items-center gap-3 p-3 bg-accent/10 rounded-lg border border-accent/20">
                       <Group className="h-5 w-5 text-primary" />
                       <div>
-                        <p className="text-sm text-muted-foreground">grupo_chamado</p>
+                        <p className="text-sm text-muted-foreground">Grupo</p>
                         <p className="font-semibold text-foreground">{selectedIncident.grupo_chamado}</p>
                       </div>
                     </div>
                     <div className="flex items-center gap-3 p-3 bg-accent/10 rounded-lg border border-accent/20">
                       <Calendar className="h-5 w-5 text-primary" />
                       <div>
-                        <p className="text-sm text-muted-foreground">abertura_chamado</p>
+                        <p className="text-sm text-muted-foreground">Abertura</p>
                         <p className="font-semibold text-foreground">{formatDate(selectedIncident.abertura_chamado)}</p>
                       </div>
                     </div>
