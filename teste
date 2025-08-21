@@ -1,21 +1,37 @@
-import { useState, useEffect } from 'react';
-import { Check, AlertTriangle, ExternalLink, Zap, Group, Calendar, Info, XCircle, Flame, Bell } from 'lucide-react';
+import { useState, useEffect, useMemo } from 'react';
+import { Check, AlertTriangle, ExternalLink, Zap, Group, Calendar, Info, XCircle, Flame, ChevronLeft, ChevronRight } from 'lucide-react';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { toast } from '@/hooks/use-toast';
-import { AlertData } from './Dashboard';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
-import { CrisisProcessDialog } from './CrisisProcessDialog';
 import {
   Dialog,
   DialogContent,
   DialogHeader,
   DialogTitle,
-  DialogDescription
 } from '@/components/ui/dialog';
+import {
+  Pagination,
+  PaginationContent,
+  PaginationItem,
+  PaginationLink,
+  PaginationNext,
+  PaginationPrevious,
+} from '@/components/ui/pagination';
 
+interface AlertData {
+  id: string;
+  chamado: string;
+  tipo_chamado: string;
+  grupo_chamado: string;
+  status_chamado: string;
+  abertura_chamado: string;
+  resumo_chamado: string;
+  severidade_chamado: string;
+  acionado: boolean;
+}
 
 interface ActionTableProps {
   alertData: AlertData[];
@@ -27,9 +43,84 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
   const [selectedIncident, setSelectedIncident] = useState<AlertData | null>(null);
   const [crisisDialogOpen, setCrisisDialogOpen] = useState(false);
   const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 5;
 
   // Estado que guarda os numeros chamados já acionados (string)
   const [acionadosSet, setAcionadosSet] = useState<Set<string>>(new Set());
+
+  // Função para formatar data de forma segura
+  const formatDate = (dateString: string) => {
+    if (!dateString) return '-';
+    
+    try {
+      // Tenta diferentes formatos de data
+      let date;
+      
+      // Se for timestamp (número)
+      if (!isNaN(Number(dateString))) {
+        date = new Date(Number(dateString));
+      } 
+      // Se for string de data
+      else {
+        // Remove caracteres extras e tenta parsear
+        const cleanDateString = dateString.trim();
+        date = new Date(cleanDateString);
+        
+        // Se ainda for inválida, tenta formato brasileiro (dd/mm/yyyy)
+        if (isNaN(date.getTime()) && cleanDateString.includes('/')) {
+          const [day, month, year, ...timeParts] = cleanDateString.split(/[/\s:]/);
+          if (day && month && year) {
+            const timeString = timeParts.length > 0 ? ` ${timeParts.join(':')}` : '';
+            date = new Date(`${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}${timeString}`);
+          }
+        }
+      }
+      
+      // Verifica se a data é válida
+      if (isNaN(date.getTime())) {
+        return dateString; // Retorna o valor original se não conseguir formatar
+      }
+      
+      return date.toLocaleString('pt-BR', {
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+      });
+    } catch (error) {
+      console.error('Erro ao formatar data:', error, 'Valor original:', dateString);
+      return dateString; // Retorna o valor original em caso de erro
+    }
+  };
+
+  // Dados ordenados e paginados
+  const { sortedAndPaginatedData, totalPages } = useMemo(() => {
+    // Ordena por chamado em ordem decrescente
+    const sortedData = [...alertData].sort((a, b) => {
+      const chamadoA = parseInt(a.chamado) || 0;
+      const chamadoB = parseInt(b.chamado) || 0;
+      return chamadoB - chamadoA; // Ordem decrescente
+    });
+
+    // Calcula paginação
+    const startIndex = (currentPage - 1) * itemsPerPage;
+    const endIndex = startIndex + itemsPerPage;
+    const paginatedData = sortedData.slice(startIndex, endIndex);
+    const totalPages = Math.ceil(sortedData.length / itemsPerPage);
+
+    return {
+      sortedAndPaginatedData: paginatedData,
+      totalPages
+    };
+  }, [alertData, currentPage, itemsPerPage]);
+
+  // Reset página quando dados mudam
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [alertData]);
 
   // Busca os incidentes acionados no DynamoDB via API
   useEffect(() => {
@@ -50,8 +141,6 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
     };
     fetchAcionados();
   }, []);
-
-
 
   const handleAcknowledgment = async (alert: AlertData) => {
     try {
@@ -128,6 +217,7 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
       });
     }
   };
+
   const truncateText = (text: string, maxLength: number) => {
     return text.length > maxLength ? text.substring(0, maxLength) + '...' : text;
   };
@@ -150,16 +240,22 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
     setSelectedIncident(alert);
     setChamadoModalOpen(true);
   };
+
   const getStatusBadgeClass = (acionado: boolean) =>
     acionado
       ? 'bg-green-500/90 text-white border-green-400/50 shadow-md'
       : 'bg-red-500/90 text-white border-red-400/50 shadow-md';
+
   const getStatusIcon = (acionado: boolean) =>
     acionado ? <Check className="h-4 w-4" /> : <XCircle className="h-4 w-4" />;
+
   const getStatusText = (acionado: boolean) => {
     return acionado ? 'Acionado' : 'Não Acionado';
   };
 
+  const handlePageChange = (page: number) => {
+    setCurrentPage(page);
+  };
 
   return (
     <TooltipProvider>
@@ -173,12 +269,12 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
                 <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary mb-4"></div>
                 <p>Carregando dados...</p>
               </div>
-            ) : alertData.length === 0 ? (
+            ) : sortedAndPaginatedData.length === 0 ? (
               <div className="text-center py-8 text-muted-foreground">
                 Nenhum dado disponível
               </div>
             ) : (
-              alertData.map((alert) => {
+              sortedAndPaginatedData.map((alert) => {
                 const isAcionado = acionadosSet.has(alert.chamado.toString());
                 const isExpanded = expandedRows.has(alert.id);
 
@@ -225,16 +321,7 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
 
                         {/* Linha 3 - abertura_chamado */}
                         <div className="text-xs text-muted-foreground">
-                          {alert.abertura_chamado
-                            ? new Date(alert.abertura_chamado).toLocaleString('pt-BR', {
-                              day: '2-digit',
-                              month: '2-digit',
-                              year: 'numeric',
-                              hour: '2-digit',
-                              minute: '2-digit',
-                              second: '2-digit',
-                            })
-                            : '-'}
+                          {formatDate(alert.abertura_chamado)}
                         </div>
 
                         {/* Botões */}
@@ -279,12 +366,56 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
                       </div>
                     </CardContent>
                   </Card>
-
                 );
               })
             )}
-          </div>
 
+            {/* Paginação Mobile */}
+            {!loading && sortedAndPaginatedData.length > 0 && totalPages > 1 && (
+              <div className="flex justify-center mt-6">
+                <Pagination>
+                  <PaginationContent>
+                    <PaginationItem>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => handlePageChange(currentPage - 1)}
+                        disabled={currentPage === 1}
+                      >
+                        <ChevronLeft className="h-4 w-4" />
+                      </Button>
+                    </PaginationItem>
+                    
+                    {[...Array(totalPages)].map((_, index) => {
+                      const page = index + 1;
+                      return (
+                        <PaginationItem key={page}>
+                          <PaginationLink
+                            onClick={() => handlePageChange(page)}
+                            isActive={currentPage === page}
+                            className="cursor-pointer"
+                          >
+                            {page}
+                          </PaginationLink>
+                        </PaginationItem>
+                      );
+                    })}
+                    
+                    <PaginationItem>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => handlePageChange(currentPage + 1)}
+                        disabled={currentPage === totalPages}
+                      >
+                        <ChevronRight className="h-4 w-4" />
+                      </Button>
+                    </PaginationItem>
+                  </PaginationContent>
+                </Pagination>
+              </div>
+            )}
+          </div>
 
           {/* Layout para Desktop (oculto em mobile) */}
           <div className="hidden lg:block">
@@ -309,14 +440,14 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
                         Carregando dados...
                       </TableCell>
                     </TableRow>
-                  ) : alertData.length === 0 ? (
+                  ) : sortedAndPaginatedData.length === 0 ? (
                     <TableRow>
                       <TableCell colSpan={8} className="text-center py-8 text-muted-foreground">
                         Nenhum dado disponível
                       </TableCell>
                     </TableRow>
                   ) : (
-                    alertData.map((alert) => {
+                    sortedAndPaginatedData.map((alert) => {
                       const isAcionado = acionadosSet.has(alert.chamado.toString());
                       return (
                         <TableRow
@@ -348,16 +479,7 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
                           <TableCell>{alert.grupo_chamado}</TableCell>
                           <TableCell>{alert.status_chamado}</TableCell>
                           <TableCell className="text-sm">
-                            {alert.abertura_chamado
-                              ? new Date(alert.abertura_chamado).toLocaleString('pt-BR', {
-                                day: '2-digit',
-                                month: '2-digit',
-                                year: 'numeric',
-                                hour: '2-digit',
-                                minute: '2-digit',
-                                second: '2-digit'
-                              })
-                              : '-'}
+                            {formatDate(alert.abertura_chamado)}
                           </TableCell>
                           <TableCell>
                             <div className="flex items-center gap-2">
@@ -414,13 +536,48 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
                 </TableBody>
               </Table>
             </div>
+
+            {/* Paginação Desktop */}
+            {!loading && sortedAndPaginatedData.length > 0 && totalPages > 1 && (
+              <div className="flex justify-center mt-6">
+                <Pagination>
+                  <PaginationContent>
+                    <PaginationItem>
+                      <PaginationPrevious
+                        onClick={() => handlePageChange(currentPage - 1)}
+                        className={currentPage === 1 ? 'pointer-events-none opacity-50' : 'cursor-pointer'}
+                      />
+                    </PaginationItem>
+                    
+                    {[...Array(totalPages)].map((_, index) => {
+                      const page = index + 1;
+                      return (
+                        <PaginationItem key={page}>
+                          <PaginationLink
+                            onClick={() => handlePageChange(page)}
+                            isActive={currentPage === page}
+                            className="cursor-pointer"
+                          >
+                            {page}
+                          </PaginationLink>
+                        </PaginationItem>
+                      );
+                    })}
+                    
+                    <PaginationItem>
+                      <PaginationNext
+                        onClick={() => handlePageChange(currentPage + 1)}
+                        className={currentPage === totalPages ? 'pointer-events-none opacity-50' : 'cursor-pointer'}
+                      />
+                    </PaginationItem>
+                  </PaginationContent>
+                </Pagination>
+              </div>
+            )}
           </div>
 
-          <CrisisProcessDialog
-            open={crisisDialogOpen}
-            onOpenChange={setCrisisDialogOpen}
-            incident={selectedIncident}
-          />
+          {/* CrisisProcessDialog será adicionado conforme necessário */}
+          
           <Dialog open={chamadoModalOpen} onOpenChange={setChamadoModalOpen}>
             <DialogContent className="max-w-2xl gradient-card">
               <DialogHeader>
@@ -480,7 +637,7 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
                       <Calendar className="h-5 w-5 text-primary" />
                       <div>
                         <p className="text-sm text-muted-foreground">abertura_chamado</p>
-                        <p className="font-semibold text-foreground">{selectedIncident.abertura_chamado}</p>
+                        <p className="font-semibold text-foreground">{formatDate(selectedIncident.abertura_chamado)}</p>
                       </div>
                     </div>
                   </div>
@@ -509,6 +666,5 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
         </CardContent>
       </Card>
     </TooltipProvider>
-
   );
 };
