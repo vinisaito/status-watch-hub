@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from 'react';
-import { Check, AlertTriangle, ExternalLink, Zap, Group, Calendar, Info, XCircle, Flame, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Check, AlertTriangle, ExternalLink, Zap, Group, Calendar, Info, XCircle, Flame, ChevronLeft, ChevronRight, ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-react';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
@@ -30,7 +30,7 @@ interface AlertData {
   abertura_chamado: string;
   resumo_chamado: string;
   severidade_chamado: string;
-  acionado:string;
+  acionado: string;
   chat: boolean;
 }
 
@@ -40,6 +40,9 @@ interface ActionTableProps {
   loading: boolean;
 }
 
+type SortField = 'chamado' | 'tipo_chamado' | 'grupo_chamado' | 'status_chamado' | 'abertura_chamado' | 'resumo_chamado' | 'severidade_chamado' | 'acionado';
+type SortDirection = 'asc' | 'desc' | null;
+
 export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: ActionTableProps) => {
   const [selectedIncident, setSelectedIncident] = useState<AlertData | null>(null);
   const [crisisDialogOpen, setCrisisDialogOpen] = useState(false);
@@ -47,8 +50,45 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 5;
 
+  // Estados para ordenação
+  const [sortField, setSortField] = useState<SortField>('chamado');
+  const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
+
   // Estado que guarda os numeros chamados já acionados (string)
   const [acionadosSet, setAcionadosSet] = useState<Set<string>>(new Set());
+
+  // Função para lidar com clique no cabeçalho da coluna
+  const handleSort = (field: SortField) => {
+    if (sortField === field) {
+      // Se já está ordenando por este campo, alterna a direção
+      if (sortDirection === 'asc') {
+        setSortDirection('desc');
+      } else if (sortDirection === 'desc') {
+        setSortDirection(null);
+        setSortField('chamado'); // volta para o padrão
+      } else {
+        setSortDirection('asc');
+      }
+    } else {
+      // Se é um campo diferente, começa com ascendente
+      setSortField(field);
+      setSortDirection('asc');
+    }
+  };
+
+  // Função para obter o ícone de ordenação
+  const getSortIcon = (field: SortField) => {
+    if (sortField !== field) {
+      return <ArrowUpDown className="h-4 w-4 ml-1 opacity-50" />;
+    }
+    if (sortDirection === 'asc') {
+      return <ArrowUp className="h-4 w-4 ml-1" />;
+    }
+    if (sortDirection === 'desc') {
+      return <ArrowDown className="h-4 w-4 ml-1" />;
+    }
+    return <ArrowUpDown className="h-4 w-4 ml-1 opacity-50" />;
+  };
 
   // Função para formatar data de forma segura
   const formatDate = (dateString: string) => {
@@ -120,14 +160,59 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
     }
   };
 
+  // Função para formatar o status "Acionado"
+  const formatAcionadoStatus = (acionado: string) => {
+    if (!acionado) return { text: '-', isOk: false };
+    
+    const upperAcionado = acionado.toUpperCase();
+    if (upperAcionado === 'OK') {
+      return { text: 'ACIONADO', isOk: true };
+    } else if (upperAcionado === 'NOK') {
+      return { text: 'NÃO ACIONADO', isOk: false };
+    }
+    
+    return { text: acionado, isOk: false };
+  };
+
   // Dados ordenados e paginados
   const { sortedAndPaginatedData, totalPages } = useMemo(() => {
-    // Ordena por chamado em ordem decrescente
-    const sortedData = [...alertData].sort((a, b) => {
-      const chamadoA = parseInt(a.chamado) || 0;
-      const chamadoB = parseInt(b.chamado) || 0;
-      return chamadoB - chamadoA; // Ordem decrescente
-    });
+    let sortedData = [...alertData];
+
+    // Aplica ordenação se houver campo e direção definidos
+    if (sortField && sortDirection) {
+      sortedData.sort((a, b) => {
+        let aValue: any = a[sortField];
+        let bValue: any = b[sortField];
+
+        // Tratamento especial para diferentes tipos de dados
+        if (sortField === 'chamado') {
+          aValue = parseInt(a.chamado) || 0;
+          bValue = parseInt(b.chamado) || 0;
+        } else if (sortField === 'abertura_chamado') {
+          aValue = new Date(a.abertura_chamado).getTime() || 0;
+          bValue = new Date(b.abertura_chamado).getTime() || 0;
+        } else {
+          // Para strings, converte para minúsculo para ordenação case-insensitive
+          aValue = String(aValue).toLowerCase();
+          bValue = String(bValue).toLowerCase();
+        }
+
+        if (aValue < bValue) {
+          return sortDirection === 'asc' ? -1 : 1;
+        }
+        if (aValue > bValue) {
+          return sortDirection === 'asc' ? 1 : -1;
+        }
+        return 0;
+      });
+    } else {
+      // Ordenação padrão por chamado decrescente
+      sortedData.sort((a, b) => {
+        const chamadoA = parseInt(a.chamado) || 0;
+        const chamadoB = parseInt(b.chamado) || 0;
+        return chamadoB - chamadoA;
+      });
+    }
 
     // Calcula paginação
     const startIndex = (currentPage - 1) * itemsPerPage;
@@ -139,7 +224,7 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
       sortedAndPaginatedData: paginatedData,
       totalPages
     };
-  }, [alertData, currentPage, itemsPerPage]);
+  }, [alertData, currentPage, itemsPerPage, sortField, sortDirection]);
 
   // Reset página quando dados mudam
   useEffect(() => {
@@ -320,6 +405,7 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
               sortedAndPaginatedData.map((alert) => {
                 const isChat = acionadosSet.has(alert.chamado.toString());
                 const isExpanded = expandedRows.has(alert.id);
+                const acionadoStatus = formatAcionadoStatus(alert.acionado);
 
                 return (
                   <Card key={alert.id} className="bg-secondary border-border">
@@ -365,6 +451,14 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
                         {/* Linha 3 - abertura_chamado */}
                         <div className="text-xs text-muted-foreground">
                           {formatDate(alert.abertura_chamado)}
+                        </div>
+
+                        {/* Status Acionado Mobile */}
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs text-muted-foreground">Status:</span>
+                          <span className={`text-xs font-medium ${acionadoStatus.isOk ? 'text-green-600' : 'text-red-600'}`}>
+                            {acionadoStatus.text}
+                          </span>
                         </div>
 
                         {/* Botões */}
@@ -449,33 +543,106 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
               <Table>
                 <TableHeader>
                   <TableRow className="border-border hover:bg-hover-bg">
-                    <TableHead className="text-muted-foreground w-[100px]">Chamado</TableHead>
-                    <TableHead className="text-muted-foreground w-[150px]">Classificação</TableHead>
-                    <TableHead className="text-muted-foreground w-[120px]">Grupo</TableHead>
-                    <TableHead className="text-muted-foreground w-[100px]">Status</TableHead>
-                    <TableHead className="text-muted-foreground w-[120px]">Abertura</TableHead>
-                    <TableHead className="text-muted-foreground min-w-[200px]">Título</TableHead>
-                    <TableHead className="text-muted-foreground w-[120px]">Severidade</TableHead>
-                    <TableHead className="text-muted-foreground w-[120px]">Acionado</TableHead>
+                    <TableHead className="text-muted-foreground w-[100px]">
+                      <Button 
+                        variant="ghost" 
+                        className="h-auto p-0 font-medium text-muted-foreground hover:text-foreground"
+                        onClick={() => handleSort('chamado')}
+                      >
+                        Chamado
+                        {getSortIcon('chamado')}
+                      </Button>
+                    </TableHead>
+                    <TableHead className="text-muted-foreground w-[150px]">
+                      <Button 
+                        variant="ghost" 
+                        className="h-auto p-0 font-medium text-muted-foreground hover:text-foreground"
+                        onClick={() => handleSort('tipo_chamado')}
+                      >
+                        Classificação
+                        {getSortIcon('tipo_chamado')}
+                      </Button>
+                    </TableHead>
+                    <TableHead className="text-muted-foreground w-[120px]">
+                      <Button 
+                        variant="ghost" 
+                        className="h-auto p-0 font-medium text-muted-foreground hover:text-foreground"
+                        onClick={() => handleSort('grupo_chamado')}
+                      >
+                        Grupo
+                        {getSortIcon('grupo_chamado')}
+                      </Button>
+                    </TableHead>
+                    <TableHead className="text-muted-foreground w-[100px]">
+                      <Button 
+                        variant="ghost" 
+                        className="h-auto p-0 font-medium text-muted-foreground hover:text-foreground"
+                        onClick={() => handleSort('status_chamado')}
+                      >
+                        Status
+                        {getSortIcon('status_chamado')}
+                      </Button>
+                    </TableHead>
+                    <TableHead className="text-muted-foreground w-[120px]">
+                      <Button 
+                        variant="ghost" 
+                        className="h-auto p-0 font-medium text-muted-foreground hover:text-foreground"
+                        onClick={() => handleSort('abertura_chamado')}
+                      >
+                        Abertura
+                        {getSortIcon('abertura_chamado')}
+                      </Button>
+                    </TableHead>
+                    <TableHead className="text-muted-foreground min-w-[200px]">
+                      <Button 
+                        variant="ghost" 
+                        className="h-auto p-0 font-medium text-muted-foreground hover:text-foreground"
+                        onClick={() => handleSort('resumo_chamado')}
+                      >
+                        Título
+                        {getSortIcon('resumo_chamado')}
+                      </Button>
+                    </TableHead>
+                    <TableHead className="text-muted-foreground w-[120px]">
+                      <Button 
+                        variant="ghost" 
+                        className="h-auto p-0 font-medium text-muted-foreground hover:text-foreground"
+                        onClick={() => handleSort('severidade_chamado')}
+                      >
+                        Severidade
+                        {getSortIcon('severidade_chamado')}
+                      </Button>
+                    </TableHead>
+                    <TableHead className="text-muted-foreground w-[120px]">
+                      <Button 
+                        variant="ghost" 
+                        className="h-auto p-0 font-medium text-muted-foreground hover:text-foreground"
+                        onClick={() => handleSort('acionado')}
+                      >
+                        Acionado
+                        {getSortIcon('acionado')}
+                      </Button>
+                    </TableHead>
                     <TableHead className="text-muted-foreground w-[100px]">Chat</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {loading ? (
                     <TableRow>
-                      <TableCell colSpan={8} className="text-center py-8">
+                      <TableCell colSpan={9} className="text-center py-8">
                         Carregando dados...
                       </TableCell>
                     </TableRow>
                   ) : sortedAndPaginatedData.length === 0 ? (
                     <TableRow>
-                      <TableCell colSpan={8} className="text-center py-8 text-muted-foreground">
+                      <TableCell colSpan={9} className="text-center py-8 text-muted-foreground">
                         Nenhum dado disponível
                       </TableCell>
                     </TableRow>
                   ) : (
                     sortedAndPaginatedData.map((alert) => {
                       const isChat = acionadosSet.has(alert.chamado.toString());
+                      const acionadoStatus = formatAcionadoStatus(alert.acionado);
                       return (
                         <TableRow
                           key={alert.id}
@@ -539,7 +706,9 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
                             </Badge>
                           </TableCell>
                           <TableCell>
-                            <p className="max-w-md">{alert.acionado}</p>
+                            <span className={`font-medium ${acionadoStatus.isOk ? 'text-green-600' : 'text-red-600'}`}>
+                              {acionadoStatus.text}
+                            </span>
                           </TableCell>
                           <TableCell>
                             <Button
@@ -668,6 +837,11 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
                         className="flex items-center gap-2 px-3 py-2">
                         {selectedIncident.tipo_chamado}
                       </Badge>
+                      {selectedIncident && (
+                        <Badge className={`${formatAcionadoStatus(selectedIncident.acionado).isOk ? 'bg-green-500' : 'bg-red-500'} text-white`}>
+                          {formatAcionadoStatus(selectedIncident.acionado).text}
+                        </Badge>
+                      )}
                     </div>
                   )}
                 </DialogTitle>
