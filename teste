@@ -66,6 +66,9 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
   // Estado que guarda os numeros chamados já acionados (string)
   const [acionadosSet, setAcionadosSet] = useState<Set<string>>(new Set());
 
+  // Estado para controlar o status de escalação de cada chamado
+  const [escalationStatus, setEscalationStatus] = useState<Record<string, string>>({});
+
   // Estados para escalação
   const [escalationStates, setEscalationStates] = useState<Record<string, EscalationState>>({});
 
@@ -98,7 +101,7 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
                   variant: "destructive",
                 });
               } else if (state.currentLevel < 4) {
-                // Acabou o tempo da escalação atual
+                // Acabou o tempo da escalação atual, mantém no status de escalação para mostrar botão
                 toast({
                   title: "Tempo de escalação esgotado",
                   description: `Escalação ${state.currentLevel} do chamado ${alertId} finalizada`,
@@ -681,7 +684,7 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
 
       case 'escalating':
         const levelNames = { 1: '1ª', 2: '2ª', 3: '3ª', 4: '4ª' };
-        const [escalationStatus, setEscalationStatus] = useState<string>('');
+        const currentEscalationStatus = escalationStatus[alert.chamado] || '';
         
         return (
           <div className="space-y-2">
@@ -718,9 +721,12 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
                 ) : (
                   <div className="space-y-2">
                     <Select
-                      value={escalationStatus}
+                      value={currentEscalationStatus}
                       onValueChange={(value) => {
-                        setEscalationStatus(value);
+                        setEscalationStatus(prev => ({
+                          ...prev,
+                          [alert.chamado]: value
+                        }));
                         const attended = value === 'attended';
                         markAsAttended(alert.chamado, attended, state.observations);
                       }}
@@ -735,12 +741,15 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
                     </Select>
 
                     {/* Botão OK para avançar quando "Não Atendida" é selecionado */}
-                    {escalationStatus === 'not-attended' && state.currentLevel < 4 && (
+                    {currentEscalationStatus === 'not-attended' && state.currentLevel < 4 && (
                       <Button
                         size="sm"
                         variant="default"
                         onClick={() => {
-                          setEscalationStatus('');
+                          setEscalationStatus(prev => ({
+                            ...prev,
+                            [alert.chamado]: ''
+                          }));
                           advanceToNextEscalation(alert.chamado);
                         }}
                         className="h-6 px-2 text-xs w-full"
