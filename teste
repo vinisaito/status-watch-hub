@@ -1,5 +1,5 @@
-import { useState, useEffect, useMemo, useCallback } from 'react';
-import { Check, AlertTriangle, ExternalLink, Zap, Group, Calendar, Info, XCircle, Flame, ChevronLeft, ChevronRight, ArrowUpDown, ArrowUp, ArrowDown, Clock, StopCircle, Play } from 'lucide-react';
+import { useState, useEffect, useMemo } from 'react';
+import { Check, AlertTriangle, ExternalLink, Zap, Group, Calendar, Info, XCircle, Flame, ChevronLeft, ChevronRight, ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-react';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
@@ -20,14 +20,6 @@ import {
   PaginationNext,
   PaginationPrevious,
 } from '@/components/ui/pagination';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
-import { Textarea } from '@/components/ui/textarea';
 
 interface AlertData {
   id: string;
@@ -48,79 +40,8 @@ interface ActionTableProps {
   loading: boolean;
 }
 
-interface TimerState {
-  startTime: Date;
-  isRunning: boolean;
-  confirmed: boolean;
-  escalated: boolean;
-}
-
-interface EscalationState {
-  status: string;
-  observation: string;
-  completed: boolean;
-  level: number;
-}
-
 type SortField = 'chamado' | 'tipo_chamado' | 'grupo_chamado' | 'status_chamado' | 'abertura_chamado' | 'resumo_chamado' | 'severidade_chamado' | 'acionado';
 type SortDirection = 'asc' | 'desc' | null;
-
-// Componente do cronômetro
-const Timer = ({ 
-  startTime, 
-  duration, 
-  isRunning, 
-  onTimeout, 
-  alertId 
-}: { 
-  startTime: Date; 
-  duration: number; 
-  isRunning: boolean; 
-  onTimeout: () => void;
-  alertId: string;
-}) => {
-  const [timeLeft, setTimeLeft] = useState(0);
-
-  useEffect(() => {
-    if (!isRunning) return;
-
-    const interval = setInterval(() => {
-      const now = new Date();
-      const elapsed = now.getTime() - startTime.getTime();
-      const remaining = duration - elapsed;
-
-      if (remaining <= 0) {
-        setTimeLeft(0);
-        onTimeout();
-        clearInterval(interval);
-      } else {
-        setTimeLeft(remaining);
-      }
-    }, 1000);
-
-    return () => clearInterval(interval);
-  }, [startTime, duration, isRunning, onTimeout]);
-
-  const formatTime = (ms: number) => {
-    const totalSeconds = Math.floor(ms / 1000);
-    const minutes = Math.floor(totalSeconds / 60);
-    const seconds = totalSeconds % 60;
-    return `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
-  };
-
-  if (!isRunning) {
-    return <span className="text-muted-foreground text-xs">Pausado</span>;
-  }
-
-  return (
-    <div className="flex items-center gap-1">
-      <Clock className="h-3 w-3 text-orange-500" />
-      <span className={`text-xs font-mono ${timeLeft < 300000 ? 'text-red-500 animate-pulse' : 'text-orange-500'}`}>
-        {formatTime(timeLeft)}
-      </span>
-    </div>
-  );
-};
 
 export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: ActionTableProps) => {
   const [selectedIncident, setSelectedIncident] = useState<AlertData | null>(null);
@@ -135,11 +56,6 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
 
   // Estado que guarda os numeros chamados já acionados (string)
   const [acionadosSet, setAcionadosSet] = useState<Set<string>>(new Set());
-
-  // Estados para cronômetros e escalação
-  const [confirmationTimers, setConfirmationTimers] = useState<Map<string, TimerState>>(new Map());
-  const [escalationTimers, setEscalationTimers] = useState<Map<string, Map<number, TimerState>>>(new Map());
-  const [escalationStates, setEscalationStates] = useState<Map<string, Map<number, EscalationState>>>(new Map());
 
   // Função para lidar com clique no cabeçalho da coluna
   const handleSort = (field: SortField) => {
@@ -256,215 +172,6 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
     }
 
     return { text: acionado, isOk: false };
-  };
-
-  // Função para iniciar cronômetro de confirmação (20 minutos)
-  const startConfirmationTimer = useCallback((chamado: string) => {
-    const newTimer: TimerState = {
-      startTime: new Date(),
-      isRunning: true,
-      confirmed: false,
-      escalated: false
-    };
-    
-    setConfirmationTimers(prev => new Map(prev.set(chamado, newTimer)));
-  }, []);
-
-  // Função para iniciar cronômetro de escalação (10 minutos)
-  const startEscalationTimer = useCallback((chamado: string, level: number = 1) => {
-    const newTimer: TimerState = {
-      startTime: new Date(),
-      isRunning: true,
-      confirmed: false,
-      escalated: false
-    };
-    
-    setEscalationTimers(prev => {
-      const newMap = new Map(prev);
-      const chamadoTimers = newMap.get(chamado) || new Map();
-      chamadoTimers.set(level, newTimer);
-      newMap.set(chamado, chamadoTimers);
-      return newMap;
-    });
-
-    // Inicializa o estado da escalação
-    setEscalationStates(prev => {
-      const newMap = new Map(prev);
-      const chamadoStates = newMap.get(chamado) || new Map();
-      if (!chamadoStates.has(level)) {
-        chamadoStates.set(level, { status: '', observation: '', completed: false, level });
-        newMap.set(chamado, chamadoStates);
-      }
-      return newMap;
-    });
-  }, []);
-
-  // Função chamada quando cronômetro de confirmação expira
-  const onConfirmationTimeout = useCallback((chamado: string) => {
-    toast({
-      title: "Tempo de confirmação expirado",
-      description: `Iniciando processo de escalação para o chamado ${chamado}`,
-      variant: "destructive",
-    });
-    
-    // Para o cronômetro de confirmação
-    setConfirmationTimers(prev => {
-      const newMap = new Map(prev);
-      const timer = newMap.get(chamado);
-      if (timer) {
-        newMap.set(chamado, { ...timer, isRunning: false, escalated: true });
-      }
-      return newMap;
-    });
-
-    // Inicia cronômetro de escalação nível 1
-    startEscalationTimer(chamado, 1);
-  }, [startEscalationTimer]);
-
-  // Função chamada quando cronômetro de escalação expira
-  const onEscalationTimeout = useCallback((chamado: string, level: number) => {
-    if (level < 4) {
-      toast({
-        title: `${level}ª Escalação expirada`,
-        description: `Iniciando ${level + 1}ª escalação para o chamado ${chamado}`,
-        variant: "destructive",
-      });
-      
-      // Para o cronômetro atual
-      setEscalationTimers(prev => {
-        const newMap = new Map(prev);
-        const chamadoTimers = newMap.get(chamado);
-        if (chamadoTimers) {
-          const timer = chamadoTimers.get(level);
-          if (timer) {
-            chamadoTimers.set(level, { ...timer, isRunning: false, escalated: true });
-          }
-        }
-        return newMap;
-      });
-
-      // Inicia próximo nível
-      startEscalationTimer(chamado, level + 1);
-    } else {
-      toast({
-        title: "4ª Escalação expirada",
-        description: `Processo de escalação finalizado para o chamado ${chamado}`,
-        variant: "destructive",
-      });
-      
-      setEscalationTimers(prev => {
-        const newMap = new Map(prev);
-        const chamadoTimers = newMap.get(chamado);
-        if (chamadoTimers) {
-          const timer = chamadoTimers.get(level);
-          if (timer) {
-            chamadoTimers.set(level, { ...timer, isRunning: false });
-          }
-        }
-        return newMap;
-      });
-    }
-  }, [startEscalationTimer]);
-
-  // Função para confirmar recebimento (para o cronômetro)
-  const handleConfirmReceived = (chamado: string) => {
-    setConfirmationTimers(prev => {
-      const newMap = new Map(prev);
-      const timer = newMap.get(chamado);
-      if (timer) {
-        newMap.set(chamado, { ...timer, isRunning: false, confirmed: true });
-      }
-      return newMap;
-    });
-
-    toast({
-      title: "Confirmação recebida",
-      description: `Cronômetro parado para o chamado ${chamado}`,
-    });
-  };
-
-  // Função para atualizar status da escalação
-  const handleEscalationStatusChange = (chamado: string, level: number, status: string) => {
-    setEscalationStates(prev => {
-      const newMap = new Map(prev);
-      const chamadoStates = newMap.get(chamado) || new Map();
-      const current = chamadoStates.get(level) || { status: '', observation: '', completed: false, level };
-      chamadoStates.set(level, { ...current, status });
-      newMap.set(chamado, chamadoStates);
-      return newMap;
-    });
-  };
-
-  // Função para atualizar observação da escalação
-  const handleEscalationObservationChange = (chamado: string, level: number, observation: string) => {
-    setEscalationStates(prev => {
-      const newMap = new Map(prev);
-      const chamadoStates = newMap.get(chamado) || new Map();
-      const current = chamadoStates.get(level) || { status: '', observation: '', completed: false, level };
-      chamadoStates.set(level, { ...current, observation });
-      newMap.set(chamado, chamadoStates);
-      return newMap;
-    });
-  };
-
-  // Função para finalizar escalação
-  const handleFinishEscalation = (chamado: string, level: number) => {
-    const chamadoStates = escalationStates.get(chamado);
-    const escalationState = chamadoStates?.get(level);
-    
-    if (!escalationState?.status) {
-      toast({
-        title: "Erro",
-        description: "Selecione o status da escalação antes de finalizar",
-        variant: "destructive",
-      });
-      return;
-    }
-
-    // Para todos os cronômetros de escalação se status for "acionado"
-    if (escalationState.status === 'acionado') {
-      setEscalationTimers(prev => {
-        const newMap = new Map(prev);
-        const chamadoTimers = newMap.get(chamado);
-        if (chamadoTimers) {
-          for (let i = 1; i <= 4; i++) {
-            const timer = chamadoTimers.get(i);
-            if (timer) {
-              chamadoTimers.set(i, { ...timer, isRunning: false });
-            }
-          }
-        }
-        return newMap;
-      });
-    } else {
-      // Para apenas o cronômetro atual
-      setEscalationTimers(prev => {
-        const newMap = new Map(prev);
-        const chamadoTimers = newMap.get(chamado);
-        if (chamadoTimers) {
-          const timer = chamadoTimers.get(level);
-          if (timer) {
-            chamadoTimers.set(level, { ...timer, isRunning: false });
-          }
-        }
-        return newMap;
-      });
-    }
-
-    // Marca escalação como completa
-    setEscalationStates(prev => {
-      const newMap = new Map(prev);
-      const chamadoStates = newMap.get(chamado) || new Map();
-      const current = chamadoStates.get(level) || { status: '', observation: '', completed: false, level };
-      chamadoStates.set(level, { ...current, completed: true });
-      newMap.set(chamado, chamadoStates);
-      return newMap;
-    });
-
-    toast({
-      title: `${level}ª Escalação finalizada`,
-      description: `${level}ª escalação concluída para o chamado ${chamado}`,
-    });
   };
 
   // Dados ordenados e paginados
@@ -765,9 +472,6 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
                 const isChat = acionadosSet.has(alert.chamado.toString());
                 const isExpanded = expandedRows.has(alert.id);
                 const acionadoStatus = formatAcionadoStatus(alert.acionado);
-                const confirmationTimer = confirmationTimers.get(alert.chamado);
-                const escalationTimersForChamado = escalationTimers.get(alert.chamado);
-                const escalationStatesForChamado = escalationStates.get(alert.chamado);
 
                 return (
                   <Card key={alert.id} className="bg-secondary border-border w-full">
@@ -823,111 +527,6 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
                           </span>
                         </div>
 
-                        {/* Confirmação Mobile */}
-                        {isChat && confirmationTimer && !confirmationTimer.confirmed && !confirmationTimer.escalated && (
-                          <div className="bg-orange-50 border border-orange-200 rounded-lg p-3 space-y-2">
-                            <div className="flex items-center justify-between mb-2">
-                              <span className="text-xs font-medium text-orange-800">Aguardando confirmação:</span>
-                              <Timer 
-                                startTime={confirmationTimer.startTime}
-                                duration={20 * 60 * 1000} // 20 minutos
-                                isRunning={confirmationTimer.isRunning}
-                                onTimeout={() => onConfirmationTimeout(alert.chamado)}
-                                alertId={alert.chamado}
-                              />
-                            </div>
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={() => handleConfirmReceived(alert.chamado)}
-                              className="w-full h-7 text-xs"
-                            >
-                              Confirmar Recebimento
-                            </Button>
-                          </div>
-                        )}
-
-                        {/* Escalações Mobile */}
-                        {[1, 2, 3, 4].map(level => {
-                          const timer = escalationTimersForChamado?.get(level);
-                          const state = escalationStatesForChamado?.get(level);
-                          const shouldShow = timer || (level === 1 && confirmationTimer?.escalated);
-
-                          if (!shouldShow) return null;
-
-                          return (
-                            <div key={level} className="bg-red-50 border border-red-200 rounded-lg p-3 space-y-2">
-                              <div className="flex items-center justify-between mb-2">
-                                <span className="text-xs font-medium text-red-800">{level}ª Escalação:</span>
-                                {timer && timer.isRunning && (
-                                  <Timer 
-                                    startTime={timer.startTime}
-                                    duration={10 * 60 * 1000} // 10 minutos
-                                    isRunning={timer.isRunning}
-                                    onTimeout={() => onEscalationTimeout(alert.chamado, level)}
-                                    alertId={alert.chamado}
-                                  />
-                                )}
-                              </div>
-                              
-                              {state?.completed ? (
-                                <div className="space-y-1">
-                                  <span className={`text-xs font-medium ${state.status === 'acionado' ? 'text-green-600' : 'text-red-600'}`}>
-                                    {state.status === 'acionado' ? 'Acionado' : 'Não Acionado'}
-                                  </span>
-                                  {state.observation && (
-                                    <p className="text-xs text-muted-foreground">
-                                      {state.observation}
-                                    </p>
-                                  )}
-                                </div>
-                              ) : timer ? (
-                                <div className="space-y-2">
-                                  <Select
-                                    value={state?.status || ''}
-                                    onValueChange={(value) => handleEscalationStatusChange(alert.chamado, level, value)}
-                                  >
-                                    <SelectTrigger className="h-8 text-xs">
-                                      <SelectValue placeholder="Status" />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                      <SelectItem value="acionado">Acionado</SelectItem>
-                                      <SelectItem value="nao_acionado">Não Acionado</SelectItem>
-                                    </SelectContent>
-                                  </Select>
-                                  
-                                  <Textarea
-                                    placeholder="Observação..."
-                                    value={state?.observation || ''}
-                                    onChange={(e) => handleEscalationObservationChange(alert.chamado, level, e.target.value)}
-                                    className="text-xs min-h-[60px]"
-                                  />
-                                  
-                                  <Button
-                                    variant="outline"
-                                    size="sm"
-                                    onClick={() => handleFinishEscalation(alert.chamado, level)}
-                                    className="w-full h-7 text-xs"
-                                  >
-                                    <StopCircle className="h-3 w-3 mr-1" />
-                                    Finalizar
-                                  </Button>
-                                </div>
-                              ) : level === 1 && confirmationTimer?.escalated ? (
-                                <Button
-                                  variant="outline"
-                                  size="sm"
-                                  onClick={() => startEscalationTimer(alert.chamado, 1)}
-                                  className="w-full h-7 text-xs"
-                                >
-                                  <Play className="h-3 w-3 mr-1" />
-                                  Iniciar Escalação
-                                </Button>
-                              ) : null}
-                            </div>
-                          );
-                        })}
-
                         {/* Botões */}
                         <div className="flex items-center justify-between pt-3 gap-2">
                           <div className="flex items-center gap-2">
@@ -947,12 +546,7 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
                           <Button
                             variant={isChat ? 'default' : 'outline'}
                             size="sm"
-                            onClick={() => {
-                              if (!isChat) {
-                                handleAcknowledgment(alert);
-                                startConfirmationTimer(alert.chamado);
-                              }
-                            }}
+                            onClick={() => !isChat && handleAcknowledgment(alert)}
                             disabled={isChat}
                             className={`h-7 px-2 sm:px-3 text-xs flex-shrink-0 ${isChat
                               ? 'bg-success text-white hover:bg-success/90'
@@ -1012,7 +606,7 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
           {/* Layout para Desktop (oculto em mobile) */}
           <div className="hidden lg:block">
             <div className="w-full overflow-x-auto">
-              <div className="min-w-[1200px]">
+              <div className="min-w-[800px]">
                 <Table>
                   <TableHeader>
                     <TableRow className="border-border hover:bg-hover-bg">
@@ -1097,23 +691,18 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
                         </Button>
                       </TableHead>
                       <TableHead className="text-muted-foreground min-w-[70px]">Chat</TableHead>
-                      <TableHead className="text-muted-foreground min-w-[120px]">Confirmação</TableHead>
-                      <TableHead className="text-muted-foreground min-w-[120px]">1ª Escalação</TableHead>
-                      <TableHead className="text-muted-foreground min-w-[120px]">2ª Escalação</TableHead>
-                      <TableHead className="text-muted-foreground min-w-[120px]">3ª Escalação</TableHead>
-                      <TableHead className="text-muted-foreground min-w-[120px]">4ª Escalação</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {loading ? (
                       <TableRow>
-                        <TableCell colSpan={14} className="text-center py-8">
+                        <TableCell colSpan={9} className="text-center py-8">
                           Carregando dados...
                         </TableCell>
                       </TableRow>
                     ) : sortedAndPaginatedData.length === 0 ? (
                       <TableRow>
-                        <TableCell colSpan={14} className="text-center py-8 text-muted-foreground">
+                        <TableCell colSpan={9} className="text-center py-8 text-muted-foreground">
                           Nenhum dado disponível
                         </TableCell>
                       </TableRow>
@@ -1121,10 +710,6 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
                       sortedAndPaginatedData.map((alert) => {
                         const isChat = acionadosSet.has(alert.chamado.toString());
                         const acionadoStatus = formatAcionadoStatus(alert.acionado);
-                        const confirmationTimer = confirmationTimers.get(alert.chamado);
-                        const escalationTimersForChamado = escalationTimers.get(alert.chamado);
-                        const escalationStatesForChamado = escalationStates.get(alert.chamado);
-
                         return (
                           <TableRow
                             key={alert.id}
@@ -1196,12 +781,7 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
                               <Button
                                 variant={isChat ? "default" : "outline"}
                                 size="sm"
-                                onClick={() => {
-                                  if (!isChat) {
-                                    handleAcknowledgment(alert);
-                                    startConfirmationTimer(alert.chamado);
-                                  }
-                                }}
+                                onClick={() => !isChat && handleAcknowledgment(alert)}
                                 disabled={isChat}
                                 className={`${isChat
                                   ? 'bg-success text-white hover:bg-success/90'
@@ -1215,117 +795,6 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
                                 )}
                               </Button>
                             </TableCell>
-
-                            {/* Coluna Confirmação */}
-                            <TableCell>
-                              {isChat && confirmationTimer && !confirmationTimer.confirmed && !confirmationTimer.escalated ? (
-                                <div className="space-y-2">
-                                  <Timer
-                                    startTime={confirmationTimer.startTime}
-                                    duration={20 * 60 * 1000} // 20 minutos
-                                    isRunning={confirmationTimer.isRunning}
-                                    onTimeout={() => onConfirmationTimeout(alert.chamado)}
-                                    alertId={alert.id}
-                                  />
-                                  <Button
-                                    variant="outline"
-                                    size="sm"
-                                    onClick={() => handleConfirmReceived(alert.chamado)}
-                                    className="h-6 px-2 text-xs"
-                                  >
-                                    Confirmar
-                                  </Button>
-                                </div>
-                              ) : confirmationTimer?.confirmed ? (
-                                <span className="text-green-600 text-xs font-medium">Confirmado</span>
-                              ) : confirmationTimer?.escalated ? (
-                                <span className="text-red-600 text-xs font-medium">Expirou</span>
-                              ) : (
-                                <span className="text-muted-foreground text-xs">-</span>
-                              )}
-                            </TableCell>
-
-                            {/* Colunas de Escalação */}
-                            {[1, 2, 3, 4].map(level => {
-                              const timer = escalationTimersForChamado?.get(level);
-                              const state = escalationStatesForChamado?.get(level);
-                              const shouldShow = timer || (level === 1 && confirmationTimer?.escalated);
-
-                              return (
-                                <TableCell key={level}>
-                                  {shouldShow ? (
-                                    <div className="space-y-2 min-w-[150px]">
-                                      {timer && timer.isRunning && (
-                                        <Timer
-                                          startTime={timer.startTime}
-                                          duration={10 * 60 * 1000} // 10 minutos
-                                          isRunning={timer.isRunning}
-                                          onTimeout={() => onEscalationTimeout(alert.chamado, level)}
-                                          alertId={alert.id}
-                                        />
-                                      )}
-                                      
-                                      {state?.completed ? (
-                                        <div className="space-y-1">
-                                          <span className={`text-xs font-medium ${state.status === 'acionado' ? 'text-green-600' : 'text-red-600'}`}>
-                                            {state.status === 'acionado' ? 'Acionado' : 'Não Acionado'}
-                                          </span>
-                                          {state.observation && (
-                                            <p className="text-xs text-muted-foreground truncate max-w-[100px]" title={state.observation}>
-                                              {state.observation}
-                                            </p>
-                                          )}
-                                        </div>
-                                      ) : timer ? (
-                                        <div className="space-y-2">
-                                          <Select
-                                            value={state?.status || ''}
-                                            onValueChange={(value) => handleEscalationStatusChange(alert.chamado, level, value)}
-                                          >
-                                            <SelectTrigger className="h-6 text-xs">
-                                              <SelectValue placeholder="Status" />
-                                            </SelectTrigger>
-                                            <SelectContent>
-                                              <SelectItem value="acionado">Acionado</SelectItem>
-                                              <SelectItem value="nao_acionado">Não Acionado</SelectItem>
-                                            </SelectContent>
-                                          </Select>
-                                          
-                                          <Textarea
-                                            placeholder="Observação..."
-                                            value={state?.observation || ''}
-                                            onChange={(e) => handleEscalationObservationChange(alert.chamado, level, e.target.value)}
-                                            className="h-16 text-xs resize-none"
-                                          />
-                                          
-                                          <Button
-                                            variant="outline"
-                                            size="sm"
-                                            onClick={() => handleFinishEscalation(alert.chamado, level)}
-                                            className="h-6 px-2 text-xs w-full"
-                                          >
-                                            <StopCircle className="h-3 w-3 mr-1" />
-                                            Finalizar
-                                          </Button>
-                                        </div>
-                                      ) : level === 1 && confirmationTimer?.escalated ? (
-                                        <Button
-                                          variant="outline"
-                                          size="sm"
-                                          onClick={() => startEscalationTimer(alert.chamado, 1)}
-                                          className="h-6 px-2 text-xs"
-                                        >
-                                          <Play className="h-3 w-3 mr-1" />
-                                          Iniciar
-                                        </Button>
-                                      ) : null}
-                                    </div>
-                                  ) : (
-                                    <span className="text-muted-foreground text-xs">-</span>
-                                  )}
-                                </TableCell>
-                              );
-                            })}
                           </TableRow>
                         );
                       })
@@ -1395,7 +864,8 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
             )}
           </div>
 
-          {/* Modal para detalhes do chamado */}
+          {/* CrisisProcessDialog será adicionado conforme necessário */}
+
           <Dialog open={chamadoModalOpen} onOpenChange={setChamadoModalOpen}>
             <DialogContent className="max-w-3xl max-h-[80vh] border-modal-border shadow-2xl animate-modal-in overflow-y-auto"
               style={{
