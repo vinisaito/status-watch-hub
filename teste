@@ -1,5 +1,5 @@
-import { useState, useEffect, useMemo } from 'react';
-import { Check, AlertTriangle, ExternalLink, Zap, Group, Calendar, Info, XCircle, Flame, ChevronLeft, ChevronRight, ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
+import { Check, AlertTriangle, ExternalLink, Zap, Group, Calendar, Info, XCircle, Flame, ChevronLeft, ChevronRight, ArrowUpDown, ArrowUp, ArrowDown, Clock, Play, CheckCircle, X } from 'lucide-react';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
@@ -13,13 +13,13 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import {
-  Pagination,
-  PaginationContent,
-  PaginationItem,
-  PaginationLink,
-  PaginationNext,
-  PaginationPrevious,
-} from '@/components/ui/pagination';
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import { Textarea } from '@/components/ui/textarea';
 
 interface AlertData {
   id: string;
@@ -32,6 +32,15 @@ interface AlertData {
   severidade_chamado: string;
   acionado: string;
   chat: boolean;
+}
+
+interface EscalationState {
+  status: 'pending' | 'confirmed' | 'escalating' | 'completed';
+  currentLevel: 0 | 1 | 2 | 3 | 4; // 0 = confirmação, 1-4 = escalações
+  timeRemaining: number;
+  timerActive: boolean;
+  isAttended: boolean;
+  observations: string;
 }
 
 interface ActionTableProps {
@@ -56,6 +65,149 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
 
   // Estado que guarda os numeros chamados já acionados (string)
   const [acionadosSet, setAcionadosSet] = useState<Set<string>>(new Set());
+
+  // Estados para escalação
+  const [escalationStates, setEscalationStates] = useState<Record<string, EscalationState>>({});
+
+  // Timer para escalações
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setEscalationStates(prev => {
+        const newStates = { ...prev };
+        let updated = false;
+
+        Object.keys(newStates).forEach(alertId => {
+          const state = newStates[alertId];
+          if (state.timerActive && state.timeRemaining > 0) {
+            newStates[alertId] = {
+              ...state,
+              timeRemaining: state.timeRemaining - 1
+            };
+            updated = true;
+
+            // Quando o timer zera
+            if (newStates[alertId].timeRemaining === 0) {
+              newStates[alertId].timerActive = false;
+              
+              if (state.currentLevel === 0) {
+                // Acabou o tempo de confirmação, vai para escalação
+                newStates[alertId].status = 'escalating';
+                toast({
+                  title: "Tempo de confirmação esgotado",
+                  description: `Chamado ${alertId} pode iniciar escalação`,
+                  variant: "destructive",
+                });
+              } else if (state.currentLevel < 4) {
+                // Acabou o tempo da escalação atual
+                toast({
+                  title: "Tempo de escalação esgotado",
+                  description: `Escalação ${state.currentLevel} do chamado ${alertId} finalizada`,
+                  variant: "destructive",
+                });
+              } else {
+                // Todas as escalações foram executadas
+                newStates[alertId].status = 'completed';
+                toast({
+                  title: "Processo finalizado",
+                  description: `Todas as escalações do chamado ${alertId} foram executadas`,
+                });
+              }
+            }
+          }
+        });
+
+        return updated ? newStates : prev;
+      });
+    }, 1000);
+
+    return () => clearInterval(interval);
+  }, []);
+
+  // Função para iniciar confirmação
+  const startConfirmation = useCallback((alertId: string) => {
+    setEscalationStates(prev => ({
+      ...prev,
+      [alertId]: {
+        status: 'pending',
+        currentLevel: 0,
+        timeRemaining: 20 * 60, // 20 minutos
+        timerActive: true,
+        isAttended: false,
+        observations: ''
+      }
+    }));
+    
+    toast({
+      title: "Confirmação iniciada",
+      description: "Aguardando confirmação por 20 minutos",
+    });
+  }, []);
+
+  // Função para confirmar recebimento
+  const confirmReceived = useCallback((alertId: string) => {
+    setEscalationStates(prev => ({
+      ...prev,
+      [alertId]: {
+        ...prev[alertId],
+        status: 'confirmed',
+        timerActive: false,
+        timeRemaining: 0
+      }
+    }));
+
+    toast({
+      title: "Confirmação recebida",
+      description: "Processo de confirmação finalizado com sucesso",
+    });
+  }, []);
+
+  // Função para iniciar escalação
+  const startEscalation = useCallback((alertId: string, level: 1 | 2 | 3 | 4) => {
+    setEscalationStates(prev => ({
+      ...prev,
+      [alertId]: {
+        ...prev[alertId],
+        status: 'escalating',
+        currentLevel: level,
+        timeRemaining: 10 * 60, // 10 minutos
+        timerActive: true
+      }
+    }));
+
+    const levelNames = { 1: 'primeira', 2: 'segunda', 3: 'terceira', 4: 'quarta' };
+    toast({
+      title: `${levelNames[level]} escalação iniciada`,
+      description: `Timer de 10 minutos ativado`,
+    });
+  }, []);
+
+  // Função para marcar como atendido
+  const markAsAttended = useCallback((alertId: string, attended: boolean, observations: string) => {
+    setEscalationStates(prev => ({
+      ...prev,
+      [alertId]: {
+        ...prev[alertId],
+        isAttended: attended,
+        observations,
+        status: attended ? 'completed' : prev[alertId].status,
+        timerActive: attended ? false : prev[alertId].timerActive
+      }
+    }));
+
+    if (attended) {
+      toast({
+        title: "Escalação atendida",
+        description: "Processo finalizado com sucesso",
+      });
+    }
+  }, []);
+
+  // Função para formatar tempo
+  const formatTime = (seconds: number) => {
+    const minutes = Math.floor(seconds / 60);
+    const remainingSeconds = seconds % 60;
+    return `${minutes.toString().padStart(2, '0')}:${remainingSeconds.toString().padStart(2, '0')}`;
+  };
 
   // Função para lidar com clique no cabeçalho da coluna
   const handleSort = (field: SortField) => {
@@ -353,8 +505,6 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
         ],
       };
 
-
-
       await fetch(webhookUrl, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -379,6 +529,9 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
       setAcionadosSet(prev => new Set([...prev, alert.chamado.toString()]));
       onUpdateAcknowledgment(alert.id, true);
 
+      // Inicia processo de confirmação
+      startConfirmation(alert.chamado);
+
       toast({
         title: "Alerta acionado com sucesso",
         description: `Mensagem enviada para a grupo_chamado ${alert.grupo_chamado}`,
@@ -394,7 +547,6 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
     }
   };
 
-
   const truncateText = (text: string, maxLength: number) => {
     return text.length > maxLength ? text.substring(0, maxLength) + '...' : text;
   };
@@ -408,8 +560,8 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
 
   const getSeverityColor = (severity: string) => {
     return severity.includes('4')
-      ? 'bg-sev4-incident text-white'
-      : 'bg-sev3-incident text-white';
+      ? 'bg-destructive text-destructive-foreground'
+      : 'bg-warning text-warning-foreground';
   };
 
   const [chamadoModalOpen, setChamadoModalOpen] = useState(false);
@@ -420,8 +572,8 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
 
   const getStatusBadgeClass = (chat: boolean) =>
     chat
-      ? 'bg-green-500/90 text-white border-green-400/50 shadow-md'
-      : 'bg-red-500/90 text-white border-red-400/50 shadow-md';
+      ? 'bg-success/90 text-white border-success/50 shadow-md'
+      : 'bg-destructive/90 text-white border-destructive/50 shadow-md';
 
   const getStatusIcon = (chat: boolean) =>
     chat ? <Check className="h-4 w-4" /> : <XCircle className="h-4 w-4" />;
@@ -430,11 +582,10 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
     return chat ? 'ACIONADO VIA CHAT' : 'NÃO ACIONADO VIA CHAT';
   };
 
-
   const getStatusBadgeClass1 = (acionado: string) =>
     acionado === 'OK'
-      ? 'bg-green-500/90 text-white border-green-400/50 shadow-md'
-      : 'bg-red-500/90 text-white border-red-400/50 shadow-md';
+      ? 'bg-success/90 text-white border-success/50 shadow-md'
+      : 'bg-destructive/90 text-white border-destructive/50 shadow-md';
 
   const getStatusIcon1 = (acionado: string) =>
     acionado === 'OK'
@@ -450,10 +601,154 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
     setCurrentPage(page);
   };
 
+  // Renderiza o componente de confirmação/escalação
+  const renderConfirmationColumn = (alert: AlertData) => {
+    const state = escalationStates[alert.chamado];
+    
+    if (!state) {
+      return (
+        <div className="text-center">
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => startConfirmation(alert.chamado)}
+            className="h-8 px-3 text-xs"
+          >
+            <Play className="h-3 w-3 mr-1" />
+            Iniciar
+          </Button>
+        </div>
+      );
+    }
+
+    switch (state.status) {
+      case 'pending':
+        return (
+          <div className="text-center space-y-2">
+            <div className="flex items-center justify-center gap-2">
+              <Clock className="h-4 w-4 text-warning" />
+              <span className="text-sm font-mono">{formatTime(state.timeRemaining)}</span>
+            </div>
+            <Button
+              size="sm"
+              variant="default"
+              onClick={() => confirmReceived(alert.chamado)}
+              className="h-6 px-2 text-xs"
+            >
+              <Check className="h-3 w-3 mr-1" />
+              Confirmar
+            </Button>
+          </div>
+        );
+
+      case 'confirmed':
+        return (
+          <div className="text-center">
+            <Badge variant="default" className="bg-success text-success-foreground">
+              <CheckCircle className="h-3 w-3 mr-1" />
+              Confirmado
+            </Badge>
+          </div>
+        );
+
+      case 'escalating':
+        const levelNames = { 1: '1ª', 2: '2ª', 3: '3ª', 4: '4ª' };
+        
+        return (
+          <div className="space-y-2">
+            {state.currentLevel > 0 && (
+              <div className="text-center">
+                <Badge variant="destructive" className="text-xs">
+                  {levelNames[state.currentLevel as keyof typeof levelNames]} Escalação
+                </Badge>
+                {state.timerActive && (
+                  <div className="flex items-center justify-center gap-1 mt-1">
+                    <Clock className="h-3 w-3 text-warning" />
+                    <span className="text-xs font-mono">{formatTime(state.timeRemaining)}</span>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {!state.isAttended && (
+              <>
+                {state.currentLevel === 0 || (!state.timerActive && state.currentLevel < 4) ? (
+                  <div className="space-y-1">
+                    {[1, 2, 3, 4].map(level => (
+                      level > state.currentLevel && (
+                        <Button
+                          key={level}
+                          size="sm"
+                          variant="outline"
+                          onClick={() => startEscalation(alert.chamado, level as 1 | 2 | 3 | 4)}
+                          className="h-6 px-2 text-xs w-full"
+                        >
+                          {levelNames[level as keyof typeof levelNames]} Escalação
+                        </Button>
+                      )
+                    ))}
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    <Select
+                      onValueChange={(value) => {
+                        const attended = value === 'attended';
+                        markAsAttended(alert.chamado, attended, state.observations);
+                      }}
+                    >
+                      <SelectTrigger className="h-6 text-xs">
+                        <SelectValue placeholder="Status" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="attended">Atendida</SelectItem>
+                        <SelectItem value="not-attended">Não Atendida</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    
+                    <Textarea
+                      placeholder="Observações..."
+                      value={state.observations}
+                      onChange={(e) => {
+                        setEscalationStates(prev => ({
+                          ...prev,
+                          [alert.chamado]: {
+                            ...prev[alert.chamado],
+                            observations: e.target.value
+                          }
+                        }));
+                      }}
+                      className="text-xs min-h-[60px]"
+                    />
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+        );
+
+      case 'completed':
+        return (
+          <div className="text-center">
+            <Badge variant="default" className="bg-success text-success-foreground">
+              <CheckCircle className="h-3 w-3 mr-1" />
+              Finalizado
+            </Badge>
+            {state.observations && (
+              <p className="text-xs text-muted-foreground mt-1 truncate">
+                {state.observations}
+              </p>
+            )}
+          </div>
+        );
+
+      default:
+        return null;
+    }
+  };
 
   return (
     <TooltipProvider>
-      <Card className="bg-panel-bg border-border">
+      <Card className="bg-card border-border">
         <CardHeader />
         <CardContent>
           {/* Layout para Mobile (oculto em desktop) */}
@@ -522,9 +817,15 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
                         {/* Status Acionado Mobile */}
                         <div className="flex items-center gap-2">
                           <span className="text-xs text-muted-foreground">Status:</span>
-                          <span className={`text-xs font-medium ${acionadoStatus.isOk ? 'text-green-600' : 'text-red-600'}`}>
+                          <span className={`text-xs font-medium ${acionadoStatus.isOk ? 'text-success' : 'text-destructive'}`}>
                             {acionadoStatus.text}
                           </span>
+                        </div>
+
+                        {/* Confirmação Mobile */}
+                        <div className="border-t pt-2">
+                          <div className="text-xs text-muted-foreground mb-1">Confirmação:</div>
+                          {renderConfirmationColumn(alert)}
                         </div>
 
                         {/* Botões */}
@@ -549,8 +850,8 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
                             onClick={() => !isChat && handleAcknowledgment(alert)}
                             disabled={isChat}
                             className={`h-7 px-2 sm:px-3 text-xs flex-shrink-0 ${isChat
-                              ? 'bg-success text-white hover:bg-success/90'
-                              : 'border-border hover:bg-hover-bg'
+                              ? 'bg-success text-success-foreground hover:bg-success/90'
+                              : 'border-border hover:bg-accent'
                               }`}
                           >
                             {isChat ? (
@@ -573,7 +874,7 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
               })
             )}
 
-            {/* Paginação Mobile - Compacta */}
+            {/* Paginação Mobile */}
             {!loading && sortedAndPaginatedData.length > 0 && totalPages > 1 && (
               <div className="flex items-center justify-between mt-4 px-2">
                 <div className="text-sm text-muted-foreground">
@@ -603,13 +904,13 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
             )}
           </div>
 
-          {/* Layout para Desktop (oculto em mobile) */}
+          {/* Layout para Desktop */}
           <div className="hidden lg:block">
             <div className="w-full overflow-x-auto">
-              <div className="min-w-[800px]">
+              <div className="min-w-[1000px]">
                 <Table>
                   <TableHeader>
-                    <TableRow className="border-border hover:bg-hover-bg">
+                    <TableRow className="border-border hover:bg-accent">
                       <TableHead className="text-muted-foreground min-w-[80px]">
                         <Button
                           variant="ghost"
@@ -690,19 +991,20 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
                           {getSortIcon('acionado')}
                         </Button>
                       </TableHead>
+                      <TableHead className="text-muted-foreground min-w-[120px]">Confirmação</TableHead>
                       <TableHead className="text-muted-foreground min-w-[70px]">Chat</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {loading ? (
                       <TableRow>
-                        <TableCell colSpan={9} className="text-center py-8">
+                        <TableCell colSpan={10} className="text-center py-8">
                           Carregando dados...
                         </TableCell>
                       </TableRow>
                     ) : sortedAndPaginatedData.length === 0 ? (
                       <TableRow>
-                        <TableCell colSpan={9} className="text-center py-8 text-muted-foreground">
+                        <TableCell colSpan={10} className="text-center py-8 text-muted-foreground">
                           Nenhum dado disponível
                         </TableCell>
                       </TableRow>
@@ -713,7 +1015,7 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
                         return (
                           <TableRow
                             key={alert.id}
-                            className="border-border hover:bg-hover-bg transition-colors"
+                            className="border-border hover:bg-accent transition-colors"
                           >
                             <TableCell className="font-medium">
                               <Button
@@ -759,7 +1061,7 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
                                     variant="ghost"
                                     size="sm"
                                     onClick={() => handleIncidentClick(alert)}
-                                    className="p-1 h-auto hover:bg-hover-bg flex-shrink-0"
+                                    className="p-1 h-auto hover:bg-accent flex-shrink-0"
                                     title="Iniciar processo de crise"
                                   >
                                     <ExternalLink className="h-3 w-3" />
@@ -773,9 +1075,12 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
                               </Badge>
                             </TableCell>
                             <TableCell>
-                              <span className={`font-medium text-xs ${acionadoStatus.isOk ? 'text-green-600' : 'text-red-600'}`}>
+                              <span className={`font-medium text-xs ${acionadoStatus.isOk ? 'text-success' : 'text-destructive'}`}>
                                 {acionadoStatus.text}
                               </span>
+                            </TableCell>
+                            <TableCell className="min-w-[120px]">
+                              {renderConfirmationColumn(alert)}
                             </TableCell>
                             <TableCell>
                               <Button
@@ -784,8 +1089,8 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
                                 onClick={() => !isChat && handleAcknowledgment(alert)}
                                 disabled={isChat}
                                 className={`${isChat
-                                  ? 'bg-success text-white hover:bg-success/90'
-                                  : 'border-border hover:bg-hover-bg'
+                                  ? 'bg-success text-success-foreground hover:bg-success/90'
+                                  : 'border-border hover:bg-accent'
                                   } h-7 w-7 p-0`}
                               >
                                 {isChat ? (
@@ -804,7 +1109,7 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
               </div>
             </div>
 
-            {/* Paginação Desktop - Elegante e Compacta */}
+            {/* Paginação Desktop */}
             {!loading && sortedAndPaginatedData.length > 0 && totalPages > 1 && (
               <div className="flex items-center justify-between mt-4 pt-4 border-t border-border">
                 <div className="text-sm text-muted-foreground">
@@ -864,27 +1169,13 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
             )}
           </div>
 
-          {/* CrisisProcessDialog será adicionado conforme necessário */}
-
+          {/* Dialog do Modal de Chamado */}
           <Dialog open={chamadoModalOpen} onOpenChange={setChamadoModalOpen}>
-            <DialogContent className="max-w-3xl max-h-[80vh] border-modal-border shadow-2xl animate-modal-in overflow-y-auto"
-              style={{
-                background: 'var(--modal-gradient)',
-                boxShadow: 'var(--modal-shadow)',
-                backdropFilter: 'blur(20px)'
-              }}>
-              <DialogHeader className="pb-6 border-b border-modal-border/50">
+            <DialogContent className="max-w-3xl max-h-[80vh] border-border shadow-2xl overflow-y-auto">
+              <DialogHeader className="pb-6 border-b border-border">
                 <DialogTitle className="text-left">
-                  {/* Header com gradiente e efeitos visuais */}
-                  <div className="relative overflow-hidden rounded-2xl p-6 mb-4"
-                    style={{
-                      boxShadow: '0 8px 32px hsl(var(--primary) / 0.2)'
-                    }}>
-
-                    {/* Efeito de brilho */}
-                    <div className="absolute top-0 left-0 w-full h-full bg-gradient-to-r from-transparent via-white/10 to-transparent 
-                          transform -skew-x-12 translate-x-[-200%] animate-pulse"></div>
-
+                  {/* Header com design melhorado */}
+                  <div className="relative overflow-hidden rounded-2xl p-6 mb-4 bg-gradient-to-r from-primary to-primary/80">
                     {/* Número do chamado e título */}
                     <div className="relative z-10 flex items-start gap-4">
                       <div className="p-3 rounded-xl bg-white/20 backdrop-blur-sm border border-white/30 shadow-lg">
@@ -913,13 +1204,12 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
                       </div>
                     </div>
 
-                    {/* Status badges com efeitos */}
+                    {/* Status badges */}
                     {selectedIncident && (
                       <div className="relative z-10 flex flex-wrap items-center gap-3 mt-6">
                         <div className="animate-fade-in">
                           <div className={`${getStatusBadgeClass(selectedIncident.chat)} flex items-center gap-2 px-4 py-2 rounded-xl 
-                              backdrop-blur-sm border border-white/20 shadow-lg transform hover:scale-105 transition-all duration-200`}
-                            style={{ boxShadow: 'var(--badge-shadow)' }}>
+                              backdrop-blur-sm border border-white/20 shadow-lg`}>
                             {getStatusIcon(selectedIncident.chat)}
                             <span className="font-medium text-sm">
                               {getStatusText(selectedIncident.chat)}
@@ -927,18 +1217,17 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
                           </div>
                         </div>
 
-                        <div className="animate-fade-in" style={{ animationDelay: '0.1s' }}>
+                        <div className="animate-fade-in">
                           <div className="bg-white/20 text-white flex items-center gap-2 px-4 py-2 rounded-xl 
-                              backdrop-blur-sm border border-white/30 shadow-lg transform hover:scale-105 transition-all duration-200">
+                              backdrop-blur-sm border border-white/30 shadow-lg">
                             <span className="font-medium text-sm">{selectedIncident.tipo_chamado}</span>
                           </div>
                         </div>
 
                         {selectedIncident && (
-                          <div className="animate-fade-in" style={{ animationDelay: '0.2s' }}>
+                          <div className="animate-fade-in">
                             <div className={`${getStatusBadgeClass1(selectedIncident.acionado)} flex items-center gap-2 px-4 py-2 rounded-xl 
-                                backdrop-blur-sm border border-white/20 shadow-lg transform hover:scale-105 transition-all duration-200`}
-                              style={{ boxShadow: 'var(--badge-shadow)' }}>
+                                backdrop-blur-sm border border-white/20 shadow-lg`}>
                               {getStatusIcon1(selectedIncident.acionado)}
                               <span className="font-medium text-sm">
                                 {getStatusText1(selectedIncident.acionado)}
@@ -952,13 +1241,12 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
                 </DialogTitle>
               </DialogHeader>
 
-              {/* Conteúdo principal com grid melhorado */}
+              {/* Conteúdo principal */}
               {selectedIncident && (
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mt-6">
-                  {/* Cards de informação com design elegante */}
                   <div className="space-y-4">
                     {/* Card Grupo */}
-                    <div className="group relative overflow-hidden rounded-xl bg-info-card-bg border border-info-card-border p-5 
+                    <div className="group relative overflow-hidden rounded-xl bg-card border border-border p-5 
                         shadow-lg hover:shadow-xl transition-all duration-300 hover:-translate-y-1">
                       <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-primary to-blue-500"></div>
                       <div className="flex items-start gap-4">
@@ -967,13 +1255,13 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
                         </div>
                         <div className="flex-1">
                           <p className="text-sm text-muted-foreground font-medium mb-1">Grupo</p>
-                          <p className="font-bold text-white text-lg">{selectedIncident.grupo_chamado}</p>
+                          <p className="font-bold text-foreground text-lg">{selectedIncident.grupo_chamado}</p>
                         </div>
                       </div>
                     </div>
 
                     {/* Card Abertura */}
-                    <div className="group relative overflow-hidden rounded-xl bg-info-card-bg border border-info-card-border p-5 
+                    <div className="group relative overflow-hidden rounded-xl bg-card border border-border p-5 
                         shadow-lg hover:shadow-xl transition-all duration-300 hover:-translate-y-1">
                       <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-green-500 to-emerald-500"></div>
                       <div className="flex items-start gap-4">
@@ -982,7 +1270,7 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
                         </div>
                         <div className="flex-1">
                           <p className="text-sm text-muted-foreground font-medium mb-1">Data de Abertura</p>
-                          <p className="font-bold text-white text-lg">{formatDate(selectedIncident.abertura_chamado)}</p>
+                          <p className="font-bold text-foreground text-lg">{formatDate(selectedIncident.abertura_chamado)}</p>
                         </div>
                       </div>
                     </div>
@@ -990,7 +1278,7 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
 
                   <div className="space-y-4">
                     {/* Card Status */}
-                    <div className="group relative overflow-hidden rounded-xl bg-info-card-bg border border-info-card-border p-5 
+                    <div className="group relative overflow-hidden rounded-xl bg-card border border-border p-5 
                         shadow-lg hover:shadow-xl transition-all duration-300 hover:-translate-y-1">
                       <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-blue-500 to-cyan-500"></div>
                       <div className="flex items-start gap-4">
@@ -999,13 +1287,13 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
                         </div>
                         <div className="flex-1">
                           <p className="text-sm text-muted-foreground font-medium mb-1">Status</p>
-                          <p className="font-bold text-white text-lg">{selectedIncident.status_chamado}</p>
+                          <p className="font-bold text-foreground text-lg">{selectedIncident.status_chamado}</p>
                         </div>
                       </div>
                     </div>
 
                     {/* Card Severidade */}
-                    <div className="group relative overflow-hidden rounded-xl bg-info-card-bg border border-info-card-border p-5 
+                    <div className="group relative overflow-hidden rounded-xl bg-card border border-border p-5 
                         shadow-lg hover:shadow-xl transition-all duration-300 hover:-translate-y-1">
                       <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-red-500 to-orange-500"></div>
                       <div className="flex items-start gap-4">
@@ -1014,17 +1302,15 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
                         </div>
                         <div className="flex-1">
                           <p className="text-sm text-muted-foreground font-medium mb-1">Severidade</p>
-                          <p className="font-bold text-white text-lg">{selectedIncident.severidade_chamado}</p>
+                          <p className="font-bold text-foreground text-lg">{selectedIncident.severidade_chamado}</p>
                         </div>
                       </div>
                     </div>
                   </div>
                 </div>
               )}
-
             </DialogContent>
           </Dialog>
-
         </CardContent>
       </Card>
     </TooltipProvider>
