@@ -813,33 +813,7 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
       );
     }
 
-    // Componente padronizado para caixas de observação (definido fora do render)
-    const ObservationBox = useMemo(() => ({ value, onChange, placeholder, required = false, alertId }: {
-      value: string;
-      onChange: (value: string) => void;
-      placeholder: string;
-      required?: boolean;
-      alertId: string;
-    }) => (
-      <div className="space-y-1">
-        <Label className="text-xs">
-          Observações {required && <span className="text-destructive">*</span>}
-        </Label>
-        <Textarea
-          key={`textarea-${alertId}`}
-          placeholder={placeholder}
-          value={value}
-          onChange={(e) => onChange(e.target.value)}
-          className="text-xs min-h-[60px] resize-none"
-          required={required}
-        />
-        {required && !value.trim() && (
-          <p className="text-xs text-destructive">
-            Observações são obrigatórias
-          </p>
-        )}
-      </div>
-    ), []);
+    // Componente padronizado para caixas de observação
 
     switch (state.status) {
       case 'pending':
@@ -851,13 +825,24 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
             </div>
             
             <div className="space-y-2">
-               <ObservationBox
-                 value={currentObservation}
-                 onChange={(value) => handleConfirmationObservationChange(alert.chamado, value)}
-                 placeholder="Observações são obrigatórias para confirmação"
-                 required
-                 alertId={alert.chamado}
-               />
+               <div className="space-y-1">
+                 <Label className="text-xs">
+                   Observações <span className="text-destructive">*</span>
+                 </Label>
+                 <Textarea
+                   key={`confirmation-textarea-${alert.chamado}`}
+                   placeholder="Observações são obrigatórias para confirmação"
+                   value={currentObservation}
+                   onChange={(e) => handleConfirmationObservationChange(alert.chamado, e.target.value)}
+                   className="text-xs min-h-[60px] resize-none"
+                   required
+                 />
+                 {!currentObservation.trim() && (
+                   <p className="text-xs text-destructive">
+                     Observações são obrigatórias
+                   </p>
+                 )}
+               </div>
               
               <Button
                 size="sm"
@@ -960,13 +945,24 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
                           Confirmar: {pendingChange?.status === 'attended' ? 'Atendida' : 'Não Atendida'}
                         </div>
                         
-                         <ObservationBox
-                           value={pendingChange?.observations || ''}
-                           onChange={(value) => handlePendingObservationChange(alert.chamado, value)}
-                           placeholder="Observações obrigatórias..."
-                           required
-                           alertId={alert.chamado}
-                         />
+                         <div className="space-y-1">
+                           <Label className="text-xs">
+                             Observações <span className="text-destructive">*</span>
+                           </Label>
+                           <Textarea
+                             key={`pending-textarea-${alert.chamado}`}
+                             placeholder="Observações obrigatórias..."
+                             value={pendingChange?.observations || ''}
+                             onChange={(e) => handlePendingObservationChange(alert.chamado, e.target.value)}
+                             className="text-xs min-h-[60px] resize-none"
+                             required
+                           />
+                           {!pendingChange?.observations?.trim() && (
+                             <p className="text-xs text-destructive">
+                               Observações são obrigatórias
+                             </p>
+                           )}
+                         </div>
                         
                         <div className="flex gap-1">
                           <Button
