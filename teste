@@ -631,22 +631,6 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
   const getStatusText = (chat: boolean) => {
     return chat ? 'ACIONADO VIA CHAT' : 'NÃO ACIONADO VIA CHAT';
   };
-
-  const getStatusBadgeClass1 = (acionado: string) =>
-    acionado === 'OK'
-      ? 'bg-success/90 text-white border-success/50 shadow-md'
-      : 'bg-destructive/90 text-white border-destructive/50 shadow-md';
-
-  const getStatusIcon1 = (acionado: string) =>
-    acionado === 'OK'
-      ? <Check className="h-4 w-4" />
-      : <XCircle className="h-4 w-4" />;
-
-  const getStatusText1 = (acionado: string) =>
-    acionado === 'OK'
-      ? 'REGISTRADO ACIONAMENTO (SDM)'
-      : 'NÃO REGISTRADO ACIONAMENTO (SDM)';
-
   const handlePageChange = (page: number) => {
     setCurrentPage(page);
   };
@@ -683,11 +667,11 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
             
             <div className="space-y-2">
               <Label htmlFor={`confirmation-${alert.chamado}`} className="text-xs text-left block">
-                Observações da Confirmação *
+                Observações *
               </Label>
               <Textarea
                 id={`confirmation-${alert.chamado}`}
-                placeholder="Digite suas observações obrigatórias para confirmar..."
+                placeholder="Observações são obrigatórias para confirmação"
                 value={currentObservation}
                 onChange={(e) => {
                   setConfirmationObservations(prev => ({
