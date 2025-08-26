@@ -82,6 +82,9 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
   const [showStatusConfirmation, setShowStatusConfirmation] = useState<Record<string, boolean>>({});
   const [pendingStatusChange, setPendingStatusChange] = useState<Record<string, { status: string; observations: string }>>({});
 
+  // Estado para controlar quais chamados já foram salvos na API
+  const [savedToAPI, setSavedToAPI] = useState<Set<string>>(new Set());
+
   // Função para salvar dados na API Gateway
   const saveToAPI = useCallback(async (alertId: string, data: any) => {
     try {
@@ -242,6 +245,9 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
 
       // Salva na API
       await saveToAPI(alertId, apiData);
+      
+      // Marca como salvo na API
+      setSavedToAPI(prev => new Set([...prev, alertId]));
 
       setEscalationStates(prev => ({
         ...prev,
@@ -304,6 +310,9 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
 
       // Salva na API
       await saveToAPI(alertId, apiData);
+      
+      // Marca como salvo na API
+      setSavedToAPI(prev => new Set([...prev, alertId]));
 
       setEscalationStates(prev => ({
         ...prev,
@@ -438,6 +447,9 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
 
         // Salva na API
         await saveToAPI(alertId, apiData);
+        
+        // Marca como salvo na API
+        setSavedToAPI(prev => new Set([...prev, alertId]));
       } catch (error) {
         // Continua o processo mesmo se falhar na API
       }
@@ -526,6 +538,9 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
 
       // Salva na API
       await saveToAPI(alertId, apiData);
+      
+      // Marca como salvo na API
+      setSavedToAPI(prev => new Set([...prev, alertId]));
     } catch (error) {
       // Continua o processo mesmo se falhar na API
     }
@@ -995,6 +1010,23 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
     const currentObservation = confirmationObservations[alert.chamado] || '';
     const showConfirmation = showStatusConfirmation[alert.chamado];
     const pendingChange = pendingStatusChange[alert.chamado];
+    const isAlreadySaved = savedToAPI.has(alert.chamado);
+    
+    // Se já foi salvo na API, mostra estado finalizado sem permitir edições
+    if (isAlreadySaved) {
+      return (
+        <div className="text-center space-y-2">
+          <Badge variant="default" className="bg-blue-600 text-white">
+            <CheckCircle className="h-3 w-3 mr-1" />
+            Dados Salvos na API
+          </Badge>
+          <div className="text-xs text-muted-foreground p-2 bg-muted rounded text-left">
+            <strong>Status:</strong> Processo finalizado e dados enviados à API.<br />
+            <strong>Observação:</strong> Não é possível fazer mais alterações.
+          </div>
+        </div>
+      );
+    }
     
     if (!state) {
       return (
@@ -1286,60 +1318,3 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
         return null;
     }
   };
-
-  // Componente principal que renderiza dados mock para demonstração
-  return (
-    <div className="min-h-screen bg-background p-8">
-      <div className="max-w-7xl mx-auto">
-        <h1 className="text-3xl font-bold mb-6">Sistema de Acompanhamento e Escalação</h1>
-        
-        {/* Dados fictícios para demonstração */}
-        <Card>
-          <CardContent className="p-6">
-            <div className="text-center text-muted-foreground">
-              <p className="mb-4">
-                Este é um sistema de acompanhamento e escalação que integra com API Gateway.
-              </p>
-              <p className="text-sm">
-                Para usar este componente, você precisa fornecer dados através da prop <code>alertData</code>.
-              </p>
-              <div className="mt-6 p-4 bg-muted rounded-lg">
-                <p className="text-sm">
-                  <strong>Funcionalidades implementadas:</strong>
-                </p>
-                <ul className="list-disc list-inside text-sm mt-2 space-y-1">
-                  <li>Confirmação de recebimento de alertas</li>
-                  <li>Sistema de escalação em 4 níveis</li>
-                  <li>Observações obrigatórias</li>
-                  <li>Integração com API Gateway para armazenamento</li>
-                  <li>Timer automático para cada etapa</li>
-                  <li>Controle de status (Atendido/Não Atendido)</li>
-                </ul>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-    </div>
-  );
-};
-
-// Componente Index que utiliza o ActionTable
-const Index = () => {
-  const [alertData] = useState<AlertData[]>([]);
-  const [loading] = useState(false);
-
-  const handleUpdateAcknowledgment = (alertId: string, acknowledged: boolean) => {
-    console.log(`Alert ${alertId} acknowledgment updated to: ${acknowledged}`);
-  };
-
-  return (
-    <ActionTable 
-      alertData={alertData}
-      onUpdateAcknowledgment={handleUpdateAcknowledgment}
-      loading={loading}
-    />
-  );
-};
-
-export default Index;
