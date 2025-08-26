@@ -119,6 +119,7 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
     try {
       // Busca dados de acompanhamento para todos os chamados visíveis
       const chamadosVisveis = alertData.map(alert => alert.chamado);
+      console.log('Carregando dados para chamados:', chamadosVisveis);
       
       const confirmationPromises = chamadosVisveis.map(async (chamado) => {
         try {
@@ -128,23 +129,35 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
           );
           
           if (response.ok) {
-            const data = await response.json();
-            return { chamado, data };
+            const allData = await response.json();
+            console.log(`Dados recebidos para chamado ${chamado}:`, allData);
+            
+            // Filtra pelo chamado específico, convertendo números para string para comparação
+            const chamadoData = Array.isArray(allData) 
+              ? allData.find(item => item.chamado?.toString() === chamado.toString())
+              : (allData.chamado?.toString() === chamado.toString() ? allData : null);
+            
+            console.log(`Dados filtrados para chamado ${chamado}:`, chamadoData);
+            return { chamado, data: chamadoData };
           }
           return { chamado, data: null };
         } catch (error) {
+          console.error(`Erro ao buscar dados do chamado ${chamado}:`, error);
           return { chamado, data: null };
         }
       });
 
       const results = await Promise.all(confirmationPromises);
+      console.log('Resultados processados:', results);
       
       // Processa os resultados e atualiza os estados
       const newEscalationStates: Record<string, EscalationState> = {};
       const newConfirmationObservations: Record<string, string> = {};
       
       results.forEach(({ chamado, data }) => {
-        if (data && data.confirmChat) {
+        if (data) {
+          console.log(`Processando chamado ${chamado}:`, data);
+          
           // Determina o status baseado nos dados salvos
           let status: EscalationState['status'] = 'pending';
           let currentLevel: EscalationState['currentLevel'] = 0;
@@ -155,6 +168,7 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
           if (data.confirmChat && data.confirmChat !== '') {
             status = 'confirmed';
             lastObservation = data.confirmChat;
+            console.log(`Chamado ${chamado} tem confirmação:`, data.confirmChat);
           }
           
           // Verifica escalações
@@ -165,19 +179,29 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
                 status = 'escalating';
                 currentLevel = (escalation.level) as EscalationState['currentLevel'];
                 lastObservation = escalation.observations || '';
+                console.log(`Chamado ${chamado} está em escalação nível ${escalation.level}`);
                 break;
               } else if (escalation.status === 'atendido') {
                 status = 'completed';
                 currentLevel = (escalation.level) as EscalationState['currentLevel'];
                 isAttended = true;
                 lastObservation = escalation.observations || '';
+                console.log(`Chamado ${chamado} foi atendido no nível ${escalation.level}`);
                 break;
               } else if (escalation.status === 'finalizado' && i < 3) {
                 // Se finalizou mas não foi o último nível, continua checando
                 currentLevel = (escalation.level) as EscalationState['currentLevel'];
                 lastObservation = escalation.observations || '';
+                console.log(`Chamado ${chamado} finalizou nível ${escalation.level}`);
               }
             }
+          }
+          
+          // Verifica se há obsChat indicando atendimento
+          if (data.obsChat && data.obsChat.includes('atendida com sucesso')) {
+            status = 'completed';
+            isAttended = true;
+            console.log(`Chamado ${chamado} foi marcado como atendido via obsChat`);
           }
           
           newEscalationStates[chamado] = {
@@ -189,12 +213,17 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
             observations: lastObservation
           };
           
+          console.log(`Estado final para chamado ${chamado}:`, newEscalationStates[chamado]);
+          
           // Salva observações de confirmação
           if (data.confirmChat) {
             newConfirmationObservations[chamado] = data.confirmChat;
           }
         }
       });
+      
+      console.log('Estados de escalação atualizados:', newEscalationStates);
+      console.log('Observações de confirmação atualizadas:', newConfirmationObservations);
       
       // Atualiza os estados apenas se houver dados para atualizar
       if (Object.keys(newEscalationStates).length > 0) {
@@ -207,7 +236,6 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
       
     } catch (error) {
       console.error('Erro ao carregar dados de confirmação:', error);
-      // Não mostra toast de erro para não poluir a interface em caso de falha na busca
     }
   }, [alertData]);
 
@@ -1099,6 +1127,14 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
     const currentObservation = confirmationObservations[alert.chamado] || '';
     const showConfirmation = showStatusConfirmation[alert.chamado];
     const pendingChange = pendingStatusChange[alert.chamado];
+    
+    // Debug: log do estado atual
+    console.log(`Renderizando coluna confirmação para chamado ${alert.chamado}:`, {
+      state,
+      currentObservation,
+      showConfirmation,
+      pendingChange
+    });
     
     if (!state) {
       return (
