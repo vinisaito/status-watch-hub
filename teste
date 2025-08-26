@@ -19,8 +19,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { Textarea } from '@/components/ui/textarea';
-import { Label } from '@/components/ui/label';
+import { ObservationInput } from '@/components/ui/observation-input';
+import { ObservationDisplay } from '@/components/ui/observation-display';
 
 interface AlertData {
   id: string;
@@ -813,8 +813,6 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
       );
     }
 
-    // Componente padronizado para caixas de observação
-
     switch (state.status) {
       case 'pending':
         return (
@@ -825,24 +823,14 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
             </div>
             
             <div className="space-y-2">
-               <div className="space-y-1">
-                 <Label className="text-xs">
-                   Observações <span className="text-destructive">*</span>
-                 </Label>
-                 <Textarea
-                   key={`confirmation-textarea-${alert.chamado}`}
-                   placeholder="Observações são obrigatórias para confirmação"
-                   value={currentObservation}
-                   onChange={(e) => handleConfirmationObservationChange(alert.chamado, e.target.value)}
-                   className="text-xs min-h-[60px] resize-none"
-                   required
-                 />
-                 {!currentObservation.trim() && (
-                   <p className="text-xs text-destructive">
-                     Observações são obrigatórias
-                   </p>
-                 )}
-               </div>
+              <ObservationInput
+                label="Observações"
+                value={currentObservation}
+                onChange={(value) => handleConfirmationObservationChange(alert.chamado, value)}
+                placeholder="Observações são obrigatórias para confirmação"
+                required
+                id={`confirmation-${alert.chamado}`}
+              />
               
               <Button
                 size="sm"
@@ -865,12 +853,10 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
               <CheckCircle className="h-3 w-3 mr-1" />
               Confirmado
             </Badge>
-            {state.observations && (
-              <div className="text-xs text-muted-foreground p-2 bg-muted rounded text-left">
-                <strong>Observações:</strong><br />
-                {state.observations}
-              </div>
-            )}
+            <ObservationDisplay
+              observations={state.observations}
+              variant="compact"
+            />
           </div>
         );
 
@@ -945,24 +931,14 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
                           Confirmar: {pendingChange?.status === 'attended' ? 'Atendida' : 'Não Atendida'}
                         </div>
                         
-                         <div className="space-y-1">
-                           <Label className="text-xs">
-                             Observações <span className="text-destructive">*</span>
-                           </Label>
-                           <Textarea
-                             key={`pending-textarea-${alert.chamado}`}
-                             placeholder="Observações obrigatórias..."
-                             value={pendingChange?.observations || ''}
-                             onChange={(e) => handlePendingObservationChange(alert.chamado, e.target.value)}
-                             className="text-xs min-h-[60px] resize-none"
-                             required
-                           />
-                           {!pendingChange?.observations?.trim() && (
-                             <p className="text-xs text-destructive">
-                               Observações são obrigatórias
-                             </p>
-                           )}
-                         </div>
+                        <ObservationInput
+                          label="Observações"
+                          value={pendingChange?.observations || ''}
+                          onChange={(value) => handlePendingObservationChange(alert.chamado, value)}
+                          placeholder="Observações obrigatórias..."
+                          required
+                          id={`pending-${alert.chamado}`}
+                        />
                         
                         <div className="flex gap-1">
                           <Button
@@ -1039,12 +1015,10 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
                 <RotateCcw className="h-3 w-3" />
               </Button>
             </div>
-            {state.observations && (
-              <div className="text-xs text-muted-foreground p-2 bg-muted rounded text-left">
-                <strong>Observações:</strong><br />
-                {state.observations}
-              </div>
-            )}
+            <ObservationDisplay
+              observations={state.observations}
+              variant="compact"
+            />
           </div>
         );
 
