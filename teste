@@ -813,18 +813,20 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
       );
     }
 
-    // Padronização das caixas de observação
-    const ObservationBox = ({ value, onChange, placeholder, required = false }: {
+    // Componente padronizado para caixas de observação (definido fora do render)
+    const ObservationBox = useMemo(() => ({ value, onChange, placeholder, required = false, alertId }: {
       value: string;
       onChange: (value: string) => void;
       placeholder: string;
       required?: boolean;
+      alertId: string;
     }) => (
       <div className="space-y-1">
         <Label className="text-xs">
           Observações {required && <span className="text-destructive">*</span>}
         </Label>
         <Textarea
+          key={`textarea-${alertId}`}
           placeholder={placeholder}
           value={value}
           onChange={(e) => onChange(e.target.value)}
@@ -837,7 +839,7 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
           </p>
         )}
       </div>
-    );
+    ), []);
 
     switch (state.status) {
       case 'pending':
@@ -854,6 +856,7 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
                  onChange={(value) => handleConfirmationObservationChange(alert.chamado, value)}
                  placeholder="Observações são obrigatórias para confirmação"
                  required
+                 alertId={alert.chamado}
                />
               
               <Button
@@ -962,6 +965,7 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
                            onChange={(value) => handlePendingObservationChange(alert.chamado, value)}
                            placeholder="Observações obrigatórias..."
                            required
+                           alertId={alert.chamado}
                          />
                         
                         <div className="flex gap-1">
