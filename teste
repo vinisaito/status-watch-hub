@@ -82,6 +82,34 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
   const [showStatusConfirmation, setShowStatusConfirmation] = useState<Record<string, boolean>>({});
   const [pendingStatusChange, setPendingStatusChange] = useState<Record<string, { status: string; observations: string }>>({});
 
+  // Handlers de observação otimizados para evitar re-renders
+  const handleConfirmationObservationChange = useCallback((alertId: string, value: string) => {
+    setConfirmationObservations(prev => ({
+      ...prev,
+      [alertId]: value
+    }));
+  }, []);
+
+  const handleEscalationObservationChange = useCallback((alertId: string, value: string) => {
+    setEscalationStates(prev => ({
+      ...prev,
+      [alertId]: {
+        ...prev[alertId],
+        observations: value
+      }
+    }));
+  }, []);
+
+  const handlePendingObservationChange = useCallback((alertId: string, value: string) => {
+    setPendingStatusChange(prev => ({
+      ...prev,
+      [alertId]: {
+        ...prev[alertId],
+        observations: value
+      }
+    }));
+  }, []);
+
   // Timer para escalações
   useEffect(() => {
     const interval = setInterval(() => {
@@ -222,8 +250,8 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
             ...currentState,
             currentLevel: previousLevel as 0 | 1 | 2 | 3 | 4,
             status: previousLevel === 0 ? 'pending' : 'escalating',
-            timerActive: false,
-            timeRemaining: 0,
+            timerActive: true, // Reativa o timer
+            timeRemaining: previousLevel === 0 ? 1 * 10 : 1 * 40, // Reinicia tempo apropriado
             isAttended: false,
             observations: ''
           }
@@ -242,7 +270,36 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
 
     toast({
       title: "Escalação revertida",
-      description: "Processo voltou ao nível anterior",
+      description: "Processo voltou ao nível anterior e timer reiniciado",
+    });
+  }, []);
+
+  // Função para avançar escalação manualmente
+  const advanceEscalationManually = useCallback((alertId: string) => {
+    setEscalationStates(prev => {
+      const currentState = prev[alertId];
+      if (currentState && currentState.currentLevel < 4) {
+        const nextLevel = (currentState.currentLevel + 1) as 1 | 2 | 3 | 4;
+        const levelNames = { 1: 'primeira', 2: 'segunda', 3: 'terceira', 4: 'quarta' };
+        
+        toast({
+          title: `${levelNames[nextLevel]} escalação iniciada`,
+          description: `Timer de 10 minutos ativado`,
+        });
+
+        return {
+          ...prev,
+          [alertId]: {
+            ...currentState,
+            currentLevel: nextLevel,
+            timeRemaining: 1 * 40, // 10 minutos
+            timerActive: true,
+            isAttended: false,
+            observations: ''
+          }
+        };
+      }
+      return prev;
     });
   }, []);
 
@@ -792,17 +849,12 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
             </div>
             
             <div className="space-y-2">
-              <ObservationBox
-                value={currentObservation}
-                onChange={(value) => {
-                  setConfirmationObservations(prev => ({
-                    ...prev,
-                    [alert.chamado]: value
-                  }));
-                }}
-                placeholder="Observações são obrigatórias para confirmação"
-                required
-              />
+               <ObservationBox
+                 value={currentObservation}
+                 onChange={(value) => handleConfirmationObservationChange(alert.chamado, value)}
+                 placeholder="Observações são obrigatórias para confirmação"
+                 required
+               />
               
               <Button
                 size="sm"
@@ -871,17 +923,29 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
                         </Button>
                       )}
                       
-                      {/* Próxima escalação */}
-                      {state.currentLevel < 4 && (
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={() => startEscalation(alert.chamado, (state.currentLevel + 1) as 1 | 2 | 3 | 4)}
-                          className="h-6 px-2 text-xs flex-1"
-                        >
-                          Iniciar {levelNames[(state.currentLevel + 1) as keyof typeof levelNames]} Escalação
-                        </Button>
-                      )}
+                       {/* Próxima escalação */}
+                       {state.currentLevel < 4 && (
+                         <Button
+                           size="sm"
+                           variant="outline"
+                           onClick={() => startEscalation(alert.chamado, (state.currentLevel + 1) as 1 | 2 | 3 | 4)}
+                           className="h-6 px-2 text-xs flex-1"
+                         >
+                           Iniciar {levelNames[(state.currentLevel + 1) as keyof typeof levelNames]} Escalação
+                         </Button>
+                       )}
+                       
+                       {/* Botão para avançar manualmente quando timer está ativo */}
+                       {state.timerActive && state.currentLevel < 4 && (
+                         <Button
+                           size="sm"
+                           variant="secondary"
+                           onClick={() => advanceEscalationManually(alert.chamado)}
+                           className="h-6 px-2 text-xs flex-1"
+                         >
+                           Avançar Escalação
+                         </Button>
+                       )}
                     </div>
                   </div>
                 ) : (
@@ -893,20 +957,12 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
                           Confirmar: {pendingChange?.status === 'attended' ? 'Atendida' : 'Não Atendida'}
                         </div>
                         
-                        <ObservationBox
-                          value={pendingChange?.observations || ''}
-                          onChange={(value) => {
-                            setPendingStatusChange(prev => ({
-                              ...prev,
-                              [alert.chamado]: {
-                                ...prev[alert.chamado],
-                                observations: value
-                              }
-                            }));
-                          }}
-                          placeholder="Observações obrigatórias..."
-                          required
-                        />
+                         <ObservationBox
+                           value={pendingChange?.observations || ''}
+                           onChange={(value) => handlePendingObservationChange(alert.chamado, value)}
+                           placeholder="Observações obrigatórias..."
+                           required
+                         />
                         
                         <div className="flex gap-1">
                           <Button
