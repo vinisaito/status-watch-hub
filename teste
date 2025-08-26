@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
-import { Check, AlertTriangle, ExternalLink, Zap, Group, Calendar, Info, XCircle, Flame, ChevronLeft, ChevronRight, ArrowUpDown, ArrowUp, ArrowDown, Clock, Play, CheckCircle, X } from 'lucide-react';
+import { Check, AlertTriangle, ExternalLink, Zap, Group, Calendar, Info, XCircle, Flame, ChevronLeft, ChevronRight, ArrowUpDown, ArrowUp, ArrowDown, Clock, Play, CheckCircle, X, RotateCcw } from 'lucide-react';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
@@ -42,6 +42,8 @@ interface EscalationState {
   timerActive: boolean;
   isAttended: boolean;
   observations: string;
+  pendingStatus?: string; // Status pendente de confirmação
+  pendingObservations?: string; // Observações pendentes
 }
 
 interface ActionTableProps {
@@ -75,6 +77,10 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
   
   // Estado para armazenar observações de confirmação por chamado
   const [confirmationObservations, setConfirmationObservations] = useState<Record<string, string>>({});
+
+  // Estados para controle de confirmação de mudança de status
+  const [showStatusConfirmation, setShowStatusConfirmation] = useState<Record<string, boolean>>({});
+  const [pendingStatusChange, setPendingStatusChange] = useState<Record<string, { status: string; observations: string }>>({});
 
   // Timer para escalações
   useEffect(() => {
@@ -203,6 +209,97 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
     });
   }, []);
 
+  // Função para voltar escalação
+  const goBackEscalation = useCallback((alertId: string) => {
+    setEscalationStates(prev => {
+      const currentState = prev[alertId];
+      if (currentState && currentState.currentLevel > 0) {
+        const previousLevel = Math.max(0, currentState.currentLevel - 1);
+        
+        return {
+          ...prev,
+          [alertId]: {
+            ...currentState,
+            currentLevel: previousLevel as 0 | 1 | 2 | 3 | 4,
+            status: previousLevel === 0 ? 'pending' : 'escalating',
+            timerActive: false,
+            timeRemaining: 0,
+            isAttended: false,
+            observations: ''
+          }
+        };
+      }
+      return prev;
+    });
+
+    // Limpa status e observações pendentes
+    setShowStatusConfirmation(prev => ({ ...prev, [alertId]: false }));
+    setPendingStatusChange(prev => {
+      const newState = { ...prev };
+      delete newState[alertId];
+      return newState;
+    });
+
+    toast({
+      title: "Escalação revertida",
+      description: "Processo voltou ao nível anterior",
+    });
+  }, []);
+
+  // Função para preparar mudança de status com confirmação
+  const prepareStatusChange = useCallback((alertId: string, status: string) => {
+    setPendingStatusChange(prev => ({
+      ...prev,
+      [alertId]: { status, observations: '' }
+    }));
+    setShowStatusConfirmation(prev => ({ ...prev, [alertId]: true }));
+  }, []);
+
+  // Função para confirmar mudança de status
+  const confirmStatusChange = useCallback((alertId: string) => {
+    const pending = pendingStatusChange[alertId];
+    if (!pending || !pending.observations.trim()) {
+      toast({
+        title: "Observações obrigatórias",
+        description: "Por favor, preencha as observações antes de confirmar",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    const attended = pending.status === 'attended';
+    markAsAttended(alertId, attended, pending.observations);
+
+    // Limpa estados de confirmação
+    setShowStatusConfirmation(prev => ({ ...prev, [alertId]: false }));
+    setPendingStatusChange(prev => {
+      const newState = { ...prev };
+      delete newState[alertId];
+      return newState;
+    });
+
+    // Se não foi atendida e não é a última escalação, prepara para próxima
+    if (!attended) {
+      const state = escalationStates[alertId];
+      if (state && state.currentLevel < 4) {
+        setTimeout(() => {
+          advanceToNextEscalation(alertId);
+        }, 100);
+      }
+    }
+  }, [pendingStatusChange, escalationStates]);
+
+  // Função para cancelar mudança de status
+  const cancelStatusChange = useCallback((alertId: string) => {
+    setShowStatusConfirmation(prev => ({ ...prev, [alertId]: false }));
+    setPendingStatusChange(prev => {
+      const newState = { ...prev };
+      delete newState[alertId];
+      return newState;
+    });
+    setEscalationStatus(prev => ({ ...prev, [alertId]: '' }));
+  }, []);
+
   // Função para marcar como atendido
   const markAsAttended = useCallback((alertId: string, attended: boolean, observations: string) => {
     setEscalationStates(prev => ({
@@ -244,7 +341,8 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
             currentLevel: nextLevel,
             timeRemaining: 10 * 60, // 10 minutos
             timerActive: true,
-            isAttended: false
+            isAttended: false,
+            observations: ''
           }
         };
       }
@@ -639,6 +737,8 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
   const renderConfirmationColumn = (alert: AlertData) => {
     const state = escalationStates[alert.chamado];
     const currentObservation = confirmationObservations[alert.chamado] || '';
+    const showConfirmation = showStatusConfirmation[alert.chamado];
+    const pendingChange = pendingStatusChange[alert.chamado];
     
     if (!state) {
       return (
@@ -656,6 +756,32 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
       );
     }
 
+    // Padronização das caixas de observação
+    const ObservationBox = ({ value, onChange, placeholder, required = false }: {
+      value: string;
+      onChange: (value: string) => void;
+      placeholder: string;
+      required?: boolean;
+    }) => (
+      <div className="space-y-1">
+        <Label className="text-xs">
+          Observações {required && <span className="text-destructive">*</span>}
+        </Label>
+        <Textarea
+          placeholder={placeholder}
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          className="text-xs min-h-[60px] resize-none"
+          required={required}
+        />
+        {required && !value.trim() && (
+          <p className="text-xs text-destructive">
+            Observações são obrigatórias
+          </p>
+        )}
+      </div>
+    );
+
     switch (state.status) {
       case 'pending':
         return (
@@ -666,20 +792,15 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
             </div>
             
             <div className="space-y-2">
-              <Label htmlFor={`confirmation-${alert.chamado}`} className="text-xs text-left block">
-                Observações *
-              </Label>
-              <Textarea
-                id={`confirmation-${alert.chamado}`}
-                placeholder="Observações são obrigatórias para confirmação"
+              <ObservationBox
                 value={currentObservation}
-                onChange={(e) => {
+                onChange={(value) => {
                   setConfirmationObservations(prev => ({
                     ...prev,
-                    [alert.chamado]: e.target.value
+                    [alert.chamado]: value
                   }));
                 }}
-                className="text-xs min-h-[60px] resize-none"
+                placeholder="Observações são obrigatórias para confirmação"
                 required
               />
               
@@ -693,12 +814,6 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
                 <Check className="h-3 w-3 mr-1" />
                 Confirmar
               </Button>
-              
-              {!currentObservation.trim() && (
-                <p className="text-xs text-muted-foreground text-center">
-                  Preencha as observações para confirmar
-                </p>
-              )}
             </div>
           </div>
         );
@@ -721,7 +836,6 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
 
       case 'escalating':
         const levelNames = { 1: '1ª', 2: '2ª', 3: '3ª', 4: '4ª' };
-        const currentEscalationStatus = escalationStatus[alert.chamado] || '';
         
         return (
           <div className="space-y-2">
@@ -743,73 +857,108 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
               <>
                 {state.currentLevel === 0 || (!state.timerActive && state.currentLevel < 4) ? (
                   <div className="space-y-1">
-                    {/* Mostra apenas a próxima escalação na sequência */}
-                    {state.currentLevel < 4 && (
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => startEscalation(alert.chamado, (state.currentLevel + 1) as 1 | 2 | 3 | 4)}
-                        className="h-6 px-2 text-xs w-full"
-                      >
-                        Iniciar {levelNames[(state.currentLevel + 1) as keyof typeof levelNames]} Escalação
-                      </Button>
-                    )}
+                    <div className="flex gap-1">
+                      {/* Botão Voltar - só aparece se não estiver no nível 0 */}
+                      {state.currentLevel > 0 && (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => goBackEscalation(alert.chamado)}
+                          className="h-6 px-2 text-xs flex-1"
+                        >
+                          <RotateCcw className="h-3 w-3 mr-1" />
+                          Voltar
+                        </Button>
+                      )}
+                      
+                      {/* Próxima escalação */}
+                      {state.currentLevel < 4 && (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => startEscalation(alert.chamado, (state.currentLevel + 1) as 1 | 2 | 3 | 4)}
+                          className="h-6 px-2 text-xs flex-1"
+                        >
+                          Iniciar {levelNames[(state.currentLevel + 1) as keyof typeof levelNames]} Escalação
+                        </Button>
+                      )}
+                    </div>
                   </div>
                 ) : (
                   <div className="space-y-2">
-                    <Select
-                      value={currentEscalationStatus}
-                      onValueChange={(value) => {
-                        setEscalationStatus(prev => ({
-                          ...prev,
-                          [alert.chamado]: value
-                        }));
-                        const attended = value === 'attended';
-                        markAsAttended(alert.chamado, attended, state.observations);
-                      }}
-                    >
-                      <SelectTrigger className="h-6 text-xs">
-                        <SelectValue placeholder="Status" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="attended">Atendida</SelectItem>
-                        <SelectItem value="not-attended">Não Atendida</SelectItem>
-                      </SelectContent>
-                    </Select>
+                    {/* Mostrar confirmação de status quando pendente */}
+                    {showConfirmation ? (
+                      <div className="space-y-2 p-2 border rounded bg-background">
+                        <div className="text-xs font-medium">
+                          Confirmar: {pendingChange?.status === 'attended' ? 'Atendida' : 'Não Atendida'}
+                        </div>
+                        
+                        <ObservationBox
+                          value={pendingChange?.observations || ''}
+                          onChange={(value) => {
+                            setPendingStatusChange(prev => ({
+                              ...prev,
+                              [alert.chamado]: {
+                                ...prev[alert.chamado],
+                                observations: value
+                              }
+                            }));
+                          }}
+                          placeholder="Observações obrigatórias..."
+                          required
+                        />
+                        
+                        <div className="flex gap-1">
+                          <Button
+                            size="sm"
+                            variant="default"
+                            onClick={() => confirmStatusChange(alert.chamado)}
+                            disabled={!pendingChange?.observations?.trim()}
+                            className="h-6 px-2 text-xs flex-1"
+                          >
+                            <Check className="h-3 w-3 mr-1" />
+                            Confirmar
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => cancelStatusChange(alert.chamado)}
+                            className="h-6 px-2 text-xs flex-1"
+                          >
+                            <X className="h-3 w-3 mr-1" />
+                            Cancelar
+                          </Button>
+                        </div>
+                      </div>
+                    ) : (
+                      <>
+                        <div className="flex gap-1">
+                          {/* Botão Voltar */}
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => goBackEscalation(alert.chamado)}
+                            className="h-6 px-2 text-xs flex-1"
+                          >
+                            <RotateCcw className="h-3 w-3 mr-1" />
+                            Voltar
+                          </Button>
+                        </div>
 
-                    {/* Botão OK para avançar quando "Não Atendida" é selecionado */}
-                    {currentEscalationStatus === 'not-attended' && state.currentLevel < 4 && (
-                      <Button
-                        size="sm"
-                        variant="default"
-                        onClick={() => {
-                          setEscalationStatus(prev => ({
-                            ...prev,
-                            [alert.chamado]: ''
-                          }));
-                          advanceToNextEscalation(alert.chamado);
-                        }}
-                        className="h-6 px-2 text-xs w-full"
-                      >
-                        <Check className="h-3 w-3 mr-1" />
-                        OK - Próxima Escalação
-                      </Button>
+                        <Select
+                          value=""
+                          onValueChange={(value) => prepareStatusChange(alert.chamado, value)}
+                        >
+                          <SelectTrigger className="h-6 text-xs">
+                            <SelectValue placeholder="Selecionar Status" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="attended">Atendida</SelectItem>
+                            <SelectItem value="not-attended">Não Atendida</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </>
                     )}
-                    
-                    <Textarea
-                      placeholder="Observações..."
-                      value={state.observations}
-                      onChange={(e) => {
-                        setEscalationStates(prev => ({
-                          ...prev,
-                          [alert.chamado]: {
-                            ...prev[alert.chamado],
-                            observations: e.target.value
-                          }
-                        }));
-                      }}
-                      className="text-xs min-h-[60px]"
-                    />
                   </div>
                 )}
               </>
@@ -819,13 +968,23 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
 
       case 'completed':
         return (
-          <div className="text-center">
-            <Badge variant="default" className="bg-success text-success-foreground">
-              <CheckCircle className="h-3 w-3 mr-1" />
-              Finalizado
-            </Badge>
+          <div className="text-center space-y-2">
+            <div className="flex gap-1 justify-center">
+              <Badge variant="default" className="bg-success text-success-foreground">
+                <CheckCircle className="h-3 w-3 mr-1" />
+                Finalizado
+              </Badge>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => goBackEscalation(alert.chamado)}
+                className="h-6 px-2 text-xs"
+              >
+                <RotateCcw className="h-3 w-3" />
+              </Button>
+            </div>
             {state.observations && (
-              <div className="text-xs text-muted-foreground p-2 bg-muted rounded text-left mt-2">
+              <div className="text-xs text-muted-foreground p-2 bg-muted rounded text-left">
                 <strong>Observações:</strong><br />
                 {state.observations}
               </div>
@@ -837,3 +996,50 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
         return null;
     }
   };
+
+  return (
+    <div className="space-y-4">
+      <Card>
+        <CardHeader>
+          <h2 className="text-xl font-semibold">Tabela de Ações</h2>
+        </CardHeader>
+        <CardContent>
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Chamado</TableHead>
+                <TableHead>Tipo</TableHead>
+                <TableHead>Grupo</TableHead>
+                <TableHead>Status</TableHead>
+                <TableHead>Abertura</TableHead>
+                <TableHead>Resumo</TableHead>
+                <TableHead>Severidade</TableHead>
+                <TableHead>Acionado</TableHead>
+                <TableHead>Confirmação/Escalação</TableHead>
+                <TableHead>Ações</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {alertData.map((alert) => (
+                <TableRow key={alert.id}>
+                  <TableCell>{alert.chamado}</TableCell>
+                  <TableCell>{alert.tipo_chamado}</TableCell>
+                  <TableCell>{alert.grupo_chamado}</TableCell>
+                  <TableCell>{alert.status_chamado}</TableCell>
+                  <TableCell>{alert.abertura_chamado}</TableCell>
+                  <TableCell>{alert.resumo_chamado}</TableCell>
+                  <TableCell>{alert.severidade_chamado}</TableCell>
+                  <TableCell>{alert.acionado}</TableCell>
+                  <TableCell>{renderConfirmationColumn(alert)}</TableCell>
+                  <TableCell>
+                    <Button size="sm">Ações</Button>
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </CardContent>
+      </Card>
+    </div>
+  );
+};
