@@ -44,7 +44,6 @@ interface EscalationState {
   observations: string;
   pendingStatus?: string; // Status pendente de confirmação
   pendingObservations?: string; // Observações pendentes
-  lastUpdated?: number; // Timestamp da última atualização
 }
 
 interface ActionTableProps {
@@ -83,9 +82,6 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
   const [showStatusConfirmation, setShowStatusConfirmation] = useState<Record<string, boolean>>({});
   const [pendingStatusChange, setPendingStatusChange] = useState<Record<string, { status: string; observations: string }>>({});
 
-  // Estado para controlar quando foi a última sincronização
-  const [lastSyncTime, setLastSyncTime] = useState<number>(0);
-
   // Função para salvar dados na API Gateway
   const saveToAPI = useCallback(async (alertId: string, data: any) => {
     try {
@@ -99,18 +95,12 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
           ...data,
           ttl: Math.floor(Date.now() / 1000) + (7 * 24 * 60 * 60), // 7 dias TTL
           alertOpenTime: new Date().toISOString(),
-          lastUpdated: Date.now(), // Adiciona timestamp de atualização
         }),
       });
 
       if (!response.ok) {
         throw new Error(`Erro na API: ${response.status}`);
       }
-
-      // Após salvar, força uma sincronização imediata
-      setTimeout(() => {
-        loadConfirmationData();
-      }, 500);
 
       return await response.json();
     } catch (error) {
@@ -124,13 +114,11 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
     }
   }, []);
 
-  // Função para carregar dados de confirmação salvos na API - MELHORADA para sincronização
-  const loadConfirmationData = useCallback(async (force = false) => {
+  // Função para carregar dados de confirmação salvos na API - APRIMORADA
+  const loadConfirmationData = useCallback(async () => {
     try {
       // Busca dados de acompanhamento para todos os chamados visíveis
       const chamadosVisveis = alertData.map(alert => alert.chamado);
-      if (chamadosVisveis.length === 0) return;
-      
       console.log('Carregando dados para chamados:', chamadosVisveis);
       
       const confirmationPromises = chamadosVisveis.map(async (chamado) => {
@@ -170,89 +158,79 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
         if (data) {
           console.log(`Processando chamado ${chamado}:`, data);
           
-          // Verifica se houve atualização recente (última hora)
-          const dataLastUpdated = data.lastUpdated || 0;
-          const currentState = escalationStates[chamado];
+          // Determina o status baseado nos dados salvos
+          let status: EscalationState['status'] = 'pending';
+          let currentLevel: EscalationState['currentLevel'] = 0;
+          let isAttended = false;
+          let lastObservation = '';
+          let timeRemaining = 0;
+          let timerActive = false;
           
-          // Se forçado ou se há dados mais recentes ou se não existe estado local
-          if (force || !currentState || dataLastUpdated > (currentState.lastUpdated || 0)) {
-            
-            // Determina o status baseado nos dados salvos
-            let status: EscalationState['status'] = 'pending';
-            let currentLevel: EscalationState['currentLevel'] = 0;
-            let isAttended = false;
-            let lastObservation = '';
-            let timerActive = false;
-            let timeRemaining = 0;
-            
-            // Verifica se foi confirmado
-            if (data.confirmChat && data.confirmChat !== '') {
-              status = 'confirmed';
-              lastObservation = data.confirmChat;
-              console.log(`Chamado ${chamado} tem confirmação:`, data.confirmChat);
-            }
-            
-            // Verifica escalações
-            if (data.escalations && Array.isArray(data.escalations)) {
-              for (let i = 0; i < data.escalations.length; i++) {
-                const escalation = data.escalations[i];
-                if (escalation.status === 'em_andamento') {
-                  status = 'escalating';
-                  currentLevel = (escalation.level) as EscalationState['currentLevel'];
-                  lastObservation = escalation.observations || '';
-                  
-                  // Calcula tempo restante baseado no timestamp do evento
-                  if (escalation.eventTimestamp) {
-                    const escalationTime = new Date(escalation.eventTimestamp).getTime();
-                    const currentTime = Date.now();
-                    const elapsedMinutes = Math.floor((currentTime - escalationTime) / (1000 * 60));
-                    const maxMinutes = currentLevel === 0 ? 20 : 10; // 20 min confirmação, 10 min escalação
-                    const remainingMinutes = Math.max(0, maxMinutes - elapsedMinutes);
-                    timeRemaining = remainingMinutes * 60; // Converte para segundos
-                    timerActive = remainingMinutes > 0;
-                  }
-                  
-                  console.log(`Chamado ${chamado} está em escalação nível ${escalation.level}`);
-                  break;
-                } else if (escalation.status === 'atendido') {
-                  status = 'completed';
-                  currentLevel = (escalation.level) as EscalationState['currentLevel'];
-                  isAttended = true;
-                  lastObservation = escalation.observations || '';
-                  console.log(`Chamado ${chamado} foi atendido no nível ${escalation.level}`);
-                  break;
-                } else if (escalation.status === 'finalizado' && i < 3) {
-                  // Se finalizou mas não foi o último nível, continua checando
-                  currentLevel = (escalation.level) as EscalationState['currentLevel'];
-                  lastObservation = escalation.observations || '';
-                  console.log(`Chamado ${chamado} finalizou nível ${escalation.level}`);
+          // Verifica se foi confirmado
+          if (data.confirmChat && data.confirmChat !== '') {
+            status = 'confirmed';
+            lastObservation = data.confirmChat;
+            console.log(`Chamado ${chamado} tem confirmação:`, data.confirmChat);
+          }
+          
+          // Verifica escalações
+          if (data.escalations && Array.isArray(data.escalations)) {
+            for (let i = 0; i < data.escalations.length; i++) {
+              const escalation = data.escalations[i];
+              if (escalation.status === 'em_andamento') {
+                status = 'escalating';
+                currentLevel = (escalation.level) as EscalationState['currentLevel'];
+                lastObservation = escalation.observations || '';
+                
+                // Calcula tempo restante baseado no timestamp do evento
+                if (escalation.eventTimestamp) {
+                  const eventTime = new Date(escalation.eventTimestamp).getTime();
+                  const currentTime = Date.now();
+                  const elapsedTime = Math.floor((currentTime - eventTime) / 1000);
+                  const totalTime = currentLevel === 0 ? 20 * 60 : 10 * 60; // 20 min para confirmação, 10 min para escalação
+                  timeRemaining = Math.max(0, totalTime - elapsedTime);
+                  timerActive = timeRemaining > 0;
                 }
+                
+                console.log(`Chamado ${chamado} está em escalação nível ${escalation.level} com ${timeRemaining}s restantes`);
+                break;
+              } else if (escalation.status === 'atendido') {
+                status = 'completed';
+                currentLevel = (escalation.level) as EscalationState['currentLevel'];
+                isAttended = true;
+                lastObservation = escalation.observations || '';
+                console.log(`Chamado ${chamado} foi atendido no nível ${escalation.level}`);
+                break;
+              } else if (escalation.status === 'finalizado' && i < 3) {
+                // Se finalizou mas não foi o último nível, continua checando
+                currentLevel = (escalation.level) as EscalationState['currentLevel'];
+                lastObservation = escalation.observations || '';
+                console.log(`Chamado ${chamado} finalizou nível ${escalation.level}`);
               }
             }
-            
-            // Verifica se há obsChat indicando atendimento
-            if (data.obsChat && data.obsChat.includes('atendida com sucesso')) {
-              status = 'completed';
-              isAttended = true;
-              console.log(`Chamado ${chamado} foi marcado como atendido via obsChat`);
-            }
-            
-            newEscalationStates[chamado] = {
-              status,
-              currentLevel,
-              timeRemaining,
-              timerActive,
-              isAttended,
-              observations: lastObservation,
-              lastUpdated: dataLastUpdated
-            };
-            
-            console.log(`Estado final para chamado ${chamado}:`, newEscalationStates[chamado]);
-            
-            // Salva observações de confirmação
-            if (data.confirmChat) {
-              newConfirmationObservations[chamado] = data.confirmChat;
-            }
+          }
+          
+          // Verifica se há obsChat indicando atendimento
+          if (data.obsChat && data.obsChat.includes('atendida com sucesso')) {
+            status = 'completed';
+            isAttended = true;
+            console.log(`Chamado ${chamado} foi marcado como atendido via obsChat`);
+          }
+          
+          newEscalationStates[chamado] = {
+            status,
+            currentLevel,
+            timeRemaining,
+            timerActive,
+            isAttended,
+            observations: lastObservation
+          };
+          
+          console.log(`Estado final para chamado ${chamado}:`, newEscalationStates[chamado]);
+          
+          // Salva observações de confirmação
+          if (data.confirmChat) {
+            newConfirmationObservations[chamado] = data.confirmChat;
           }
         }
       });
@@ -269,23 +247,17 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
         setConfirmationObservations(prev => ({ ...prev, ...newConfirmationObservations }));
       }
       
-      setLastSyncTime(Date.now());
-      
     } catch (error) {
       console.error('Erro ao carregar dados de confirmação:', error);
     }
-  }, [alertData, escalationStates]);
+  }, [alertData]);
 
-  // Polling automático para sincronização a cada 10 segundos
-  useEffect(() => {
-    if (alertData.length === 0) return;
-
-    const interval = setInterval(() => {
-      loadConfirmationData();
-    }, 10000); // 10 segundos
-
-    return () => clearInterval(interval);
-  }, [alertData, loadConfirmationData]);
+  // Função para sincronizar dados periodicamente
+  const syncData = useCallback(async () => {
+    if (alertData.length > 0) {
+      await loadConfirmationData();
+    }
+  }, [loadConfirmationData]);
 
   // Handlers de observação otimizados para evitar re-renders
   const handleConfirmationObservationChange = useCallback((alertId: string, value: string) => {
@@ -315,7 +287,7 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
     }));
   }, []);
 
-  // Timer para escalações - MELHORADO para não conflitar com sincronização
+  // Timer para escalações - APRIMORADO
   useEffect(() => {
     const interval = setInterval(() => {
       setEscalationStates(prev => {
@@ -369,18 +341,43 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
     return () => clearInterval(interval);
   }, []);
 
-  // Função para iniciar confirmação
-  const startConfirmation = useCallback((alertId: string) => {
+  // Sincronização automática de dados a cada 30 segundos
+  useEffect(() => {
+    const syncInterval = setInterval(syncData, 30000);
+    return () => clearInterval(syncInterval);
+  }, [syncData]);
+
+  // Função para iniciar confirmação - APRIMORADA
+  const startConfirmation = useCallback(async (alertId: string) => {
+    try {
+      // Salva na API o início da confirmação
+      const apiData = {
+        escalations: [
+          { level: 1, status: "", observations: "", eventTimestamp: "" },
+          { level: 2, status: "", observations: "", eventTimestamp: "" },
+          { level: 3, status: "", observations: "", eventTimestamp: "" },
+          { level: 4, status: "", observations: "", eventTimestamp: "" }
+        ],
+        obsChat: "",
+        confirmChat: "",
+        sendChat: new Date().toISOString(),
+        confirmationStarted: new Date().toISOString(),
+      };
+
+      await saveToAPI(alertId, apiData);
+    } catch (error) {
+      // Continua mesmo se falhar na API
+    }
+
     setEscalationStates(prev => ({
       ...prev,
       [alertId]: {
         status: 'pending',
         currentLevel: 0,
-        timeRemaining: 20 * 60, // 20 minutos
+        timeRemaining: 20 * 60, // 20 minutos para confirmação
         timerActive: true,
         isAttended: false,
-        observations: '',
-        lastUpdated: Date.now()
+        observations: ''
       }
     }));
     
@@ -394,7 +391,7 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
       title: "Confirmação iniciada",
       description: "Aguardando confirmação por 20 minutos",
     });
-  }, []);
+  }, [saveToAPI]);
 
   // Função para confirmar recebimento - MODIFICADA para integrar com API
   const confirmReceived = useCallback(async (alertId: string) => {
@@ -412,6 +409,7 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
         obsChat: "",
         confirmChat: observation,
         sendChat: new Date().toISOString(),
+        confirmedAt: new Date().toISOString(),
       };
 
       // Salva na API
@@ -424,8 +422,7 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
           status: 'confirmed',
           timerActive: false,
           timeRemaining: 0,
-          observations: observation,
-          lastUpdated: Date.now()
+          observations: observation
         }
       }));
 
@@ -448,8 +445,7 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
           status: 'confirmed',
           timerActive: false,
           timeRemaining: 0,
-          observations: observation,
-          lastUpdated: Date.now()
+          observations: observation
         }
       }));
 
@@ -476,6 +472,8 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
         obsChat: "",
         confirmChat: level === 1 ? (confirmationObservations[alertId] || "") : "",
         sendChat: new Date().toISOString(),
+        escalationLevel: level,
+        escalationStarted: new Date().toISOString(),
       };
 
       // Salva na API
@@ -487,11 +485,10 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
           ...prev[alertId],
           status: 'escalating',
           currentLevel: level,
-          timeRemaining: 10 * 60, // 10 minutos
+          timeRemaining: 10 * 60, // 10 minutos para escalação
           timerActive: true,
           isAttended: false,
-          observations: '',
-          lastUpdated: Date.now()
+          observations: ''
         }
       }));
 
@@ -511,8 +508,7 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
           timeRemaining: 10 * 60,
           timerActive: true,
           isAttended: false,
-          observations: '',
-          lastUpdated: Date.now()
+          observations: ''
         }
       }));
 
@@ -540,8 +536,7 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
             timerActive: true, // Reativa o timer
             timeRemaining: previousLevel === 0 ? 20 * 60 : 10 * 60, // Reinicia tempo apropriado
             isAttended: false,
-            observations: '',
-            lastUpdated: Date.now()
+            observations: ''
           }
         };
       }
@@ -613,6 +608,8 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
           obsChat: "",
           confirmChat: confirmationObservations[alertId] || "",
           sendChat: new Date().toISOString(),
+          escalationLevel: nextLevel,
+          escalationAdvanced: new Date().toISOString(),
         };
 
         // Salva na API
@@ -636,8 +633,7 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
           timeRemaining: 10 * 60, // 10 minutos
           timerActive: true,
           isAttended: false,
-          observations: '',
-          lastUpdated: Date.now()
+          observations: ''
         }
       }));
     }
@@ -702,6 +698,8 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
         obsChat: attended ? "Escalação atendida com sucesso" : "Escalação não atendida - prosseguindo",
         confirmChat: confirmationObservations[alertId] || "",
         sendChat: new Date().toISOString(),
+        statusChanged: new Date().toISOString(),
+        attended: attended
       };
 
       // Salva na API
@@ -751,8 +749,7 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
         isAttended: attended,
         observations,
         status: attended ? 'completed' : prev[alertId].status,
-        timerActive: attended ? false : prev[alertId].timerActive,
-        lastUpdated: Date.now()
+        timerActive: attended ? false : prev[alertId].timerActive
       }
     }));
 
@@ -785,8 +782,7 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
             timeRemaining: 10 * 60, // 10 minutos
             timerActive: true,
             isAttended: false,
-            observations: '',
-            lastUpdated: Date.now()
+            observations: ''
           }
         };
       }
@@ -992,10 +988,10 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
   // Carrega dados de confirmação quando os alertas mudam
   useEffect(() => {
     if (alertData.length > 0) {
-      loadConfirmationData(true); // Force na primeira carga
+      loadConfirmationData();
     }
   }, [alertData, loadConfirmationData]);
-
+  
   const handleAcknowledgment = async (alert: AlertData) => {
     try {
       const response = await fetch(
@@ -1173,6 +1169,7 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
   const getStatusText = (chat: boolean) => {
     return chat ? 'ACIONADO VIA CHAT' : 'NÃO ACIONADO VIA CHAT';
   };
+  
   const handlePageChange = (page: number) => {
     setCurrentPage(page);
   };
