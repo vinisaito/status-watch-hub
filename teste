@@ -1,3 +1,5 @@
+// Update this page (the content is just a fallback if you fail to update the page)
+
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import { Check, AlertTriangle, ExternalLink, Zap, Group, Calendar, Info, XCircle, Flame, ChevronLeft, ChevronRight, ArrowUpDown, ArrowUp, ArrowDown, Clock, Play, CheckCircle, X, RotateCcw, FastForward } from 'lucide-react';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
@@ -220,15 +222,7 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
             }
           }
           
-          // Verifica se foi confirmado
-          if (data.confirmChat && data.confirmChat !== '') {
-            status = 'confirmed';
-            lastObservation = data.confirmChat;
-            timerActive = false;
-            console.log(`Chamado ${chamado} tem confirmação:`, data.confirmChat);
-          }
-          
-          // Verifica escalações
+          // Verifica escalações PRIMEIRO para determinar o estado correto
           if (data.escalations && Array.isArray(data.escalations)) {
             for (let i = 0; i < data.escalations.length; i++) {
               const escalation = data.escalations[i];
@@ -262,6 +256,14 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
             console.log(`Chamado ${chamado} foi marcado como atendido via obsChat`);
           }
           
+          // Verifica se foi confirmado apenas se não há escalação ativa
+          if (data.confirmChat && data.confirmChat !== '' && status !== 'escalating' && status !== 'completed') {
+            status = 'confirmed';
+            lastObservation = data.confirmChat;
+            timerActive = false;
+            console.log(`Chamado ${chamado} tem confirmação:`, data.confirmChat);
+          }
+          
           newEscalationStates[chamado] = {
             status,
             currentLevel,
@@ -284,8 +286,38 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
       console.log('Estados de escalação atualizados:', newEscalationStates);
       console.log('Observações de confirmação atualizadas:', newConfirmationObservations);
       
+      // Atualiza estados de forma inteligente - preserva timers ativos locais
       if (Object.keys(newEscalationStates).length > 0) {
-        setEscalationStates(prev => ({ ...prev, ...newEscalationStates }));
+        setEscalationStates(prev => {
+          const mergedStates = { ...prev };
+          
+          Object.entries(newEscalationStates).forEach(([chamado, newState]) => {
+            const currentState = prev[chamado];
+            
+            // Se há um timer local ativo e o estado remoto não tem timer ativo, mantém o local
+            if (currentState?.timerActive && currentState.timeRemaining > 0 && !newState.timerActive) {
+              console.log(`Mantendo timer local ativo para chamado ${chamado}`);
+              return; // Não sobrescreve
+            }
+            
+            // Se o estado remoto tem timer ativo, calcula o tempo correto
+            if (newState.timerActive && newState.startTime && newState.duration) {
+              const timePassed = Math.floor((Date.now() - newState.startTime) / 1000);
+              const timeRemaining = Math.max(0, newState.duration - timePassed);
+              
+              mergedStates[chamado] = {
+                ...newState,
+                timeRemaining,
+                timerActive: timeRemaining > 0
+              };
+              console.log(`Timer sincronizado para chamado ${chamado}: ${timeRemaining}s restantes`);
+            } else {
+              mergedStates[chamado] = newState;
+            }
+          });
+          
+          return mergedStates;
+        });
       }
       
       if (Object.keys(newConfirmationObservations).length > 0) {
@@ -401,11 +433,15 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
   // Intervalo de sincronização para manter estados atualizados entre usuários
   useEffect(() => {
     const syncInterval = setInterval(() => {
-      syncStates();
+      // Só sincroniza se não há timers ativos localmente
+      const hasActiveTimers = Object.values(escalationStates).some(state => state.timerActive);
+      if (!hasActiveTimers) {
+        syncStates();
+      }
     }, 15000); // Sincroniza a cada 15 segundos
 
     return () => clearInterval(syncInterval);
-  }, [syncStates]);
+  }, [syncStates, escalationStates]);
 
   // Função para iniciar confirmação - MODIFICADA para salvar estado
   const startConfirmation = useCallback(async (alertId: string) => {
