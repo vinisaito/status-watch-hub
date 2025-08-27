@@ -1,4 +1,8 @@
-  // Renderiza o componente de confirmação/escalação
+"[{\"escalations\": [{\"level\": 1, \"status\": \"\", \"observations\": \"\", \"eventTimestamp\": \"\"}, {\"level\": 2, \"status\": \"\", \"observations\": \"\", \"eventTimestamp\": \"\"}, {\"level\": 3, \"status\": \"\", \"observations\": \"\", \"eventTimestamp\": \"\"}, {\"level\": 4, \"status\": \"\", \"observations\": \"\", \"eventTimestamp\": \"\"}], \"obsChat\": \"\", \"chamado\": 12345, \"confirmChat\": \"\", \"sendChat\": \"2025-08-26T09:30:00Z\", \"ttl\": 1771782338, \"alertOpenTime\": \"2025-08-26T09:30:00Z\"},
+
+https://f6ffk8e9fe.execute-api.us-east-1.amazonaws.com/prod/acompanhamento
+
+// Renderiza o componente de confirmação/escalação
   const renderConfirmationColumn = (alert: AlertData) => {
     const state = escalationStates[alert.chamado];
     const currentObservation = confirmationObservations[alert.chamado] || '';
