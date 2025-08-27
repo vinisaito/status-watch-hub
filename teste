@@ -1,52 +1,85 @@
 import * as React from "react"
-import { Slot } from "@radix-ui/react-slot"
 import { cva, type VariantProps } from "class-variance-authority"
 import { cn } from "@/lib/utils"
+import { Clock, CheckCircle, AlertTriangle, Zap } from "lucide-react"
 
-const escalationButtonVariants = cva(
-  "inline-flex items-center justify-center rounded-lg text-sm font-medium transition-all duration-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 transform hover:scale-105 active:scale-95",
+const escalationStatusVariants = cva(
+  "inline-flex items-center gap-2 rounded-full px-3 py-1 text-xs font-medium transition-all duration-300",
   {
     variants: {
-      variant: {
-        pending: "bg-gradient-warning text-warning-foreground shadow-md hover:shadow-lg",
-        confirmed: "bg-gradient-success text-success-foreground shadow-md hover:shadow-lg",
-        escalating: "bg-gradient-danger text-destructive-foreground shadow-md hover:shadow-lg animate-pulse",
-        completed: "bg-gradient-primary text-primary-foreground shadow-md hover:shadow-lg",
-        timer: "bg-amber-100 text-amber-800 border border-amber-200 shadow-sm hover:shadow-md",
-        action: "bg-white text-foreground border border-border shadow-sm hover:shadow-md hover:bg-accent"
-      },
-      size: {
-        default: "h-8 px-3 py-2",
-        sm: "h-6 px-2 py-1 text-xs",
-        lg: "h-10 px-4 py-3",
-        icon: "h-8 w-8"
-      },
+      status: {
+        pending: "bg-amber-100 text-amber-800 border border-amber-200",
+        confirmed: "bg-emerald-100 text-emerald-800 border border-emerald-200",
+        escalating: "bg-red-100 text-red-800 border border-red-200 animate-pulse",
+        completed: "bg-blue-100 text-blue-800 border border-blue-200"
+      }
     },
     defaultVariants: {
-      variant: "action",
-      size: "default",
-    },
+      status: "pending"
+    }
   }
 )
 
-export interface EscalationButtonProps
-  extends React.ButtonHTMLAttributes<HTMLButtonElement>,
-    VariantProps<typeof escalationButtonVariants> {
-  asChild?: boolean
+interface EscalationStatusProps extends VariantProps<typeof escalationStatusVariants> {
+  className?: string
+  level?: number
+  timeRemaining?: number
 }
 
-const EscalationButton = React.forwardRef<HTMLButtonElement, EscalationButtonProps>(
-  ({ className, variant, size, asChild = false, ...props }, ref) => {
-    const Comp = asChild ? Slot : "button"
+const formatTime = (seconds: number) => {
+  const minutes = Math.floor(seconds / 60)
+  const remainingSeconds = seconds % 60
+  return `${minutes.toString().padStart(2, '0')}:${remainingSeconds.toString().padStart(2, '0')}`
+}
+
+const getStatusIcon = (status: string) => {
+  switch (status) {
+    case 'pending':
+      return <Clock className="h-3 w-3" />
+    case 'confirmed':
+      return <CheckCircle className="h-3 w-3" />
+    case 'escalating':
+      return <AlertTriangle className="h-3 w-3" />
+    case 'completed':
+      return <Zap className="h-3 w-3" />
+    default:
+      return <Clock className="h-3 w-3" />
+  }
+}
+
+const getStatusText = (status: string, level?: number) => {
+  switch (status) {
+    case 'pending':
+      return 'Aguardando Confirmação'
+    case 'confirmed':
+      return 'Confirmado'
+    case 'escalating':
+      return level ? `${level}ª Escalação` : 'Escalação'
+    case 'completed':
+      return 'Finalizado'
+    default:
+      return 'Pendente'
+  }
+}
+
+export const EscalationStatus = React.forwardRef<HTMLDivElement, EscalationStatusProps>(
+  ({ className, status = "pending", level, timeRemaining, ...props }, ref) => {
     return (
-      <Comp
-        className={cn(escalationButtonVariants({ variant, size, className }))}
+      <div
         ref={ref}
+        className={cn(escalationStatusVariants({ status }), className)}
         {...props}
-      />
+      >
+        {getStatusIcon(status)}
+        <span>{getStatusText(status, level)}</span>
+        {timeRemaining !== undefined && timeRemaining > 0 && (
+          <span className="font-mono text-xs bg-white/50 px-2 py-0.5 rounded">
+            {formatTime(timeRemaining)}
+          </span>
+        )}
+      </div>
     )
   }
 )
-EscalationButton.displayName = "EscalationButton"
 
-export { EscalationButton, escalationButtonVariants }
+EscalationStatus.displayName = "EscalationStatus"
