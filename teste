@@ -1,10 +1,2 @@
-useEffect(() => {
-  ws.current = new WebSocket(WS_ENDPOINT);
-
-  ws.current.onopen = () => console.log("✅ WebSocket conectado");
-  ws.current.onmessage = (msg) => console.log("📩 Mensagem recebida:", msg.data);
-  ws.current.onerror = (err) => console.error("❌ Erro WebSocket:", err);
-  ws.current.onclose = () => console.log("⚠️ WebSocket desconectado");
-
-  return () => ws.current?.close();
-}, []);
+✅ WebSocket conectado
+Timer.tsx:23 📩 Mensagem recebida: {"type": "TIMER_UPDATED", "chamado": 10418007, "startedAt": "2025-08-29T22:12:25.560263+00:00", "durationMinutes": 15, "timerActive": true}
