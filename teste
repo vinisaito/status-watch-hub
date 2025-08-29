@@ -15,7 +15,7 @@ const Timer: React.FC = () => {
   const [timers, setTimers] = useState<TimerData[]>([]);
   const ws = useRef<WebSocket | null>(null);
 
-  // Busca dados iniciais
+  // Fetch inicial
   useEffect(() => {
     fetch(API_URL)
       .then((res) => res.json())
@@ -23,9 +23,11 @@ const Timer: React.FC = () => {
       .catch(console.error);
   }, []);
 
-  // Conecta WebSocket
+  // Conexão WebSocket
   useEffect(() => {
     ws.current = new WebSocket(WS_URL);
+
+    ws.current.onopen = () => console.log("✅ WebSocket conectado");
 
     ws.current.onmessage = (event) => {
       const data = JSON.parse(event.data);
@@ -40,25 +42,36 @@ const Timer: React.FC = () => {
       }
     };
 
+    ws.current.onclose = () => console.log("❌ WebSocket desconectado");
+
     return () => ws.current?.close();
   }, []);
 
-  // Calcula remaining
+  // Calcula tempo restante
   const getRemaining = (timer: TimerData) => {
-    if (!timer.startedAt) return timer.durationMinutes * 60;
-    const elapsed = (new Date().getTime() - new Date(timer.startedAt).getTime()) / 1000;
-    return Math.max(0, timer.durationMinutes * 60 - elapsed);
+    const duration = timer.durationMinutes ?? 0;
+    if (!timer.startedAt) return duration * 60;
+
+    const startedAtDate = new Date(timer.startedAt);
+    if (isNaN(startedAtDate.getTime())) return duration * 60;
+
+    const elapsed = (new Date().getTime() - startedAtDateDate.getTime()) / 1000;
+    return Math.max(0, duration * 60 - elapsed);
   };
 
+  // Envia ação para o WS
   const sendAction = (chamado: number, action: "startTimer" | "pauseTimer") => {
-    ws.current?.send(JSON.stringify({ action, chamado }));
+    if (ws.current?.readyState === WebSocket.OPEN) {
+      ws.current.send(JSON.stringify({ action, chamado }));
+    }
   };
 
   return (
     <div>
       <h1>Painel de Alertas</h1>
+      {timers.length === 0 && <p>Carregando alertas...</p>}
       {timers.map((t) => (
-        <div key={t.chamado} style={{ border: "1px solid gray", margin: 5, padding: 5 }}>
+        <div key={t.chamado} style={{ border: "1px solid gray", padding: 10, margin: 5 }}>
           <p>Chamado: {t.chamado}</p>
           <p>Status: {t.timerActive ? "Rodando" : "Pausado"}</p>
           <p>
@@ -73,8 +86,3 @@ const Timer: React.FC = () => {
           <button onClick={() => sendAction(t.chamado, "pauseTimer")}>Pausar</button>
         </div>
       ))}
-    </div>
-  );
-};
-
-export default Timer;
