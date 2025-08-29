@@ -1,3 +1,6 @@
+https://f6ffk8e9fe.execute-api.us-east-1.amazonaws.com/prod/acompanhamento
+
+
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import { Check, AlertTriangle, ExternalLink, Zap, Group, Calendar, Info, XCircle, Flame, ChevronLeft, ChevronRight, ArrowUpDown, ArrowUp, ArrowDown, Clock, Play, CheckCircle, X, RotateCcw, FastForward } from 'lucide-react';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
