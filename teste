@@ -1,4 +1,112 @@
-{
-  "statusCode": 500,
-  "body": "An error occurred (BadRequestException) when calling the PostToConnection operation: Invalid connectionId: test123"
+// Timer.tsx
+import React, { useEffect, useState, useRef } from "react";
+
+interface TimerData {
+  chamado: number;
+  startedAt: string | null;
+  durationMinutes: number;
+  timerActive: boolean;
 }
+
+const WEBSOCKET_URL = "wss://SEU_ENDPOINT.execute-api.us-east-1.amazonaws.com/dev"; // substitua pelo seu endpoint
+
+export const Timer: React.FC<{ chamado: number }> = ({ chamado }) => {
+  const [timerData, setTimerData] = useState<TimerData>({
+    chamado,
+    startedAt: null,
+    durationMinutes: 15,
+    timerActive: false,
+  });
+  const [timeRemaining, setTimeRemaining] = useState<number>(0);
+  const ws = useRef<WebSocket | null>(null);
+
+  // Conectar WebSocket
+  useEffect(() => {
+    ws.current = new WebSocket(WEBSOCKET_URL);
+
+    ws.current.onopen = () => {
+      console.log("✅ WebSocket conectado");
+    };
+
+    ws.current.onmessage = (event) => {
+      const data = JSON.parse(event.data);
+      if (data.type === "TIMER_UPDATED" && data.chamado === chamado) {
+        console.log("📩 Mensagem recebida:", data);
+        setTimerData({
+          chamado: data.chamado,
+          startedAt: data.startedAt,
+          durationMinutes: data.durationMinutes,
+          timerActive: data.timerActive,
+        });
+      }
+    };
+
+    ws.current.onclose = () => console.log("❌ WebSocket desconectado");
+
+    return () => {
+      ws.current?.close();
+    };
+  }, [chamado]);
+
+  // Atualiza o tempo restante a cada segundo
+  useEffect(() => {
+    let interval: NodeJS.Timeout;
+    if (timerData.timerActive && timerData.startedAt) {
+      interval = setInterval(() => {
+        const elapsed =
+          (new Date().getTime() - new Date(timerData.startedAt!).getTime()) / 1000;
+        const remaining = Math.max(0, timerData.durationMinutes * 60 - elapsed);
+        setTimeRemaining(remaining);
+      }, 1000);
+    } else {
+      setTimeRemaining(
+        timerData.startedAt
+          ? Math.max(
+              0,
+              timerData.durationMinutes * 60 -
+                (new Date().getTime() - new Date(timerData.startedAt).getTime()) / 1000
+            )
+          : timerData.durationMinutes * 60
+      );
+    }
+
+    return () => clearInterval(interval);
+  }, [timerData]);
+
+  // Funções para iniciar e pausar
+  const sendAction = (action: "startTimer" | "pauseTimer") => {
+    if (ws.current?.readyState === WebSocket.OPEN) {
+      ws.current.send(JSON.stringify({ action, chamado }));
+    }
+  };
+
+  // Formata o tempo para MM:SS
+  const formatTime = (seconds: number) => {
+    const m = Math.floor(seconds / 60)
+      .toString()
+      .padStart(2, "0");
+    const s = Math.floor(seconds % 60)
+      .toString()
+      .padStart(2, "0");
+    return `${m}:${s}`;
+  };
+
+  return (
+    <div style={{ border: "1px solid #ccc", padding: "16px", width: "250px" }}>
+      <h2>Painel de Alertas</h2>
+      <p>
+        <strong>Chamado:</strong> {timerData.chamado}
+      </p>
+      <p>
+        <strong>Tempo restante:</strong> {formatTime(timeRemaining)}
+      </p>
+      <p>
+        <strong>Status:</strong> {timerData.timerActive ? "Rodando" : "Pausado"}
+      </p>
+      <button onClick={() => sendAction("startTimer")} style={{ marginRight: "8px" }}>
+        Iniciar
+      </button>
+      <button onClick={() => sendAction("pauseTimer")}>Pausar</button>
+    </div>
+  );
+};
