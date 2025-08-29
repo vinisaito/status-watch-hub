@@ -1,7 +1,95 @@
-PATCH https://f6ffk8e9fe.execute-api.us-east-1.amazonaws.com/prod/dados/10418007
-Content-Type: application/json
+import React, { useEffect, useState } from "react";
 
-{
-  "timerActive": true,
-  "startedAt": "2025-08-29T18:00:00Z"
+const API_BASE = "https://f6ffk8e9fe.execute-api.us-east-1.amazonaws.com/prod";
+
+export default function Timer() {
+  const [alerts, setAlerts] = useState([]);
+
+  const fetchAlerts = () => {
+    fetch(`${API_BASE}/dados`)
+      .then((res) => res.json())
+      .then((data) => {
+        if (!Array.isArray(data)) {
+          console.error("❌ API não retornou lista de alertas:", data);
+          return;
+        }
+        const updated = data.map((alert) => ({
+          ...alert,
+          timerActive: false,
+          localTimeRemaining: alert.timeRemaining ?? 0,
+        }));
+        setAlerts(updated);
+      })
+      .catch((err) => console.error("Erro ao buscar alertas:", err));
+  };
+
+  useEffect(() => {
+    fetchAlerts();
+  }, []);
+
+  // Atualiza o cronômetro local
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setAlerts((prev) =>
+        prev.map((alert) => {
+          if (alert.timerActive && alert.startedAt) {
+            const startedAt = new Date(alert.startedAt).getTime();
+            const durationMs = (alert.durationMinutes ?? 15) * 60 * 1000;
+            const elapsed = Date.now() - startedAt;
+            const remaining = Math.max(0, durationMs - elapsed);
+            return { ...alert, localTimeRemaining: Math.floor(remaining / 1000) };
+          }
+          return alert;
+        })
+      );
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [alerts]);
+
+  const startTimer = (chamado: string | number) => {
+    setAlerts((prev) =>
+      prev.map((alert) =>
+        alert.chamado === chamado
+          ? { ...alert, timerActive: true, startedAt: new Date().toISOString() }
+          : alert
+      )
+    );
+  };
+
+  const pauseTimer = (chamado: string | number) => {
+    setAlerts((prev) =>
+      prev.map((alert) =>
+        alert.chamado === chamado ? { ...alert, timerActive: false } : alert
+      )
+    );
+  };
+
+  return (
+    <div style={{ padding: "20px" }}>
+      <h1>Painel de Alertas</h1>
+      {alerts.map((alert) => (
+        <div
+          key={alert.chamado}
+          style={{ border: "1px solid #ccc", padding: "10px", marginBottom: "10px" }}
+        >
+          <p><strong>Chamado:</strong> {alert.chamado}</p>
+          <p>
+            <strong>Tempo restante:</strong>{" "}
+            {Math.floor((alert.localTimeRemaining ?? 0) / 60)
+              .toString()
+              .padStart(2, "0")}
+            :
+            {((alert.localTimeRemaining ?? 0) % 60).toString().padStart(2, "0")}
+          </p>
+          <p><strong>Status:</strong> {alert.timerActive ? "Rodando" : "Pausado"}</p>
+          <button onClick={() => startTimer(alert.chamado)} disabled={alert.timerActive}>
+            Iniciar
+          </button>
+          <button onClick={() => pauseTimer(alert.chamado)} disabled={!alert.timerActive}>
+            Pausar
+          </button>
+        </div>
+      ))}
+    </div>
+  );
 }
