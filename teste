@@ -1,10 +1,40 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useRef } from "react";
 
 const API_BASE = "https://f6ffk8e9fe.execute-api.us-east-1.amazonaws.com/prod";
+const WS_ENDPOINT = "wss://SEU_ENDPOINT_WEBSOCKET"; // substitua pelo seu endpoint WebSocket
 
 export default function Timer() {
   const [alerts, setAlerts] = useState([]);
+  const ws = useRef<WebSocket | null>(null);
 
+  // Conectar WebSocket
+  useEffect(() => {
+    ws.current = new WebSocket(WS_ENDPOINT);
+
+    ws.current.onopen = () => console.log("✅ WebSocket conectado");
+    ws.current.onmessage = (msg) => {
+      const data = JSON.parse(msg.data);
+      // Recebe ação de start/pause para sincronizar todos os clientes
+      if (data.type === "updateTimer" && data.chamado) {
+        setAlerts((prev) =>
+          prev.map((alert) =>
+            alert.chamado === data.chamado
+              ? {
+                  ...alert,
+                  timerActive: data.timerActive,
+                  startedAt: data.startedAt ?? alert.startedAt,
+                }
+              : alert
+          )
+        );
+      }
+    };
+    ws.current.onclose = () => console.log("❌ WebSocket desconectado");
+
+    return () => ws.current?.close();
+  }, []);
+
+  // Buscar alertas da API
   const fetchAlerts = () => {
     fetch(`${API_BASE}/dados`)
       .then((res) => res.json())
@@ -27,7 +57,7 @@ export default function Timer() {
     fetchAlerts();
   }, []);
 
-  // Atualiza o cronômetro local
+  // Atualiza o cronômetro local a cada segundo
   useEffect(() => {
     const interval = setInterval(() => {
       setAlerts((prev) =>
@@ -46,22 +76,33 @@ export default function Timer() {
     return () => clearInterval(interval);
   }, [alerts]);
 
+  // Iniciar cronômetro local + enviar WS
   const startTimer = (chamado: string | number) => {
+    const startedAt = new Date().toISOString();
     setAlerts((prev) =>
       prev.map((alert) =>
         alert.chamado === chamado
-          ? { ...alert, timerActive: true, startedAt: new Date().toISOString() }
+          ? { ...alert, timerActive: true, startedAt }
           : alert
       )
     );
+
+    if (ws.current && ws.current.readyState === WebSocket.OPEN) {
+      ws.current.send(JSON.stringify({ type: "updateTimer", chamado, timerActive: true, startedAt }));
+    }
   };
 
+  // Pausar cronômetro local + enviar WS
   const pauseTimer = (chamado: string | number) => {
     setAlerts((prev) =>
       prev.map((alert) =>
         alert.chamado === chamado ? { ...alert, timerActive: false } : alert
       )
     );
+
+    if (ws.current && ws.current.readyState === WebSocket.OPEN) {
+      ws.current.send(JSON.stringify({ type: "updateTimer", chamado, timerActive: false }));
+    }
   };
 
   return (
