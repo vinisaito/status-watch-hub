@@ -1,26 +1,40 @@
-{
-  "Version": "2012-10-17",
-  "Statement": [
-    {
-      "Sid": "DynamoDBAccess",
-      "Effect": "Allow",
-      "Action": [
-        "dynamodb:PutItem",
-        "dynamodb:DeleteItem",
-        "dynamodb:UpdateItem",
-        "dynamodb:Scan",
-        "dynamodb:GetItem"
-      ],
-      "Resource": [
-        "arn:aws:dynamodb:us-east-1:*:table/painelmonitoracao_acompanhamento",
-        "arn:aws:dynamodb:us-east-1:*:table/wsConnections"
-      ]
-    },
-    {
-      "Sid": "ManageWSConnections",
-      "Effect": "Allow",
-      "Action": "execute-api:ManageConnections",
-      "Resource": "arn:aws:execute-api:us-east-1:*:{api-id}/dev/POST/@connections/*"
-    }
-  ]
+import { useEffect, useRef, useState } from "react";
+
+export default function WSClient() {
+  const [msgs, setMsgs] = useState([]);
+  const wsRef = useRef(null);
+
+  useEffect(() => {
+    const ws = new WebSocket("wss://{api-id}.execute-api.us-east-1.amazonaws.com/dev");
+    wsRef.current = ws;
+
+    ws.onopen = () => console.log("WS conectado");
+    ws.onmessage = (evt) => {
+      const data = JSON.parse(evt.data);
+      setMsgs((m) => [...m, data]);
+      if (data.type === "TIMER_UPDATED") {
+        // Atualize seu estado de chamados e calcule o cronômetro
+        // exatamente como você já faz com startedAt + durationMinutes
+      }
+    };
+    ws.onclose = () => console.log("WS fechado");
+    ws.onerror = (e) => console.error("WS erro", e);
+
+    return () => ws.close();
+  }, []);
+
+  const startTimer = () => {
+    wsRef.current?.send(JSON.stringify({
+      action: "startTimer",
+      chamado: 123,
+      durationMinutes: 30
+    }));
+  };
+
+  return (
+    <div>
+      <button onClick={startTimer}>Iniciar cronômetro (123)</button>
+      <pre>{JSON.stringify(msgs, null, 2)}</pre>
+    </div>
+  );
 }
