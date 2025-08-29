@@ -1,74 +1,118 @@
-import boto3
-import json
-from datetime import datetime, timezone
+import React, { useEffect, useRef, useState } from "react";
 
-DDB = boto3.resource("dynamodb", region_name="us-east-1")
-ACOMP_TABLE = DDB.Table("painelmonitoracao_acompanhamento")
-CONN_TABLE = DDB.Table("painelmonitoracao_connections")
+interface Alert {
+  chamado: string;
+  startedAt?: string;
+  durationMinutes?: number;
+  timerActive?: boolean;
+  localTimeRemaining?: number;
+}
 
-APIGW_ENDPOINT = "https://SEU_ENDPOINT.execute-api.us-east-1.amazonaws.com/dev"
-apigw = boto3.client("apigatewaymanagementapi", endpoint_url=APIGW_ENDPOINT)
+const WS_ENDPOINT = "wss://SEU_ENDPOINT.execute-api.us-east-1.amazonaws.com/dev";
+const REST_ENDPOINT = "https://f6ffk8e9fe.execute-api.us-east-1.amazonaws.com/prod/dados";
 
-def lambda_handler(event, context):
-    route = event.get("requestContext", {}).get("routeKey")
-    connection_id = event.get("requestContext", {}).get("connectionId")
+const Timer: React.FC = () => {
+  const ws = useRef<WebSocket | null>(null);
+  const [alerts, setAlerts] = useState<Alert[]>([]);
 
-    if route == "$connect":
-        CONN_TABLE.put_item(Item={"connectionId": connection_id})
-        return {"statusCode": 200}
+  // Buscar alertas iniciais
+  useEffect(() => {
+    fetch(REST_ENDPOINT)
+      .then((res) => res.json())
+      .then((data) => {
+        if (Array.isArray(data)) {
+          setAlerts(
+            data.map((a) => ({
+              ...a,
+              localTimeRemaining: a.durationMinutes ? a.durationMinutes * 60 : 0,
+            }))
+          );
+        }
+      })
+      .catch((err) => console.error(err));
+  }, []);
 
-    elif route == "$disconnect":
-        CONN_TABLE.delete_item(Key={"connectionId": connection_id})
-        return {"statusCode": 200}
+  // Conectar WebSocket
+  useEffect(() => {
+    ws.current = new WebSocket(WS_ENDPOINT);
 
-    elif route == "sendMessage":
-        body = json.loads(event.get("body", "{}"))
-        action = body.get("action")
-        chamado = str(body.get("chamado"))
+    ws.current.onopen = () => console.log("✅ WebSocket conectado");
 
-        if not action or not chamado:
-            return {"statusCode": 400, "body": "Chamado ou ação ausente"}
+    ws.current.onmessage = (msg) => {
+      const data = JSON.parse(msg.data);
+      if (data.type === "TIMER_UPDATED") {
+        setAlerts((prev) =>
+          prev.map((alert) =>
+            alert.chamado === data.chamado
+              ? {
+                  ...alert,
+                  timerActive: data.timerActive,
+                  startedAt: data.startedAt,
+                  durationMinutes: data.durationMinutes ?? 15,
+                  localTimeRemaining: data.timerActive
+                    ? (data.durationMinutes ?? 15) * 60
+                    : alert.localTimeRemaining ?? 0,
+                }
+              : alert
+          )
+        );
+      }
+    };
 
-        try:
-            if action == "startTimer":
-                startedAt = datetime.utcnow().replace(tzinfo=timezone.utc).isoformat()
-                ACOMP_TABLE.update_item(
-                    Key={"chamado": chamado},
-                    UpdateExpression="SET timerActive=:t, startedAt=:s",
-                    ExpressionAttributeValues={":t": True, ":s": startedAt}
-                )
-            elif action == "pauseTimer":
-                item = ACOMP_TABLE.get_item(Key={"chamado": chamado}).get("Item", {})
-                startedAt = item.get("startedAt")
-                ACOMP_TABLE.update_item(
-                    Key={"chamado": chamado},
-                    UpdateExpression="SET timerActive=:t",
-                    ExpressionAttributeValues={":t": False}
-                )
-            else:
-                return {"statusCode": 400, "body": "Ação inválida"}
+    ws.current.onerror = (err) => console.error(err);
+    ws.current.onclose = () => console.log("⚠️ WebSocket desconectado");
 
-            # Broadcast
-            connections = CONN_TABLE.scan().get("Items", [])
-            for conn in connections:
-                try:
-                    apigw.post_to_connection(
-                        ConnectionId=conn["connectionId"],
-                        Data=json.dumps({
-                            "type": "TIMER_UPDATED",
-                            "chamado": chamado,
-                            "timerActive": action == "startTimer",
-                            "startedAt": startedAt,
-                            "durationMinutes": 15
-                        })
-                    )
-                except apigw.exceptions.GoneException:
-                    CONN_TABLE.delete_item(Key={"connectionId": conn["connectionId"]})
+    return () => ws.current?.close();
+  }, []);
 
-            return {"statusCode": 200, "body": "ok"}
+  // Atualizar cronômetro local
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setAlerts((prev) =>
+        prev.map((alert) => {
+          if (alert.timerActive && alert.startedAt) {
+            const startedAt = new Date(alert.startedAt).getTime();
+            const durationMs = (alert.durationMinutes ?? 15) * 60 * 1000;
+            const elapsed = Date.now() - startedAt;
+            const remaining = Math.max(0, durationMs - elapsed);
+            return { ...alert, localTimeRemaining: Math.floor(remaining / 1000) };
+          }
+          return alert;
+        })
+      );
+    }, 1000);
 
-        except Exception as e:
-            return {"statusCode": 500, "body": str(e)}
+    return () => clearInterval(interval);
+  }, [alerts]);
 
-    else:
-        return {"statusCode": 400, "body": "Rota não suportada"}
+  // Iniciar / pausar cronômetro
+  const toggleTimer = (alert: Alert) => {
+    if (!ws.current || ws.current.readyState !== WebSocket.OPEN) return;
+    const action = alert.timerActive ? "pauseTimer" : "startTimer";
+    ws.current.send(JSON.stringify({ action, chamado: alert.chamado }));
+  };
+
+  return (
+    <div style={{ padding: "20px" }}>
+      <h1>Painel de Alertas</h1>
+      {alerts.map((alert) => (
+        <div key={alert.chamado} style={{ border: "1px solid #ccc", padding: "10px", marginBottom: "10px" }}>
+          <h2>Alerta {alert.chamado}</h2>
+          <p>
+            Tempo restante:{" "}
+            {alert.localTimeRemaining
+              ? `${Math.floor(alert.localTimeRemaining / 60)
+                  .toString()
+                  .padStart(2, "0")}:${(alert.localTimeRemaining % 60).toString().padStart(2, "0")}`
+              : "00:00"}
+          </p>
+          <button onClick={() => toggleTimer(alert)}>
+            {alert.timerActive ? "Pausar" : "Iniciar"} cronômetro
+          </button>
+        </div>
+      ))}
+    </div>
+  );
+};
+
+export default Timer;
