@@ -1,15 +1,4 @@
-import { useState, useEffect, useMemo, useCallback } from 'react';
-import { Check, AlertTriangle, ExternalLink, Zap, Group, Calendar, Info, XCircle, Flame, ChevronLeft, ChevronRight, ArrowUpDown, ArrowUp, ArrowDown, Clock, Play, CheckCircle, X, RotateCcw, FastForward, User } from 'lucide-react';
-import { Card, CardContent, CardHeader } from '@/components/ui/card';
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
-import { toast } from '@/hooks/use-toast';
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import {Select, SelectContent, SelectItem, SelectTrigger, SelectValue} from '@/components/ui/select';
-import { Textarea } from '@/components/ui/textarea';
-import { Label } from '@/components/ui/label';
+import { useState, useEffect, useCallback } from 'react';
 
 interface AlertData {
   id: string;
@@ -23,793 +12,110 @@ interface AlertData {
   chat: boolean;
 }
 
-interface EscalationState {
-  status: 'pending' | 'confirmed' | 'escalating' | 'completed';
-  currentLevel: 0 | 1 | 2 | 3 | 4;
-  timeRemaining: number;
-  timerActive: boolean;
-  isAttended: boolean;
-  observations: string;
-  pendingStatus?: string;
-  pendingObservations?: string;
-  operator?: string; // Novo campo para operador
-  serverStartTime?: number; // Tempo de início do servidor para sincronização
-}
+export const useAlertData = () => {
+  const [alertData, setAlertData] = useState<AlertData[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
-interface ActionTableProps {
-  alertData: AlertData[];
-  onUpdateAcknowledgment: (alertId: string, acknowledged: boolean) => void;
-  loading: boolean;
-}
-
-type SortField = 'chamado' | 'tipo_chamado' | 'grupo_chamado' | 'status_chamado' | 'abertura_chamado' | 'resumo_chamado' | 'severidade_chamado' | 'acionado';
-type SortDirection = 'asc' | 'desc' | null;
-
-const OPERATORS = [
-  'João Silva',
-  'Maria Santos', 
-  'Pedro Oliveira',
-  'Ana Costa',
-  'Carlos Pereira',
-  'Luciana Ferreira'
-];
-
-export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: ActionTableProps) => {
-  const [selectedIncident, setSelectedIncident] = useState<AlertData | null>(null);
-  const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
-  const [currentPage, setCurrentPage] = useState(1);
-  const itemsPerPage = 5;
-
-  const [sortField, setSortField] = useState<SortField>('chamado');
-  const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
-
-  const [acionadosSet, setAcionadosSet] = useState<Set<string>>(new Set());
-
-  const [escalationStatus, setEscalationStatus] = useState<Record<string, string>>({});
-
-  const [escalationStates, setEscalationStates] = useState<Record<string, EscalationState>>({});
-
-  const [confirmationObservations, setConfirmationObservations] = useState<Record<string, string>>({});
-
-  const [showStatusConfirmation, setShowStatusConfirmation] = useState<Record<string, boolean>>({});
-  const [pendingStatusChange, setPendingStatusChange] = useState<Record<string, { status: string; observations: string }>>({});
-
-  // Novo estado para operadores
-  const [operators, setOperators] = useState<Record<string, string>>({});
-
-  const saveToAPI = useCallback(async (alertId: string, data: any) => {
+  const fetchAlertData = useCallback(async () => {
     try {
-      const response = await fetch('https://f6ffk8e9fe.execute-api.us-east-1.amazonaws.com/prod/acompanhamento', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          chamado: parseInt(alertId),
-          ...data,
-          ttl: Math.floor(Date.now() / 1000) + (7 * 24 * 60 * 60), // 7 dias TTL
-          alertOpenTime: new Date().toISOString(),
-          serverTimestamp: Date.now(), // Adiciona timestamp do servidor para sincronização
-        }),
-      });
-
+      setLoading(true);
+      setError(null);
+      
+      const response = await fetch('https://f6ffk8e9fe.execute-api.us-east-1.amazonaws.com/prod/acompanhamento');
+      
       if (!response.ok) {
-        throw new Error(`Erro na API: ${response.status}`);
+        throw new Error(`Erro na API: ${response.status} ${response.statusText}`);
       }
-
-      return await response.json();
-    } catch (error) {
-      console.error('Erro ao salvar na API:', error);
-      toast({
-        title: "Erro ao salvar dados",
-        description: "Não foi possível salvar na API. Tente novamente.",
-        variant: "destructive",
-      });
-      throw error;
-    }
-  }, []);
-
-  // Função para sincronizar cronômetro com a API
-  const syncTimerWithAPI = useCallback(async (chamado: string) => {
-    try {
-      const response = await fetch(
-        `https://f6ffk8e9fe.execute-api.us-east-1.amazonaws.com/prod/acompanhamento?chamado=${chamado}`,
-        { method: 'GET' }
-      );
       
-      if (response.ok) {
-        const allData = await response.json();
-        const chamadoData = Array.isArray(allData) 
-          ? allData.find(item => item.chamado?.toString() === chamado.toString())
-          : (allData.chamado?.toString() === chamado.toString() ? allData : null);
-        
-        if (chamadoData && chamadoData.serverTimestamp) {
-          const serverTime = Date.now();
-          const elapsedTime = Math.floor((serverTime - chamadoData.serverTimestamp) / 1000);
-          
-          // Atualiza o timer baseado no tempo do servidor
-          setEscalationStates(prev => {
-            const currentState = prev[chamado];
-            if (currentState && currentState.timerActive) {
-              const newTimeRemaining = Math.max(0, currentState.timeRemaining - elapsedTime);
-              return {
-                ...prev,
-                [chamado]: {
-                  ...currentState,
-                  timeRemaining: newTimeRemaining,
-                  serverStartTime: chamadoData.serverTimestamp
-                }
-              };
-            }
-            return prev;
-          });
+      const data = await response.json();
+      console.log('Dados recebidos da API:', data);
+      
+      // Converte os dados da API para o formato esperado
+      const formattedData: AlertData[] = Array.isArray(data) ? data.map((item, index) => ({
+        id: item.chamado?.toString() || index.toString(),
+        chamado: item.chamado?.toString() || '',
+        tipo_chamado: item.tipo_chamado || 'Incidente',
+        grupo_chamado: item.grupo_chamado || 'Não definido',
+        status_chamado: item.status_chamado || 'Aberto',
+        abertura_chamado: item.abertura_chamado || new Date().toISOString(),
+        resumo_chamado: item.resumo_chamado || 'Sem descrição',
+        severidade_chamado: item.severidade_chamado || 'Média',
+        chat: item.chat || false
+      })) : [];
+      
+      setAlertData(formattedData);
+    } catch (error) {
+      console.error('Erro ao buscar dados:', error);
+      setError(error instanceof Error ? error.message : 'Erro desconhecido');
+      
+      // Dados de exemplo para desenvolvimento/fallback
+      const mockData: AlertData[] = [
+        {
+          id: '1',
+          chamado: '12345',
+          tipo_chamado: 'Incidente',
+          grupo_chamado: 'TI - Infraestrutura',
+          status_chamado: 'Aberto',
+          abertura_chamado: new Date().toISOString(),
+          resumo_chamado: 'Servidor de produção com lentidão',
+          severidade_chamado: 'Alta - 4',
+          chat: false
+        },
+        {
+          id: '2',
+          chamado: '12346',
+          tipo_chamado: 'Solicitação',
+          grupo_chamado: 'TI - Suporte',
+          status_chamado: 'Em Andamento',
+          abertura_chamado: new Date(Date.now() - 3600000).toISOString(),
+          resumo_chamado: 'Solicitação de acesso ao sistema',
+          severidade_chamado: 'Média - 3',
+          chat: false
+        },
+        {
+          id: '3',
+          chamado: '12347',
+          tipo_chamado: 'Incidente',
+          grupo_chamado: 'TI - Redes',
+          status_chamado: 'Aberto',
+          abertura_chamado: new Date(Date.now() - 7200000).toISOString(),
+          resumo_chamado: 'Falha na conexão de internet',
+          severidade_chamado: 'Crítica - 4',
+          chat: false
         }
-      }
-    } catch (error) {
-      console.error('Erro ao sincronizar timer:', error);
+      ];
+      
+      setAlertData(mockData);
+    } finally {
+      setLoading(false);
     }
   }, []);
 
-  // Função para carregar dados de confirmação salvos na API
-  const loadConfirmationData = useCallback(async () => {
-    try {
-      const chamadosVisveis = alertData.map(alert => alert.chamado);
-      console.log('Carregando dados para chamados:', chamadosVisveis);
-      
-      const confirmationPromises = chamadosVisveis.map(async (chamado) => {
-        try {
-          const response = await fetch(
-            `https://f6ffk8e9fe.execute-api.us-east-1.amazonaws.com/prod/acompanhamento?chamado=${chamado}`,
-            { method: 'GET' }
-          );
-          
-          if (response.ok) {
-            const allData = await response.json();
-            console.log(`Dados recebidos para chamado ${chamado}:`, allData);
-            
-            // Filtra pelo chamado específico, convertendo números para string para comparação
-            const chamadoData = Array.isArray(allData) 
-              ? allData.find(item => item.chamado?.toString() === chamado.toString())
-              : (allData.chamado?.toString() === chamado.toString() ? allData : null);
-            
-            console.log(`Dados filtrados para chamado ${chamado}:`, chamadoData);
-            return { chamado, data: chamadoData };
-          }
-          return { chamado, data: null };
-        } catch (error) {
-          console.error(`Erro ao buscar dados do chamado ${chamado}:`, error);
-          return { chamado, data: null };
-        }
-      });
-
-      const results = await Promise.all(confirmationPromises);
-      console.log('Resultados processados:', results);
-      
-      const newEscalationStates: Record<string, EscalationState> = {};
-      const newConfirmationObservations: Record<string, string> = {};
-      const newOperators: Record<string, string> = {};
-      
-      results.forEach(({ chamado, data }) => {
-        if (data) {
-          console.log(`Processando chamado ${chamado}:`, data);
-          
-          let status: EscalationState['status'] = 'pending';
-          let currentLevel: EscalationState['currentLevel'] = 0;
-          let isAttended = false;
-          let lastObservation = '';
-          
-          // Carrega operador se existir
-          if (data.operator) {
-            newOperators[chamado] = data.operator;
-          }
-          
-          if (data.confirmChat && data.confirmChat !== '') {
-            status = 'confirmed';
-            lastObservation = data.confirmChat;
-            console.log(`Chamado ${chamado} tem confirmação:`, data.confirmChat);
-          }
-          
-          if (data.escalations && Array.isArray(data.escalations)) {
-            for (let i = 0; i < data.escalations.length; i++) {
-              const escalation = data.escalations[i];
-              if (escalation.status === 'em_andamento') {
-                status = 'escalating';
-                currentLevel = (escalation.level) as EscalationState['currentLevel'];
-                lastObservation = escalation.observations || '';
-                console.log(`Chamado ${chamado} está em escalação nível ${escalation.level}`);
-                break;
-              } else if (escalation.status === 'atendido') {
-                status = 'completed';
-                currentLevel = (escalation.level) as EscalationState['currentLevel'];
-                isAttended = true;
-                lastObservation = escalation.observations || '';
-                console.log(`Chamado ${chamado} foi atendido no nível ${escalation.level}`);
-                break;
-              } else if (escalation.status === 'finalizado' && i < 3) {
-                currentLevel = (escalation.level) as EscalationState['currentLevel'];
-                lastObservation = escalation.observations || '';
-                console.log(`Chamado ${chamado} finalizou nível ${escalation.level}`);
-              }
-            }
-          }
-          
-          if (data.obsChat && data.obsChat.includes('atendida com sucesso')) {
-            status = 'completed';
-            isAttended = true;
-            console.log(`Chamado ${chamado} foi marcado como atendido via obsChat`);
-          }
-          
-          // Calcula tempo restante sincronizado com servidor
-          let timeRemaining = 0;
-          let timerActive = false;
-          if (data.serverTimestamp && status === 'escalating') {
-            const serverTime = Date.now();
-            const elapsedTime = Math.floor((serverTime - data.serverTimestamp) / 1000);
-            const baseTime = currentLevel === 0 ? 20 * 60 : 10 * 60; // 20 min confirmação, 10 min escalação
-            timeRemaining = Math.max(0, baseTime - elapsedTime);
-            timerActive = timeRemaining > 0;
-          }
-          
-          newEscalationStates[chamado] = {
-            status,
-            currentLevel,
-            timeRemaining,
-            timerActive,
-            isAttended,
-            observations: lastObservation,
-            operator: data.operator,
-            serverStartTime: data.serverTimestamp
-          };
-          
-          console.log(`Estado final para chamado ${chamado}:`, newEscalationStates[chamado]);
-          
-          if (data.confirmChat) {
-            newConfirmationObservations[chamado] = data.confirmChat;
-          }
-        }
-      });
-      
-      console.log('Estados de escalação atualizados:', newEscalationStates);
-      console.log('Observações de confirmação atualizadas:', newConfirmationObservations);
-      console.log('Operadores carregados:', newOperators);
-      
-      if (Object.keys(newEscalationStates).length > 0) {
-        setEscalationStates(prev => ({ ...prev, ...newEscalationStates }));
-      }
-      
-      if (Object.keys(newConfirmationObservations).length > 0) {
-        setConfirmationObservations(prev => ({ ...prev, ...newConfirmationObservations }));
-      }
-
-      if (Object.keys(newOperators).length > 0) {
-        setOperators(prev => ({ ...prev, ...newOperators }));
-      }
-      
-    } catch (error) {
-      console.error('Erro ao carregar dados de confirmação:', error);
-    }
-  }, [alertData]);
-
-  // Função para definir operador
-  const setOperator = useCallback(async (alertId: string, operator: string) => {
-    try {
-      // Salva operador na API
-      const apiData = {
-        operator,
-        escalations: [
-          { level: 1, status: "", observations: "", eventTimestamp: "" },
-          { level: 2, status: "", observations: "", eventTimestamp: "" },
-          { level: 3, status: "", observations: "", eventTimestamp: "" },
-          { level: 4, status: "", observations: "", eventTimestamp: "" }
-        ],
-        obsChat: "",
-        confirmChat: "",
-        sendChat: new Date().toISOString(),
-      };
-
-      await saveToAPI(alertId, apiData);
-
-      // Atualiza estado local
-      setOperators(prev => ({
-        ...prev,
-        [alertId]: operator
-      }));
-
-      toast({
-        title: "Operador definido",
-        description: `${operator} foi definido como operador responsável`,
-      });
-
-    } catch (error) {
-      console.error('Erro ao definir operador:', error);
-    }
-  }, [saveToAPI]);
-
-  const handleConfirmationObservationChange = useCallback((alertId: string, value: string) => {
-    setConfirmationObservations(prev => ({
-      ...prev,
-      [alertId]: value
-    }));
-  }, []);
-
-  const handleEscalationObservationChange = useCallback((alertId: string, value: string) => {
-    setEscalationStates(prev => ({
-      ...prev,
-      [alertId]: {
-        ...prev[alertId],
-        observations: value
-      }
-    }));
-  }, []);
-
-  const handlePendingObservationChange = useCallback((alertId: string, value: string) => {
-    setPendingStatusChange(prev => ({
-      ...prev,
-      [alertId]: {
-        ...prev[alertId],
-        observations: value
-      }
-    }));
-  }, []);
-
-  // Timer para escalações com sincronização periódica
-  useEffect(() => {
-    const interval = setInterval(() => {
-      setEscalationStates(prev => {
-        const newStates = { ...prev };
-        let updated = false;
-
-        Object.keys(newStates).forEach(alertId => {
-          const state = newStates[alertId];
-          if (state.timerActive && state.timeRemaining > 0) {
-            newStates[alertId] = {
-              ...state,
-              timeRemaining: state.timeRemaining - 1
-            };
-            updated = true;
-
-            // Sincroniza com API a cada 30 segundos
-            if (state.timeRemaining % 30 === 0) {
-              syncTimerWithAPI(alertId);
-            }
-
-            // Quando o timer zera
-            if (newStates[alertId].timeRemaining === 0) {
-              newStates[alertId].timerActive = false;
-              
-              if (state.currentLevel === 0) {
-                // Acabou o tempo de confirmação, vai para escalação
-                newStates[alertId].status = 'escalating';
-                toast({
-                  title: "Tempo de confirmação esgotado",
-                  description: `Chamado ${alertId} pode iniciar escalação`,
-                  variant: "destructive",
-                });
-              } else if (state.currentLevel < 4) {
-                // Acabou o tempo da escalação atual, mantém no status de escalação para mostrar botão
-                toast({
-                  title: "Tempo de escalação esgotado",
-                  description: `Escalação ${state.currentLevel} do chamado ${alertId} finalizada`,
-                  variant: "destructive",
-                });
-              } else {
-                // Todas as escalações foram executadas
-                newStates[alertId].status = 'completed';
-                toast({
-                  title: "Processo finalizado",
-                  description: `Todas as escalações do chamado ${alertId} foram executadas`,
-                });
-              }
-            }
-          }
-        });
-
-        return updated ? newStates : prev;
-      });
-    }, 1000);
-
-    return () => clearInterval(interval);
-  }, [syncTimerWithAPI]);
-
-  // Função para iniciar confirmação
-  const startConfirmation = useCallback((alertId: string) => {
-    const serverTimestamp = Date.now();
-    
-    setEscalationStates(prev => ({
-      ...prev,
-      [alertId]: {
-        status: 'pending',
-        currentLevel: 0,
-        timeRemaining: 20 * 60, // 20 minutos para confirmação
-        timerActive: true,
-        isAttended: false,
-        observations: '',
-        serverStartTime: serverTimestamp
-      }
-    }));
-    
-    // Inicializa o campo de observações de confirmação
-    setConfirmationObservations(prev => ({
-      ...prev,
-      [alertId]: ''
-    }));
-    
-    toast({
-      title: "Confirmação iniciada",
-      description: "Aguardando confirmação por 20 minutos",
-    });
-  }, []);
-
-  // ... resto das funções existentes continuam iguais ...
-  // [Mantendo todas as outras funções como confirmReceived, startEscalation, etc.]
-
-  // Função para obter status atual de forma legível
-  const getCurrentStatus = (alertId: string) => {
-    const state = escalationStates[alertId];
-    if (!state) return 'Não iniciado';
-    
-    switch (state.status) {
-      case 'pending':
-        return 'Aguardando confirmação';
-      case 'confirmed':
-        return 'Confirmado';
-      case 'escalating':
-        const levelNames = { 1: '1ª', 2: '2ª', 3: '3ª', 4: '4ª' };
-        return `Em escalação - ${levelNames[state.currentLevel as keyof typeof levelNames]} nível`;
-      case 'completed':
-        return state.isAttended ? 'Atendido' : 'Finalizado';
-      default:
-        return 'Não iniciado';
-    }
-  };
-
-  // Renderiza campo de operador
-  const renderOperatorField = (alert: AlertData) => {
-    const currentOperator = operators[alert.chamado];
-    
-    if (currentOperator) {
-      // Operador já definido - somente leitura
-      return (
-        <div className="flex items-center gap-2 p-2 bg-muted rounded">
-          <User className="h-4 w-4 text-primary" />
-          <span className="text-sm font-medium">{currentOperator}</span>
-          <Badge variant="secondary" className="text-xs">Definido</Badge>
-        </div>
-      );
-    }
-
-    // Operador não definido - permite seleção
-    return (
-      <Select onValueChange={(value) => setOperator(alert.chamado, value)}>
-        <SelectTrigger className="h-8 text-xs">
-          <SelectValue placeholder="Selecionar Operador" />
-        </SelectTrigger>
-        <SelectContent>
-          {OPERATORS.map((operator) => (
-            <SelectItem key={operator} value={operator}>
-              {operator}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
+  const updateAcknowledgment = useCallback((alertId: string, acknowledged: boolean) => {
+    setAlertData(prev => 
+      prev.map(alert => 
+        alert.id === alertId 
+          ? { ...alert, chat: acknowledged }
+          : alert
+      )
     );
-  };
+  }, []);
 
-  // Continue com todas as outras funções existentes...
-  // [Aqui continuariam todas as outras funções como confirmReceived, startEscalation, etc.]
-  
-  // Função para confirmar recebimento - MODIFICADA para integrar com API
-  const confirmReceived = useCallback(async (alertId: string) => {
-    const observation = confirmationObservations[alertId] || '';
+  useEffect(() => {
+    fetchAlertData();
     
-    try {
-      // Prepara dados para a API
-      const apiData = {
-        escalations: [
-          { level: 1, status: "", observations: "", eventTimestamp: "" },
-          { level: 2, status: "", observations: "", eventTimestamp: "" },
-          { level: 3, status: "", observations: "", eventTimestamp: "" },
-          { level: 4, status: "", observations: "", eventTimestamp: "" }
-        ],
-        obsChat: "",
-        confirmChat: observation,
-        sendChat: new Date().toISOString(),
-        operator: operators[alertId] || "", // Inclui operador
-      };
-
-      // Salva na API
-      await saveToAPI(alertId, apiData);
-
-      setEscalationStates(prev => ({
-        ...prev,
-        [alertId]: {
-          ...prev[alertId],
-          status: 'confirmed',
-          timerActive: false,
-          timeRemaining: 0,
-          observations: observation
-        }
-      }));
-
-      // Limpa o campo de observações após confirmação
-      setConfirmationObservations(prev => ({
-        ...prev,
-        [alertId]: ''
-      }));
-
-      toast({
-        title: "Confirmação recebida",
-        description: "Processo de confirmação finalizado com sucesso",
-      });
-    } catch (error) {
-      // Em caso de erro na API, ainda atualiza o estado local para não travar a UI
-      setEscalationStates(prev => ({
-        ...prev,
-        [alertId]: {
-          ...prev[alertId],
-          status: 'confirmed',
-          timerActive: false,
-          timeRemaining: 0,
-          observations: observation
-        }
-      }));
-
-      setConfirmationObservations(prev => ({
-        ...prev,
-        [alertId]: ''
-      }));
-    }
-  }, [confirmationObservations, saveToAPI, operators]);
-
-  // ... continue com todas as outras funções existentes ...
-
-  // Função para formatar tempo
-  const formatTime = (seconds: number) => {
-    const minutes = Math.floor(seconds / 60);
-    const remainingSeconds = seconds % 60;
-    return `${minutes.toString().padStart(2, '0')}:${remainingSeconds.toString().padStart(2, '0')}`;
-  };
-
-  // Renderiza o componente de confirmação/escalação
-  const renderConfirmationColumn = (alert: AlertData) => {
-    const state = escalationStates[alert.chamado];
-    const currentObservation = confirmationObservations[alert.chamado] || '';
-    const showConfirmation = showStatusConfirmation[alert.chamado];
-    const pendingChange = pendingStatusChange[alert.chamado];
+    // Atualiza dados a cada 30 segundos
+    const interval = setInterval(fetchAlertData, 30000);
     
-    // Debug: log do estado atual
-    console.log(`Renderizando coluna confirmação para chamado ${alert.chamado}:`, {
-      state,
-      currentObservation,
-      showConfirmation,
-      pendingChange
-    });
-    
-    if (!state) {
-      return (
-        <div className="space-y-2">
-          {/* Campo de Operador */}
-          <div>
-            <Label className="text-xs mb-1 block">Operador</Label>
-            {renderOperatorField(alert)}
-          </div>
-          
-          {/* Status Atual */}
-          <div>
-            <Label className="text-xs mb-1 block">Status</Label>
-            <Badge variant="outline" className="text-xs">
-              {getCurrentStatus(alert.chamado)}
-            </Badge>
-          </div>
-          
-          <div className="text-center">
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => startConfirmation(alert.chamado)}
-              className="h-8 px-3 text-xs"
-              disabled={!operators[alert.chamado]} // Só permite iniciar se operador estiver definido
-            >
-              <Play className="h-3 w-3 mr-1" />
-              Iniciar
-            </Button>
-          </div>
-        </div>
-      );
-    }
+    return () => clearInterval(interval);
+  }, [fetchAlertData]);
 
-    switch (state.status) {
-      case 'pending':
-        return (
-          <div className="space-y-3">
-            {/* Campo de Operador (somente leitura) */}
-            <div>
-              <Label className="text-xs mb-1 block">Operador</Label>
-              {renderOperatorField(alert)}
-            </div>
-            
-            {/* Status Atual */}
-            <div>
-              <Label className="text-xs mb-1 block">Status</Label>
-              <Badge variant="outline" className="text-xs">
-                {getCurrentStatus(alert.chamado)}
-              </Badge>
-            </div>
-
-            <div className="text-center space-y-3">
-              <div className="flex items-center justify-center gap-2">
-                <Clock className="h-4 w-4 text-warning" />
-                <span className="text-sm font-mono">{formatTime(state.timeRemaining)}</span>
-              </div>
-              
-              <div className="space-y-2">
-                 <div className="space-y-1">
-                   <Label className="text-xs">
-                     Observações <span className="text-destructive">*</span>
-                   </Label>
-                   <Textarea
-                     key={`confirmation-textarea-${alert.chamado}`}
-                     placeholder="Observações são obrigatórias para confirmação"
-                     value={currentObservation}
-                     onChange={(e) => handleConfirmationObservationChange(alert.chamado, e.target.value)}
-                     className="text-xs min-h-[60px] resize-none"
-                     required
-                   />
-                   {!currentObservation.trim() && (
-                     <p className="text-xs text-destructive">
-                       Observações são obrigatórias
-                     </p>
-                   )}
-                 </div>
-                
-                <div className="flex gap-1">
-                  <Button
-                    size="sm"
-                    variant="default"
-                    onClick={() => confirmReceived(alert.chamado)}
-                    disabled={!currentObservation.trim()}
-                    className="h-8 px-3 text-xs flex-1 disabled:opacity-50 disabled:cursor-not-allowed"
-                  >
-                    <Check className="h-3 w-3 mr-1" />
-                    Confirmar
-                  </Button>
-                </div>
-              </div>
-            </div>
-          </div>
-        );
-
-      case 'confirmed':
-        return (
-          <div className="space-y-2">
-            {/* Campo de Operador (somente leitura) */}
-            <div>
-              <Label className="text-xs mb-1 block">Operador</Label>
-              {renderOperatorField(alert)}
-            </div>
-            
-            {/* Status Atual */}
-            <div>
-              <Label className="text-xs mb-1 block">Status</Label>
-              <Badge variant="default" className="bg-green-600 text-white text-xs">
-                {getCurrentStatus(alert.chamado)}
-              </Badge>
-            </div>
-
-            <div className="text-center space-y-2">
-              {state.observations && (
-                <div className="text-xs text-muted-foreground p-2 bg-muted rounded text-left">
-                  <strong>Observações:</strong><br />
-                  {state.observations}
-                </div>
-              )}
-            </div>
-          </div>
-        );
-
-      case 'escalating':
-        return (
-          <div className="space-y-2">
-            {/* Campo de Operador (somente leitura) */}
-            <div>
-              <Label className="text-xs mb-1 block">Operador</Label>
-              {renderOperatorField(alert)}
-            </div>
-            
-            {/* Status Atual */}
-            <div>
-              <Label className="text-xs mb-1 block">Status</Label>
-              <Badge variant="destructive" className="text-xs">
-                {getCurrentStatus(alert.chamado)}
-              </Badge>
-            </div>
-
-            {state.timerActive && (
-              <div className="flex items-center justify-center gap-1">
-                <Clock className="h-3 w-3 text-warning" />
-                <span className="text-xs font-mono">{formatTime(state.timeRemaining)}</span>
-              </div>
-            )}
-          </div>
-        );
-
-      case 'completed':
-        return (
-          <div className="space-y-2">
-            {/* Campo de Operador (somente leitura) */}
-            <div>
-              <Label className="text-xs mb-1 block">Operador</Label>
-              {renderOperatorField(alert)}
-            </div>
-            
-            {/* Status Atual */}
-            <div>
-              <Label className="text-xs mb-1 block">Status</Label>
-              <Badge variant="default" className="bg-green-600 text-white text-xs">
-                {getCurrentStatus(alert.chamado)}
-              </Badge>
-            </div>
-
-            <div className="text-center space-y-2">
-              {state.observations && (
-                <div className="text-xs text-muted-foreground p-2 bg-muted rounded text-left">
-                  <strong>Observações:</strong><br />
-                  {state.observations}
-                </div>
-              )}
-            </div>
-          </div>
-        );
-
-      default:
-        return null;
-    }
+  return {
+    alertData,
+    loading,
+    error,
+    refetch: fetchAlertData,
+    updateAcknowledgment
   };
-
-  // ... continue com todas as outras funções e JSX do componente original ...
-
-  return (
-    <div className="p-4">
-      <Card>
-        <CardHeader>
-          <h2 className="text-2xl font-bold">Action Table</h2>
-          <p className="text-muted-foreground">
-            Gerenciamento de alertas com operadores e cronômetro sincronizado
-          </p>
-        </CardHeader>
-        <CardContent>
-          {loading ? (
-            <div className="text-center py-8">
-              <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary mb-4"></div>
-              <p>Carregando dados...</p>
-            </div>
-          ) : alertData.length === 0 ? (
-            <div className="text-center py-8 text-muted-foreground">
-              Nenhum dado disponível
-            </div>
-          ) : (
-            <div className="space-y-4">
-              {alertData.map((alert) => (
-                <Card key={alert.id} className="p-4">
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                    <div>
-                      <h3 className="font-semibold">Chamado: {alert.chamado}</h3>
-                      <p className="text-sm text-muted-foreground">{alert.resumo_chamado}</p>
-                    </div>
-                    <div>
-                      <p><strong>Grupo:</strong> {alert.grupo_chamado}</p>
-                      <p><strong>Severidade:</strong> {alert.severidade_chamado}</p>
-                    </div>
-                    <div>
-                      {renderConfirmationColumn(alert)}
-                    </div>
-                  </div>
-                </Card>
-              ))}
-            </div>
-          )}
-        </CardContent>
-      </Card>
-    </div>
-  );
 };
