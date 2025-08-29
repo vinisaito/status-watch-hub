@@ -1,18 +1,10 @@
-Timer.tsx:39 
- Erro ao buscar alertas: TypeError: data.map is not a function
-    at Timer.tsx:33:38
-(anônimo)	@	Timer.tsx:39
-Promise.catch		
-fetchAlerts	@	Timer.tsx:39
-(anônimo)	@	Timer.tsx:44
-Timer.tsx:29 
+https://f6ffk8e9fe.execute-api.us-east-1.amazonaws.com/prod/dados/10418007' from origin 'http://localhost:8080' has been blocked by CORS policy: Response to preflight request doesn't pass access control check: It does not have HTTP ok status.
+Timer.tsx:69 
  
- GET https://f6ffk8e9fe.execute-api.us-east-1.amazonaws.com/prod/dados/acompanhamento 403 (Forbidden)
-Timer.tsx:32 🚀 Dados recebidos da API: 
-{message: 'Missing Authentication Token'}
-message
-: 
-"Missing Authentication Token"
-[[Prototype]]
-: 
-Object
+ PATCH https://f6ffk8e9fe.execute-api.us-east-1.amazonaws.com/prod/dados/10418007 net::ERR_FAILED
+Timer.tsx:69 
+ 
+ 
+ Uncaught (in promise) TypeError: Failed to fetch
+    at startTimer (Timer.tsx:69:9)
+    at onClick (Timer.tsx:116:44)
