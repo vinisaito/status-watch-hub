@@ -1,8 +1,18 @@
-Access to fetch at 'https://tgwtw1v4rg.execute-api.us-east-1.amazonaws.com/dev/acompanhamento' from origin 'http://localhost:8080' has been blocked by CORS policy: No 'Access-Control-Allow-Origin' header is present on the requested resource.
+Timer.tsx:39 
+ Erro ao buscar alertas: TypeError: data.map is not a function
+    at Timer.tsx:33:38
+(anônimo)	@	Timer.tsx:39
+Promise.catch		
+fetchAlerts	@	Timer.tsx:39
+(anônimo)	@	Timer.tsx:44
 Timer.tsx:29 
  
- GET https://tgwtw1v4rg.execute-api.us-east-1.amazonaws.com/dev/acompanhamento net::ERR_FAILED 426 (Upgrade Required)
-Timer.tsx:39 
- Erro ao buscar alertas: TypeError: Failed to fetch
-    at fetchAlerts (Timer.tsx:29:9)
-    at Timer.tsx:44:9
+ GET https://f6ffk8e9fe.execute-api.us-east-1.amazonaws.com/prod/dados/acompanhamento 403 (Forbidden)
+Timer.tsx:32 🚀 Dados recebidos da API: 
+{message: 'Missing Authentication Token'}
+message
+: 
+"Missing Authentication Token"
+[[Prototype]]
+: 
+Object
