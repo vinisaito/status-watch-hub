@@ -1,16 +1,20 @@
-[ERROR] ClientError: An error occurred (AccessDeniedException) when calling the UpdateItem operation: User: arn:aws:sts::368696837445:assumed-role/testepainelacionamento-role-ficrh1es/testepainelacionamento is not authorized to perform: dynamodb:UpdateItem on resource: arn:aws:dynamodb:us-east-1:368696837445:table/painelmonitoracao_acompanhamento because no identity-based policy allows the dynamodb:UpdateItem action
-Traceback (most recent call last):
-  File "/var/task/lambda_function.py", line 37, in lambda_handler
-    return start_timer(body)
-  File "/var/task/lambda_function.py", line 60, in start_timer
-    ACOMP_TABLE.update_item(
-  File "/var/lang/lib/python3.11/site-packages/boto3/resources/factory.py", line 581, in do_action
-    response = action(self, *args, **kwargs)
-  File "/var/lang/lib/python3.11/site-packages/boto3/resources/action.py", line 88, in __call__
-    response = getattr(parent.meta.client, operation_name)(*args, **params)
-  File "/var/lang/lib/python3.11/site-packages/botocore/client.py", line 602, in _api_call
-    return self._make_api_call(operation_name, kwargs)
-  File "/var/lang/lib/python3.11/site-packages/botocore/context.py", line 123, in wrapper
-    return func(*args, **kwargs)
-  File "/var/lang/lib/python3.11/site-packages/botocore/client.py", line 1078, in _make_api_call
-    raise error_class(parsed_response, operation_name)
+{
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Effect": "Allow",
+            "Action": [
+                "dynamodb:UpdateItem",
+                "dynamodb:GetItem",
+                "dynamodb:PutItem",
+                "dynamodb:Scan"
+            ],
+            "Resource": "arn:aws:dynamodb:us-east-1:368696837445:table/painelmonitoracao_acompanhamento"
+        },
+        {
+            "Effect": "Allow",
+            "Action": "execute-api:ManageConnections",
+            "Resource": "arn:aws:execute-api:us-east-1:368696837445:*/*/@connections/*"
+        }
+    ]
+}
