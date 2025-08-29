@@ -4,7 +4,7 @@ function Timer() {
   const [data, setData] = useState([]);
   const [loading, setLoading] = useState(true);
 
-  // Função para buscar dados da API
+  // 🔹 Buscar dados da API
   const fetchData = async () => {
     try {
       const res = await fetch(
@@ -18,9 +18,33 @@ function Timer() {
     }
   };
 
+  // 🔹 Iniciar cronômetro
+  const startTimer = async (chamadoId) => {
+    const payload = {
+      chamado: chamadoId,
+      startedAt: new Date().toISOString(),
+      durationMinutes: 30, // Altere a duração como quiser
+      timerActive: true,
+    };
+
+    try {
+      await fetch(
+        "https://f6ffk8e9fe.execute-api.us-east-1.amazonaws.com/prod/acompanhamento",
+        {
+          method: "PATCH", // ou PUT/POST, conforme sua API
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        }
+      );
+      fetchData(); // Atualiza lista
+    } catch (err) {
+      console.error("Erro ao iniciar cronômetro", err);
+    }
+  };
+
   useEffect(() => {
     fetchData();
-    const interval = setInterval(fetchData, 5000); // Atualiza API a cada 5s
+    const interval = setInterval(fetchData, 5000);
     return () => clearInterval(interval);
   }, []);
 
@@ -39,6 +63,16 @@ function Timer() {
             <p>Status: {chamado.status}</p>
             <p>Operador: {chamado.operador}</p>
             <TimerDisplay chamado={chamado} />
+
+            {/* 🔹 Botão Iniciar */}
+            {!chamado.timerActive && (
+              <button
+                onClick={() => startTimer(chamado.chamado)}
+                className="mt-2 px-4 py-2 bg-green-600 text-white rounded-lg"
+              >
+                Iniciar Cronômetro
+              </button>
+            )}
           </li>
         ))}
       </ul>
