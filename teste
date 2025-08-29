@@ -5,6 +5,7 @@ interface TimerData {
   startedAt: string | null;
   durationMinutes: number;
   timerActive: boolean;
+  remaining: number; // adicionamos aqui
 }
 
 const WS_URL = "wss://SEU_ENDPOINT.execute-api.us-east-1.amazonaws.com/dev"; // substitua
@@ -28,6 +29,14 @@ export const Timer: React.FC = () => {
       if (data.type === "TIMER_UPDATED") {
         setTimers((prev) => {
           const exists = prev.find((t) => t.chamado === data.chamado);
+          const remaining = data.startedAt
+            ? Math.max(
+                0,
+                data.durationMinutes * 60 -
+                  (new Date().getTime() - new Date(data.startedAt).getTime()) / 1000
+              )
+            : data.durationMinutes * 60;
+
           if (exists) {
             return prev.map((t) =>
               t.chamado === data.chamado
@@ -36,6 +45,7 @@ export const Timer: React.FC = () => {
                     startedAt: data.startedAt,
                     durationMinutes: data.durationMinutes,
                     timerActive: data.timerActive,
+                    remaining,
                   }
                 : t
             );
@@ -47,6 +57,7 @@ export const Timer: React.FC = () => {
                 startedAt: data.startedAt,
                 durationMinutes: data.durationMinutes,
                 timerActive: data.timerActive,
+                remaining,
               },
             ];
           }
@@ -73,9 +84,8 @@ export const Timer: React.FC = () => {
               (new Date().getTime() - new Date(t.startedAt).getTime()) / 1000;
             const remaining = Math.max(0, t.durationMinutes * 60 - elapsed);
             return { ...t, remaining };
-          } else {
-            return { ...t, remaining: t.durationMinutes * 60 };
           }
+          return { ...t };
         })
       );
     }, 1000);
@@ -92,21 +102,28 @@ export const Timer: React.FC = () => {
     <div>
       <h1>Painel de Alertas</h1>
       {timers.map((t) => (
-        <div key={t.chamado} style={{ border: "1px solid gray", padding: 10, margin: 5 }}>
+        <div
+          key={t.chamado}
+          style={{ border: "1px solid gray", padding: 10, margin: 5 }}
+        >
           <p>Chamado: {t.chamado}</p>
           <p>Status: {t.timerActive ? "Rodando" : "Pausado"}</p>
           <p>
             Tempo restante:{" "}
             {t.remaining
               ? `${Math.floor(t.remaining / 60)
-              .toString()
-              .padStart(2, "0")}:${Math.floor(t.remaining % 60)
-              .toString()
-              .padStart(2, "0")}`
+                  .toString()
+                  .padStart(2, "0")}:${Math.floor(t.remaining % 60)
+                  .toString()
+                  .padStart(2, "0")}`
               : "00:00"}
           </p>
-          <button onClick={() => sendAction(t.chamado, "startTimer")}>Iniciar</button>
-          <button onClick={() => sendAction(t.chamado, "pauseTimer")}>Pausar</button>
+          <button onClick={() => sendAction(t.chamado, "startTimer")}>
+            Iniciar
+          </button>
+          <button onClick={() => sendAction(t.chamado, "pauseTimer")}>
+            Pausar
+          </button>
         </div>
       ))}
     </div>
