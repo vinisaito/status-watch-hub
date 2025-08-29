@@ -55,7 +55,7 @@ const Timer: React.FC = () => {
     const startedAtDate = new Date(timer.startedAt);
     if (isNaN(startedAtDate.getTime())) return duration * 60;
 
-    const elapsed = (new Date().getTime() - startedAtDateDate.getTime()) / 1000;
+    const elapsed = (new Date().getTime() - startedAtDate.getTime()) / 1000;
     return Math.max(0, duration * 60 - elapsed);
   };
 
