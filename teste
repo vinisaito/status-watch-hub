@@ -1,124 +1,13 @@
-import React, { useEffect, useState, useRef } from "react";
-
-const WS_ENDPOINT = "wss://SEU_ENDPOINT.execute-api.us-east-1.amazonaws.com/dev";
-const API_BASE = "https://f6ffk8e9fe.execute-api.us-east-1.amazonaws.com/prod";
-
-export default function Painel() {
-  const [alerts, setAlerts] = useState([]);
-  const ws = useRef(null);
-
-  // Conecta WebSocket
-  useEffect(() => {
-    ws.current = new WebSocket(WS_ENDPOINT);
-
-    ws.current.onopen = () => console.log("✅ WebSocket conectado");
-    ws.current.onmessage = (msg) => {
-      const data = JSON.parse(msg.data);
-      if (data.type === "update") {
-        // Atualiza apenas o alerta modificado
-        fetchAlerts();
-      }
-    };
-    ws.current.onclose = () => console.log("❌ WebSocket desconectado");
-
-    return () => ws.current.close();
-  }, []);
-
-  // Busca alertas da API
-  const fetchAlerts = () => {
-    fetch(`${API_BASE}/acompanhamento`)
-      .then((res) => res.json())
-      .then((data) => {
-        // Inicializa o timer local
-        const updated = data.map((alert) => ({
-          ...alert,
-          localTimeRemaining: alert.timeRemaining,
-        }));
-        setAlerts(updated);
-      });
-  };
-
-  useEffect(() => {
-    fetchAlerts();
-  }, []);
-
-  // Atualiza o timer local a cada segundo
-  useEffect(() => {
-    const interval = setInterval(() => {
-      setAlerts((prev) =>
-        prev.map((alert) => {
-          if (alert.timerActive) {
-            const startedAt = new Date(alert.startedAt).getTime();
-            const durationMs = alert.durationMinutes * 60 * 1000;
-            const now = Date.now();
-            const elapsed = now - startedAt;
-            const remaining = Math.max(0, durationMs - elapsed);
-            return { ...alert, localTimeRemaining: Math.floor(remaining / 1000) };
-          }
-          return alert;
-        })
-      );
-    }, 1000);
-    return () => clearInterval(interval);
-  }, [alerts]);
-
-  // Iniciar cronômetro
-  const startTimer = (chamado) => {
-    fetch(`${API_BASE}/acompanhamento/${chamado}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ timerActive: true, startedAt: new Date().toISOString() }),
-    }).then(() => {
-      if (ws.current && ws.current.readyState === WebSocket.OPEN) {
-        ws.current.send(JSON.stringify({ action: "startTimer", chamado }));
-      }
-    });
-  };
-
-  // Pausar cronômetro
-  const pauseTimer = (chamado) => {
-    fetch(`${API_BASE}/acompanhamento/${chamado}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ timerActive: false }),
-    }).then(() => {
-      if (ws.current && ws.current.readyState === WebSocket.OPEN) {
-        ws.current.send(JSON.stringify({ action: "pauseTimer", chamado }));
-      }
-    });
-  };
-
-  // Renderiza os alertas
-  return (
-    <div style={{ padding: "20px" }}>
-      <h1>Painel de Alertas</h1>
-      {alerts.map((alert) => (
-        <div
-          key={alert.chamado}
-          style={{
-            border: "1px solid #ccc",
-            padding: "10px",
-            marginBottom: "10px",
-          }}
-        >
-          <p><strong>Chamado:</strong> {alert.chamado}</p>
-          <p>
-            <strong>Tempo restante:</strong>{" "}
-            {Math.floor(alert.localTimeRemaining / 60)
-              .toString()
-              .padStart(2, "0")}
-            :
-            {(alert.localTimeRemaining % 60).toString().padStart(2, "0")}
-          </p>
-          <p><strong>Status:</strong> {alert.timerActive ? "Rodando" : "Pausado"}</p>
-          <button onClick={() => startTimer(alert.chamado)} disabled={alert.timerActive}>
-            Iniciar
-          </button>
-          <button onClick={() => pauseTimer(alert.chamado)} disabled={!alert.timerActive}>
-            Pausar
-          </button>
-        </div>
-      ))}
-    </div>
-  );
-}
+const fetchAlerts = () => {
+  fetch(`${API_BASE}/acompanhamento`)
+    .then((res) => res.json())
+    .then((data) => {
+      console.log("🚀 Dados recebidos da API:", data);
+      const updated = data.map((alert) => ({
+        ...alert,
+        localTimeRemaining: alert.timeRemaining,
+      }));
+      setAlerts(updated);
+    })
+    .catch(err => console.error("Erro ao buscar alertas:", err));
+};
