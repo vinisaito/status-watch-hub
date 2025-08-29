@@ -1,4 +1,4 @@
-[ERROR] ClientError: An error occurred (ValidationException) when calling the UpdateItem operation: The provided key element does not match the schema
+[ERROR] ClientError: An error occurred (AccessDeniedException) when calling the UpdateItem operation: User: arn:aws:sts::368696837445:assumed-role/testepainelacionamento-role-ficrh1es/testepainelacionamento is not authorized to perform: dynamodb:UpdateItem on resource: arn:aws:dynamodb:us-east-1:368696837445:table/painelmonitoracao_acompanhamento because no identity-based policy allows the dynamodb:UpdateItem action
 Traceback (most recent call last):
   File "/var/task/lambda_function.py", line 37, in lambda_handler
     return start_timer(body)
