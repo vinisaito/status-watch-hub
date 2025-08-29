@@ -1,227 +1,108 @@
-import boto3
+import os
 import json
+import boto3
 from datetime import datetime, timezone
-from decimal import Decimal
+from boto3.dynamodb.conditions import Key
 
-# Conecta no DynamoDB
-dynamodb = boto3.resource("dynamodb", region_name="us-east-1")
-table = dynamodb.Table("painelmonitoracao_acompanhamento")
+DDB = boto3.resource("dynamodb", region_name="us-east-1")
+ACOMP_TABLE = DDB.Table(os.environ["ACOMP_TABLE"])
+CONN_TABLE = DDB.Table(os.environ["CONN_TABLE"])
 
-# Função para serializar Decimal
-def json_serial(obj):
-    if isinstance(obj, Decimal):
-        if obj % 1 == 0:
-            return int(obj)
-        else:
-            return float(obj)
-    raise TypeError
-
-# Função helper de response
-def response(status_code, body):
-    return {
-        "statusCode": status_code,
-        "headers": {
-            "Content-Type": "application/json",
-            "Access-Control-Allow-Origin": "*",
-            "Access-Control-Allow-Methods": "OPTIONS,POST,GET,PATCH",
-            "Access-Control-Allow-Headers": "Content-Type"
-        },
-        "body": json.dumps(body, default=json_serial)
-    }
+# IMPORTANTÍSSIMO: endpoint do *Management API* é HTTPS, não WSS.
+# Formato: https://{api-id}.execute-api.{region}.amazonaws.com/{stage}
+APIGW_MGMT = boto3.client(
+    "apigatewaymanagementapi",
+    endpoint_url=os.environ["WS_MANAGEMENT_ENDPOINT"]
+)
 
 def lambda_handler(event, context):
-    method = event.get("httpMethod")
-    path = event.get("path")
-    body = {}
+    route = event.get("requestContext", {}).get("routeKey")
+    connection_id = event.get("requestContext", {}).get("connectionId")
 
-    # Se vier corpo no request, tenta decodificar
-    if event.get("body"):
-        try:
-            body = json.loads(event["body"])
-        except:
-            body = {}
-
+    # body do WebSocket (JSON) vira string; decodifica quando precisar
+    raw_body = event.get("body") or "{}"
     try:
-        # Criar novo alerta
-        if method == "POST" and path == "/acompanhamento":
-            return create_alert(body)
+        body = json.loads(raw_body)
+    except:
+        body = {}
 
-        # Atualizar campos principais do alerta (status, cronômetro, etc)
-        if method == "PATCH" and path.startswith("/acompanhamento/") and "/escalation/" not in path:
-            alert_id = int(path.split("/")[2])
-            return update_alert(alert_id, body)
+    if route == "$connect":
+        return on_connect(connection_id)
+    elif route == "$disconnect":
+        return on_disconnect(connection_id)
+    elif route == "$default":
+        # útil para debug
+        return ok({"echo": body})
+    elif route == "startTimer":
+        return start_timer(body)
+    else:
+        return err(400, f"Rota não suportada: {route}")
 
-        # Atualizar escalonamento específico
-        if method == "PATCH" and "/escalation/" in path:
-            parts = path.strip("/").split("/")
-            alert_id = int(parts[1])
-            level = int(parts[3])
-            return update_escalation(alert_id, level, body)
+def on_connect(connection_id):
+    CONN_TABLE.put_item(Item={"connectionId": connection_id})
+    # (Opcional) enviar estado inicial só para essa conexão
+    # send_to(connection_id, {"type":"CONNECTED"})
+    return ok({"connected": True})
 
-        # Buscar um alerta específico
-        if method == "GET" and path.startswith("/acompanhamento/") and path != "/acompanhamento":
-            alert_id = int(path.split("/")[2])
-            return get_alert(alert_id)
+def on_disconnect(connection_id):
+    CONN_TABLE.delete_item(Key={"connectionId": connection_id})
+    return ok({"disconnected": True})
 
-        # Listar alertas
-        if method == "GET" and path == "/acompanhamento":
-            return list_alerts()
+def start_timer(body):
+    # validação
+    if "chamado" not in body:
+        return err(400, "Campo 'chamado' é obrigatório")
+    chamado = int(body["chamado"])
+    duration = int(body.get("durationMinutes", 15))
+    now_iso = datetime.utcnow().replace(tzinfo=timezone.utc).isoformat()
 
-        return response(400, {"error": "Rota não suportada"})
+    # Atualiza na tabela de acompanhamento
+    ACOMP_TABLE.update_item(
+        Key={"chamado": chamado},
+        UpdateExpression=("SET startedAt=:s, durationMinutes=:d, "
+                          "timerActive=:t, updatedAt=:u"),
+        ExpressionAttributeValues={
+            ":s": now_iso,
+            ":d": duration,
+            ":t": True,
+            ":u": now_iso
+        }
+        # Se quiser garantir que o item exista, adicione:
+        # ,ConditionExpression="attribute_exists(chamado)"
+    )
 
-    except Exception as e:
-        print("Erro:", str(e))
-        return response(500, {"error": str(e)})
-
-# -------------------------------
-# Criar alerta
-# -------------------------------
-def create_alert(data):
-    chamado_raw = data.get("chamado")
-    if chamado_raw is None:
-        return response(400, {"error": "Campo 'chamado' é obrigatório"})
-
-    try:
-        chamado = int(chamado_raw)
-    except ValueError:
-        return response(400, {"error": "Campo 'chamado' deve ser numérico"})
-
-    now = datetime.utcnow().replace(tzinfo=timezone.utc).isoformat()
-
-    alert = {
+    # Mensagem padronizada para todos os clientes
+    msg = {
+        "type": "TIMER_UPDATED",
         "chamado": chamado,
-        "alertOpenTime": data.get("alertOpenTime", now),
-        "sendChat": data.get("sendChat", ""),
-        "confirmChat": data.get("confirmChat", ""),
-        "obsChat": data.get("obsChat", ""),
-        "operador": data.get("operador", ""),
-        # Campos de persistência do cronômetro e escalação
-        "status": data.get("status", "pending"),
-        "timeRemaining": data.get("timeRemaining", 0),  # só inicial
-        "timerActive": data.get("timerActive", False),
-        "observations": data.get("observations", ""),
-        "pendingChange": data.get("pendingChange", {}),
-        "currentLevel": data.get("currentLevel", 0),
-        "isAttended": data.get("isAttended", False),
-        "startedAt": data.get("startedAt", now),  # referência do cronômetro
-        "durationMinutes": data.get("durationMinutes", 15),  # tempo total do cronômetro (default 15min)
-        "updatedAt": now,
-        "escalations": [
-            {"level": i, "status": "", "observations": "", "eventTimestamp": "", "operador": ""}
-            for i in range(1, 5)
-        ],
-        "ttl": int(datetime.utcnow().timestamp()) + 60 * 60 * 24 * 180  # 6 meses
+        "startedAt": now_iso,
+        "durationMinutes": duration,
+        "timerActive": True
     }
 
-    table.put_item(Item=alert)
-    return response(201, alert)
+    broadcast(msg)
+    return ok({"message": "Timer iniciado", "payload": msg})
 
-# -------------------------------
-# Atualizar alerta (status geral)
-# -------------------------------
-def update_alert(alert_id, data):
-    timestamp = datetime.utcnow().replace(tzinfo=timezone.utc).isoformat()
+# ---------- utilitários ----------
 
-    update_expression = "SET "
-    expr_names = {}
-    expr_values = {}
+def ok(body):
+    return {"statusCode": 200, "body": json.dumps(body)}
 
-    allowed_fields = [
-        "status", "timeRemaining", "timerActive",
-        "observations", "pendingChange", "currentLevel",
-        "isAttended", "operador", "durationMinutes"
-    ]
+def err(status, message):
+    return {"statusCode": status, "body": json.dumps({"error": message})}
 
-    for i, field in enumerate(allowed_fields):
-        if field in data:
-            if len(expr_values) > 0:
-                update_expression += ", "
-            update_expression += f"#{field} = :{field}"
-            expr_names[f"#{field}"] = field
-            expr_values[f":{field}"] = data[field]
-
-    # Sempre atualiza o updatedAt
-    update_expression += ", updatedAt = :updatedAt"
-    expr_values[":updatedAt"] = timestamp
-
-    result = table.update_item(
-        Key={"chamado": alert_id},
-        UpdateExpression=update_expression,
-        ExpressionAttributeNames=expr_names,
-        ExpressionAttributeValues=expr_values,
-        ReturnValues="ALL_NEW"
-    )
-
-    return response(200, enrich_with_timer(result["Attributes"]))
-
-# -------------------------------
-# Atualizar escalonamento específico
-# -------------------------------
-def update_escalation(alert_id, level, data):
-    timestamp = datetime.utcnow().replace(tzinfo=timezone.utc).isoformat()
-    idx = level - 1
-
-    update_expression = (
-        f"SET escalations[{idx}].#s = :status, "
-        f"escalations[{idx}].observations = :obs, "
-        f"escalations[{idx}].eventTimestamp = :ts, "
-        f"escalations[{idx}].operador = :op"
-    )
-    expression_attr_names = {"#s": "status"}
-    expression_attr_values = {
-        ":status": data.get("status", ""),
-        ":obs": data.get("observations", ""),
-        ":ts": timestamp,
-        ":op": data.get("operador", "")
-    }
-
-    result = table.update_item(
-        Key={"chamado": alert_id},
-        UpdateExpression=update_expression,
-        ExpressionAttributeNames=expression_attr_names,
-        ExpressionAttributeValues=expression_attr_values,
-        ReturnValues="ALL_NEW"
-    )
-
-    return response(200, enrich_with_timer(result["Attributes"]))
-
-# -------------------------------
-# Buscar alerta específico (com cálculo do cronômetro)
-# -------------------------------
-def get_alert(alert_id):
-    result = table.get_item(Key={"chamado": alert_id})
-    item = result.get("Item", {})
-    enriched = enrich_with_timer(item)
-    return response(200, enriched)
-
-# -------------------------------
-# Listar alertas (todos com cronômetro atualizado)
-# -------------------------------
-def list_alerts():
-    result = table.scan(Limit=50)
-    items = result.get("Items", [])
-    enriched = [enrich_with_timer(item) for item in items]
-    return response(200, enriched)
-
-# -------------------------------
-# Função auxiliar para atualizar cronômetro em tempo real
-# -------------------------------
-def enrich_with_timer(item):
-    if not item:
-        return item
-
-    started_at_str = item.get("startedAt")
-    duration_minutes = int(item.get("durationMinutes", 15))
-
-    if started_at_str:
+def broadcast(message: dict):
+    data = json.dumps(message)
+    # pega todas as conexões
+    scan = CONN_TABLE.scan()
+    for item in scan.get("Items", []):
+        cid = item["connectionId"]
         try:
-            started_at = datetime.fromisoformat(started_at_str.replace("Z", "+00:00"))
-            now = datetime.utcnow().replace(tzinfo=timezone.utc)
-            elapsed = (now - started_at).total_seconds()
-            remaining = max(0, duration_minutes * 60 - elapsed)
-            item["timeRemaining"] = int(remaining)
+            APIGW_MGMT.post_to_connection(ConnectionId=cid, Data=data)
         except Exception as e:
-            print("Erro no cálculo do cronômetro:", e)
-            item["timeRemaining"] = item.get("timeRemaining", 0)
+            # conexão quebrada → remove
+            print(f"Falha ao enviar para {cid}: {e}")
+            CONN_TABLE.delete_item(Key={"connectionId": cid})
 
-    return item
+def send_to(connection_id: str, payload: dict):
+    APIGW_MGMT.post_to_connection(ConnectionId=connection_id, Data=json.dumps(payload))
