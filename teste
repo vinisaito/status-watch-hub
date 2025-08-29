@@ -1,26 +1,6 @@
 {
-  "Version": "2012-10-17",
-  "Statement": [
-    {
-      "Effect": "Allow",
-      "Action": [
-        "dynamodb:PutItem",
-        "dynamodb:DeleteItem",
-        "dynamodb:UpdateItem",
-        "dynamodb:GetItem",
-        "dynamodb:Scan"
-      ],
-      "Resource": [
-        "arn:aws:dynamodb:us-east-1:368696837445:table/painelmonitoracao_connections",
-        "arn:aws:dynamodb:us-east-1:368696837445:table/painelmonitoracao_acompanhamento"
-      ]
-    },
-    {
-      "Effect": "Allow",
-      "Action": [
-        "execute-api:ManageConnections"
-      ],
-      "Resource": "arn:aws:execute-api:us-east-1:368696837445:*/*/*/*"
-    }
-  ]
+  "requestContext": {
+    "routeKey": "$connect",
+    "connectionId": "test123"
+  }
 }
