@@ -1,4 +1,3 @@
-{
-  "statusCode": 500,
-  "body": "An error occurred (ValidationException) when calling the GetItem operation: The provided key element does not match the schema"
-}
+# Se a chave for NUMBER
+chamado = int(body.get("chamado"))
+item = ACOMP_TABLE.get_item(Key={"chamado": chamado}).get("Item")
