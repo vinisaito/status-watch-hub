@@ -127,4 +127,4 @@ def lambda_handler(event, context):
 
     else:
         print(f"Rota não suportada: {route}")
-        return {"statusCode": 400, "body": "Rota não supo
+        return {"statusCode": 400, "body": "Rota não suportada"}
