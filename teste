@@ -1,13 +1,8 @@
-const fetchAlerts = () => {
-  fetch(`${API_BASE}/acompanhamento`)
-    .then((res) => res.json())
-    .then((data) => {
-      console.log("🚀 Dados recebidos da API:", data);
-      const updated = data.map((alert) => ({
-        ...alert,
-        localTimeRemaining: alert.timeRemaining,
-      }));
-      setAlerts(updated);
-    })
-    .catch(err => console.error("Erro ao buscar alertas:", err));
-};
+Access to fetch at 'https://tgwtw1v4rg.execute-api.us-east-1.amazonaws.com/dev/acompanhamento' from origin 'http://localhost:8080' has been blocked by CORS policy: No 'Access-Control-Allow-Origin' header is present on the requested resource.
+Timer.tsx:29 
+ 
+ GET https://tgwtw1v4rg.execute-api.us-east-1.amazonaws.com/dev/acompanhamento net::ERR_FAILED 426 (Upgrade Required)
+Timer.tsx:39 
+ Erro ao buscar alertas: TypeError: Failed to fetch
+    at fetchAlerts (Timer.tsx:29:9)
+    at Timer.tsx:44:9
