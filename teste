@@ -119,3 +119,35 @@ export default function Timer() {
             padding: "10px",
             marginBottom: "10px",
           }}
+        >
+          <p>
+            <strong>Chamado:</strong> {alert.chamado}
+          </p>
+          <p>
+            <strong>Tempo restante:</strong>{" "}
+            {Math.floor((alert.localTimeRemaining ?? 0) / 60)
+              .toString()
+              .padStart(2, "0")}
+            :
+            {((alert.localTimeRemaining ?? 0) % 60).toString().padStart(2, "0")}
+          </p>
+          <p>
+            <strong>Status:</strong> {alert.timerActive ? "Rodando" : "Pausado"}
+          </p>
+          <button
+            onClick={() => startTimer(alert.chamado)}
+            disabled={alert.timerActive}
+          >
+            Iniciar
+          </button>
+          <button
+            onClick={() => pauseTimer(alert.chamado)}
+            disabled={!alert.timerActive}
+          >
+            Pausar
+          </button>
+        </div>
+      ))}
+    </div>
+  );
+}
