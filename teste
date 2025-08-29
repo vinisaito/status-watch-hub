@@ -1,3 +1,7 @@
-# Se a chave for NUMBER
-chamado = int(body.get("chamado"))
-item = ACOMP_TABLE.get_item(Key={"chamado": chamado}).get("Item")
+{
+  "requestContext": {
+    "routeKey": "sendMessage",
+    "connectionId": "teste-connection-1"
+  },
+  "body": "{\"action\": \"startTimer\", \"chamado\": 10418007}"
+}
