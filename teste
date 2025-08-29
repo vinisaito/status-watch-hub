@@ -1,2 +1,104 @@
-✅ WebSocket conectado
-Timer.tsx:23 📩 Mensagem recebida: {"type": "TIMER_UPDATED", "chamado": 10418007, "startedAt": "2025-08-29T22:12:25.560263+00:00", "durationMinutes": 15, "timerActive": true}
+import React, { useEffect, useRef, useState } from "react";
+
+interface Alert {
+  chamado: number;
+  startedAt?: string;
+  durationMinutes?: number;
+  timerActive?: boolean;
+  localTimeRemaining?: number;
+}
+
+const WS_ENDPOINT = "wss://SEU_ENDPOINT.execute-api.us-east-1.amazonaws.com/prod";
+
+export const Timer: React.FC = () => {
+  const ws = useRef<WebSocket | null>(null);
+  const [alerts, setAlerts] = useState<Alert[]>([]);
+
+  // Conectar WebSocket
+  useEffect(() => {
+    ws.current = new WebSocket(WS_ENDPOINT);
+
+    ws.current.onopen = () => console.log("✅ WebSocket conectado");
+
+    ws.current.onmessage = (msg) => {
+      const data = JSON.parse(msg.data);
+      console.log("📩 Mensagem recebida:", data);
+
+      if (data.type === "TIMER_UPDATED") {
+        setAlerts((prev) =>
+          prev.map((alert) =>
+            alert.chamado === data.chamado
+              ? { ...alert, ...data, localTimeRemaining: data.durationMinutes! * 60 }
+              : alert
+          )
+        );
+      }
+    };
+
+    ws.current.onerror = (err) => console.error("❌ Erro WebSocket:", err);
+    ws.current.onclose = () => console.log("⚠️ WebSocket desconectado");
+
+    return () => ws.current?.close();
+  }, []);
+
+  // Atualizar cronômetro local a cada segundo
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setAlerts((prev) =>
+        prev.map((alert) => {
+          if (alert.timerActive && alert.startedAt) {
+            const startedAt = new Date(alert.startedAt).getTime();
+            const durationMs = (alert.durationMinutes ?? 15) * 60 * 1000;
+            const elapsed = Date.now() - startedAt;
+            const remaining = Math.max(0, durationMs - elapsed);
+            return { ...alert, localTimeRemaining: Math.floor(remaining / 1000) };
+          }
+          return { ...alert, localTimeRemaining: 0 };
+        })
+      );
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [alerts]);
+
+  // Iniciar ou pausar cronômetro
+  const toggleTimer = (alert: Alert) => {
+    if (!ws.current || ws.current.readyState !== WebSocket.OPEN) return;
+    const action = alert.timerActive ? "pauseTimer" : "startTimer";
+    ws.current.send(JSON.stringify({ action, chamado: alert.chamado }));
+    console.log("➡️ Mensagem enviada:", { action, chamado: alert.chamado });
+  };
+
+  return (
+    <div style={{ padding: "20px" }}>
+      <h1>Painel de Alertas</h1>
+      {alerts.map((alert) => (
+        <div
+          key={alert.chamado}
+          style={{
+            border: "1px solid #ccc",
+            padding: "10px",
+            marginBottom: "10px",
+            borderRadius: "5px",
+          }}
+        >
+          <h2>Alerta {alert.chamado}</h2>
+          <p>
+            Tempo restante:{" "}
+            {alert.localTimeRemaining
+              ? `${Math.floor(alert.localTimeRemaining / 60)
+                  .toString()
+                  .padStart(2, "0")}:${(alert.localTimeRemaining % 60)
+                  .toString()
+                  .padStart(2, "0")}`
+              : "00:00"}
+          </p>
+          <button onClick={() => toggleTimer(alert)}>
+            {alert.timerActive ? "Pausar" : "Iniciar"} cronômetro
+          </button>
+        </div>
+      ))}
+    </div>
+  );
+};
+
+export default Timer;
