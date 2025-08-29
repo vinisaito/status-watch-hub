@@ -49,7 +49,9 @@ def lambda_handler(event, context):
         startedAt = None
 
         try:
+            # --------------------------
             # Atualiza o cronômetro no DynamoDB
+            # --------------------------
             if action == "startTimer":
                 startedAt = datetime.utcnow().replace(tzinfo=timezone.utc).isoformat()
                 ACOMP_TABLE.update_item(
@@ -58,13 +60,18 @@ def lambda_handler(event, context):
                     ExpressionAttributeValues={":t": True, ":s": startedAt}
                 )
                 print(f"⏱ Timer iniciado: {chamado} às {startedAt}")
+
             elif action == "pauseTimer":
+                # Busca startedAt atual para enviar no broadcast
+                item = ACOMP_TABLE.get_item(Key={"chamado": str(chamado)}).get("Item", {})
+                startedAt = item.get("startedAt")
                 ACOMP_TABLE.update_item(
                     Key={"chamado": str(chamado)},
                     UpdateExpression="SET timerActive = :t",
                     ExpressionAttributeValues={":t": False}
                 )
                 print(f"⏸ Timer pausado: {chamado}")
+
             else:
                 print("❌ Ação inválida")
                 return {"statusCode": 400, "body": "Ação inválida"}
@@ -79,15 +86,16 @@ def lambda_handler(event, context):
                 try:
                     apigw.post_to_connection(
                         Data=json.dumps({
-                            "type": "updateTimer",
+                            "type": "TIMER_UPDATED",
                             "chamado": chamado,
                             "timerActive": action == "startTimer",
-                            "startedAt": startedAt if action == "startTimer" else None
+                            "startedAt": startedAt,
+                            # Opcional: enviar duração também
+                            "durationMinutes": item.get("durationMinutes", 15) if action == "pauseTimer" else 15
                         }),
                         ConnectionId=conn["connectionId"]
                     )
                 except apigw.exceptions.GoneException:
-                    # Conexão inválida, remove da tabela
                     print(f"❌ Conexão ausente: {conn['connectionId']}")
                     CONN_TABLE.delete_item(Key={"connectionId": conn["connectionId"]})
 
