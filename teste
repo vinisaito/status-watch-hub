@@ -1,18 +1,146 @@
-Encountered two children with the same key, `10418007`. Keys should be unique so that components maintain their identity across updates. Non-unique keys may cause children to be duplicated and/or omitted — the behavior is unsupported and could change in a future version.
-    at div
-    at Timer (http://localhost:8080/src/components/Timer.tsx?t=1756508683051:16:33)
-    at div
-    at div
-    at div
-    at div
-    at div
-    at Dashboard (http://localhost:8080/src/components/Dashboard.tsx?t=1756508683051:24:41)
-    at Index
-    at RenderedRoute (http://localhost:8080/node_modules/.vite/deps/react-router-dom.js?v=4964fdab:4069:5)
-    at Routes (http://localhost:8080/node_modules/.vite/deps/react-router-dom.js?v=4964fdab:4508:5)
-    at Router (http://localhost:8080/node_modules/.vite/deps/react-router-dom.js?v=4964fdab:4451:15)
-    at BrowserRouter (http://localhost:8080/node_modules/.vite/deps/react-router-dom.js?v=4964fdab:5196:5)
-    at Provider (http://localhost:8080/node_modules/.vite/deps/chunk-H267BXJE.js?v=4964fdab:48:15)
-    at TooltipProvider (http://localhost:8080/node_modules/.vite/deps/@radix-ui_react-tooltip.js?v=4964fdab:58:5)
-    at QueryClientProvider (http://localhost:8080/node_modules/.vite/deps/@tanstack_react-query.js?v=4964fdab:2794:3)
-    at App
+import React, { useEffect, useState, useRef } from "react";
+
+interface TimerData {
+  chamado: number;
+  startedAt: string | null;
+  durationMinutes: number;
+  timerActive: boolean;
+  remaining: number;
+}
+
+const WS_URL = "wss://SEU_ENDPOINT.execute-api.us-east-1.amazonaws.com/dev"; // substituir
+const API_URL = "https://SEU_ENDPOINT.execute-api.us-east-1.amazonaws.com/prod/dados"; // substituir
+
+const Timer: React.FC = () => {
+  const [timers, setTimers] = useState<TimerData[]>([]);
+  const ws = useRef<WebSocket | null>(null);
+
+  // Carregar timers iniciais do back-end
+  useEffect(() => {
+    fetch(API_URL)
+      .then((res) => res.json())
+      .then((data) => {
+        const initialTimers: TimerData[] = data.map((item: any) => {
+          const remaining = item.startedAt
+            ? Math.max(
+                0,
+                item.durationMinutes * 60 -
+                  (new Date().getTime() - new Date(item.startedAt).getTime()) / 1000
+              )
+            : item.durationMinutes * 60;
+          return {
+            chamado: item.chamado,
+            startedAt: item.startedAt,
+            durationMinutes: item.durationMinutes,
+            timerActive: item.timerActive,
+            remaining,
+          };
+        });
+        setTimers(initialTimers);
+      })
+      .catch((err) => console.error("Erro ao buscar alertas:", err));
+  }, []);
+
+  // Conexão WebSocket
+  useEffect(() => {
+    ws.current = new WebSocket(WS_URL);
+
+    ws.current.onopen = () => {
+      console.log("✅ WebSocket conectado");
+    };
+
+    ws.current.onmessage = (event) => {
+      const data = JSON.parse(event.data);
+      if (data.type === "TIMER_UPDATED") {
+        setTimers((prev) => {
+          const index = prev.findIndex((t) => t.chamado === data.chamado);
+          const remaining = data.startedAt
+            ? Math.max(
+                0,
+                data.durationMinutes * 60 -
+                  (new Date().getTime() - new Date(data.startedAt).getTime()) / 1000
+              )
+            : data.durationMinutes * 60;
+
+          const newTimer = {
+            chamado: data.chamado,
+            startedAt: data.startedAt,
+            durationMinutes: data.durationMinutes,
+            timerActive: data.timerActive,
+            remaining,
+          };
+
+          if (index >= 0) {
+            const copy = [...prev];
+            copy[index] = newTimer; // substitui
+            return copy;
+          } else {
+            return [...prev, newTimer]; // adiciona se não existir
+          }
+        });
+      }
+    };
+
+    ws.current.onclose = () => console.log("❌ WebSocket desconectado");
+
+    return () => ws.current?.close();
+  }, []);
+
+  // Atualizar timer a cada segundo
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setTimers((prev) =>
+        prev.map((t) => {
+          if (t.startedAt && t.timerActive) {
+            const elapsed =
+              (new Date().getTime() - new Date(t.startedAt).getTime()) / 1000;
+            const remaining = Math.max(0, t.durationMinutes * 60 - elapsed);
+            return { ...t, remaining };
+          }
+          return { ...t };
+        })
+      );
+    }, 1000);
+    return () => clearInterval(interval);
+  }, []);
+
+  const sendAction = (chamado: number, action: "startTimer" | "pauseTimer") => {
+    if (ws.current && ws.current.readyState === WebSocket.OPEN) {
+      ws.current.send(JSON.stringify({ action, chamado }));
+    }
+  };
+
+  return (
+    <div>
+      <h1>Painel de Alertas</h1>
+      {timers.length === 0 && <p>Carregando alertas...</p>}
+      {timers.map((t) => (
+        <div
+          key={t.chamado}
+          style={{ border: "1px solid gray", padding: 10, margin: 5 }}
+        >
+          <p>Chamado: {t.chamado}</p>
+          <p>Status: {t.timerActive ? "Rodando" : "Pausado"}</p>
+          <p>
+            Tempo restante:{" "}
+            {t.remaining
+              ? `${Math.floor(t.remaining / 60)
+                  .toString()
+                  .padStart(2, "0")}:${Math.floor(t.remaining % 60)
+                  .toString()
+                  .padStart(2, "0")}`
+              : "00:00"}
+          </p>
+          <button onClick={() => sendAction(t.chamado, "startTimer")}>
+            Iniciar
+          </button>
+          <button onClick={() => sendAction(t.chamado, "pauseTimer")}>
+            Pausar
+          </button>
+        </div>
+      ))}
+    </div>
+  );
+};
+
+export default Timer;
