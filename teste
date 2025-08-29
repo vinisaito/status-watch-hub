@@ -6,19 +6,8 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { toast } from '@/hooks/use-toast';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import {Select, SelectContent, SelectItem, SelectTrigger, SelectValue} from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
 
@@ -31,19 +20,18 @@ interface AlertData {
   abertura_chamado: string;
   resumo_chamado: string;
   severidade_chamado: string;
-  acionado: string;
   chat: boolean;
 }
 
 interface EscalationState {
   status: 'pending' | 'confirmed' | 'escalating' | 'completed';
-  currentLevel: 0 | 1 | 2 | 3 | 4; // 0 = confirmação, 1-4 = escalações
+  currentLevel: 0 | 1 | 2 | 3 | 4;
   timeRemaining: number;
   timerActive: boolean;
   isAttended: boolean;
   observations: string;
-  pendingStatus?: string; // Status pendente de confirmação
-  pendingObservations?: string; // Observações pendentes
+  pendingStatus?: string;
+  pendingObservations?: string;
 }
 
 interface ActionTableProps {
@@ -57,32 +45,24 @@ type SortDirection = 'asc' | 'desc' | null;
 
 export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: ActionTableProps) => {
   const [selectedIncident, setSelectedIncident] = useState<AlertData | null>(null);
-  const [crisisDialogOpen, setCrisisDialogOpen] = useState(false);
   const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 5;
 
-  // Estados para ordenação
   const [sortField, setSortField] = useState<SortField>('chamado');
   const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
 
-  // Estado que guarda os numeros chamados já acionados (string)
   const [acionadosSet, setAcionadosSet] = useState<Set<string>>(new Set());
 
-  // Estado para controlar o status de escalação de cada chamado
   const [escalationStatus, setEscalationStatus] = useState<Record<string, string>>({});
 
-  // Estados para escalação
   const [escalationStates, setEscalationStates] = useState<Record<string, EscalationState>>({});
-  
-  // Estado para armazenar observações de confirmação por chamado
+
   const [confirmationObservations, setConfirmationObservations] = useState<Record<string, string>>({});
 
-  // Estados para controle de confirmação de mudança de status
   const [showStatusConfirmation, setShowStatusConfirmation] = useState<Record<string, boolean>>({});
   const [pendingStatusChange, setPendingStatusChange] = useState<Record<string, { status: string; observations: string }>>({});
 
-  // Função para salvar dados na API Gateway
   const saveToAPI = useCallback(async (alertId: string, data: any) => {
     try {
       const response = await fetch('https://f6ffk8e9fe.execute-api.us-east-1.amazonaws.com/prod/acompanhamento', {
@@ -117,7 +97,6 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
   // Função para carregar dados de confirmação salvos na API
   const loadConfirmationData = useCallback(async () => {
     try {
-      // Busca dados de acompanhamento para todos os chamados visíveis
       const chamadosVisveis = alertData.map(alert => alert.chamado);
       console.log('Carregando dados para chamados:', chamadosVisveis);
       
@@ -150,7 +129,6 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
       const results = await Promise.all(confirmationPromises);
       console.log('Resultados processados:', results);
       
-      // Processa os resultados e atualiza os estados
       const newEscalationStates: Record<string, EscalationState> = {};
       const newConfirmationObservations: Record<string, string> = {};
       
@@ -158,20 +136,17 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
         if (data) {
           console.log(`Processando chamado ${chamado}:`, data);
           
-          // Determina o status baseado nos dados salvos
           let status: EscalationState['status'] = 'pending';
           let currentLevel: EscalationState['currentLevel'] = 0;
           let isAttended = false;
           let lastObservation = '';
           
-          // Verifica se foi confirmado
           if (data.confirmChat && data.confirmChat !== '') {
             status = 'confirmed';
             lastObservation = data.confirmChat;
             console.log(`Chamado ${chamado} tem confirmação:`, data.confirmChat);
           }
           
-          // Verifica escalações
           if (data.escalations && Array.isArray(data.escalations)) {
             for (let i = 0; i < data.escalations.length; i++) {
               const escalation = data.escalations[i];
@@ -189,7 +164,6 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
                 console.log(`Chamado ${chamado} foi atendido no nível ${escalation.level}`);
                 break;
               } else if (escalation.status === 'finalizado' && i < 3) {
-                // Se finalizou mas não foi o último nível, continua checando
                 currentLevel = (escalation.level) as EscalationState['currentLevel'];
                 lastObservation = escalation.observations || '';
                 console.log(`Chamado ${chamado} finalizou nível ${escalation.level}`);
@@ -197,7 +171,6 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
             }
           }
           
-          // Verifica se há obsChat indicando atendimento
           if (data.obsChat && data.obsChat.includes('atendida com sucesso')) {
             status = 'completed';
             isAttended = true;
@@ -207,7 +180,7 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
           newEscalationStates[chamado] = {
             status,
             currentLevel,
-            timeRemaining: 0, // Não reinicia timer automático no reload
+            timeRemaining: 0, 
             timerActive: false,
             isAttended,
             observations: lastObservation
@@ -215,7 +188,6 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
           
           console.log(`Estado final para chamado ${chamado}:`, newEscalationStates[chamado]);
           
-          // Salva observações de confirmação
           if (data.confirmChat) {
             newConfirmationObservations[chamado] = data.confirmChat;
           }
@@ -225,7 +197,6 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
       console.log('Estados de escalação atualizados:', newEscalationStates);
       console.log('Observações de confirmação atualizadas:', newConfirmationObservations);
       
-      // Atualiza os estados apenas se houver dados para atualizar
       if (Object.keys(newEscalationStates).length > 0) {
         setEscalationStates(prev => ({ ...prev, ...newEscalationStates }));
       }
@@ -239,7 +210,6 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
     }
   }, [alertData]);
 
-  // Handlers de observação otimizados para evitar re-renders
   const handleConfirmationObservationChange = useCallback((alertId: string, value: string) => {
     setConfirmationObservations(prev => ({
       ...prev,
@@ -1090,7 +1060,6 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
   const handleIncidentClick = (alert: AlertData) => {
     if (alert.tipo_chamado.toLowerCase().includes('incidente')) {
       setSelectedIncident(alert);
-      setCrisisDialogOpen(true);
     }
   };
 
