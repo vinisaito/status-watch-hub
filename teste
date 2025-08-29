@@ -13,13 +13,17 @@ const API_URL = "https://SEU_ENDPOINT.execute-api.us-east-1.amazonaws.com/prod/d
 
 const Timer: React.FC = () => {
   const [timers, setTimers] = useState<TimerData[]>([]);
+  const [wsConnected, setWsConnected] = useState(false);
   const ws = useRef<WebSocket | null>(null);
 
   // Fetch inicial
   useEffect(() => {
     fetch(API_URL)
       .then((res) => res.json())
-      .then((data) => setTimers(data))
+      .then((data) => {
+        setTimers(data);
+        console.log("✅ Dados recebidos da API:", data);
+      })
       .catch(console.error);
   }, []);
 
@@ -27,10 +31,14 @@ const Timer: React.FC = () => {
   useEffect(() => {
     ws.current = new WebSocket(WS_URL);
 
-    ws.current.onopen = () => console.log("✅ WebSocket conectado");
+    ws.current.onopen = () => {
+      console.log("✅ WebSocket conectado");
+      setWsConnected(true);
+    };
 
     ws.current.onmessage = (event) => {
       const data = JSON.parse(event.data);
+      console.log("📩 Mensagem recebida:", data);
       if (data.type === "TIMER_UPDATED") {
         setTimers((prev) =>
           prev.map((t) =>
@@ -42,7 +50,15 @@ const Timer: React.FC = () => {
       }
     };
 
-    ws.current.onclose = () => console.log("❌ WebSocket desconectado");
+    ws.current.onclose = () => {
+      console.log("❌ WebSocket desconectado");
+      setWsConnected(false);
+    };
+
+    ws.current.onerror = (err) => {
+      console.error("⚠ WebSocket erro:", err);
+      setWsConnected(false);
+    };
 
     return () => ws.current?.close();
   }, []);
@@ -63,12 +79,17 @@ const Timer: React.FC = () => {
   const sendAction = (chamado: number, action: "startTimer" | "pauseTimer") => {
     if (ws.current?.readyState === WebSocket.OPEN) {
       ws.current.send(JSON.stringify({ action, chamado }));
+      console.log("📤 Mensagem enviada:", { action, chamado });
+    } else {
+      console.warn("⚠ WebSocket não está conectado");
+      alert("WebSocket não está conectado. Atualize a página.");
     }
   };
 
   return (
     <div>
       <h1>Painel de Alertas</h1>
+      {!wsConnected && <p style={{ color: "red" }}>WebSocket desconectado</p>}
       {timers.length === 0 && <p>Carregando alertas...</p>}
       {timers.map((t) => (
         <div key={t.chamado} style={{ border: "1px solid gray", padding: 10, margin: 5 }}>
