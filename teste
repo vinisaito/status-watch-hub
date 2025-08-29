@@ -1,40 +1,16 @@
-import { useEffect, useRef, useState } from "react";
-
-export default function WSClient() {
-  const [msgs, setMsgs] = useState([]);
-  const wsRef = useRef(null);
-
-  useEffect(() => {
-    const ws = new WebSocket("wss://{api-id}.execute-api.us-east-1.amazonaws.com/dev");
-    wsRef.current = ws;
-
-    ws.onopen = () => console.log("WS conectado");
-    ws.onmessage = (evt) => {
-      const data = JSON.parse(evt.data);
-      setMsgs((m) => [...m, data]);
-      if (data.type === "TIMER_UPDATED") {
-        // Atualize seu estado de chamados e calcule o cronômetro
-        // exatamente como você já faz com startedAt + durationMinutes
-      }
-    };
-    ws.onclose = () => console.log("WS fechado");
-    ws.onerror = (e) => console.error("WS erro", e);
-
-    return () => ws.close();
-  }, []);
-
-  const startTimer = () => {
-    wsRef.current?.send(JSON.stringify({
-      action: "startTimer",
-      chamado: 123,
-      durationMinutes: 30
-    }));
-  };
-
-  return (
-    <div>
-      <button onClick={startTimer}>Iniciar cronômetro (123)</button>
-      <pre>{JSON.stringify(msgs, null, 2)}</pre>
-    </div>
-  );
+{
+  "errorMessage": "'ACOMP_TABLE'",
+  "errorType": "KeyError",
+  "requestId": "",
+  "stackTrace": [
+    "  File \"/var/lang/lib/python3.11/importlib/__init__.py\", line 126, in import_module\n    return _bootstrap._gcd_import(name[level:], package, level)\n",
+    "  File \"<frozen importlib._bootstrap>\", line 1204, in _gcd_import\n",
+    "  File \"<frozen importlib._bootstrap>\", line 1176, in _find_and_load\n",
+    "  File \"<frozen importlib._bootstrap>\", line 1147, in _find_and_load_unlocked\n",
+    "  File \"<frozen importlib._bootstrap>\", line 690, in _load_unlocked\n",
+    "  File \"<frozen importlib._bootstrap_external>\", line 940, in exec_module\n",
+    "  File \"<frozen importlib._bootstrap>\", line 241, in _call_with_frames_removed\n",
+    "  File \"/var/task/lambda_function.py\", line 8, in <module>\n    ACOMP_TABLE = DDB.Table(os.environ[\"ACOMP_TABLE\"])\n",
+    "  File \"<frozen os>\", line 679, in __getitem__\n"
+  ]
 }
