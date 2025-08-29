@@ -76,4 +76,9 @@ function TimerDisplay({ chamado }) {
   return (
     <p className="text-green-600 font-mono text-lg">
       ⏱ {minutes.toString().padStart(2, "0")}:
-      {seconds.toS
+      {seconds.toString().padStart(2, "0")}
+    </p>
+  );
+}
+
+export default Timer;
