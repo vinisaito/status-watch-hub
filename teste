@@ -6,9 +6,21 @@
       "Action": [
         "dynamodb:PutItem",
         "dynamodb:DeleteItem",
-        "dynamodb:Scan",
+        "dynamodb:UpdateItem",
         "dynamodb:GetItem",
-        "dynamodb:UpdateItem"
+        "dynamodb:Scan"
       ],
       "Resource": [
-        "arn:aws:dynamodb:us-east-1:368696837445:table/painelmonitor
+        "arn:aws:dynamodb:us-east-1:368696837445:table/painelmonitoracao_connections",
+        "arn:aws:dynamodb:us-east-1:368696837445:table/painelmonitoracao_acompanhamento"
+      ]
+    },
+    {
+      "Effect": "Allow",
+      "Action": [
+        "execute-api:ManageConnections"
+      ],
+      "Resource": "arn:aws:execute-api:us-east-1:368696837445:*/*/*/*"
+    }
+  ]
+}
