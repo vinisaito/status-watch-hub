@@ -86,3 +86,8 @@ const Timer: React.FC = () => {
           <button onClick={() => sendAction(t.chamado, "pauseTimer")}>Pausar</button>
         </div>
       ))}
+    </div>
+  );
+};
+
+export default Timer;
