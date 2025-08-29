@@ -1,134 +1,105 @@
-import React, { useEffect, useRef, useState } from "react";
+import boto3
+import json
+from datetime import datetime, timezone
 
-interface Alert {
-  chamado: number;
-  startedAt?: string;
-  durationMinutes?: number;
-  timerActive?: boolean;
-  localTimeRemaining?: number;
-}
+# DynamoDB
+DDB = boto3.resource("dynamodb", region_name="us-east-1")
+ACOMP_TABLE = DDB.Table("painelmonitoracao_acompanhamento")  # tabela de alertas
+CONN_TABLE = DDB.Table("painelmonitoracao_connections")       # tabela de conexões WebSocket
 
-const WS_ENDPOINT = "wss://SEU_ENDPOINT.execute-api.us-east-1.amazonaws.com/prod";
-const REST_ENDPOINT = "https://f6ffk8e9fe.execute-api.us-east-1.amazonaws.com/prod/dados";
+# API Gateway Management API para enviar mensagens via WebSocket
+APIGW_ENDPOINT = "https://tgwtw1v4rg.execute-api.us-east-1.amazonaws.com/dev"  # substituir
+apigw = boto3.client("apigatewaymanagementapi", endpoint_url=APIGW_ENDPOINT)
 
-const Timer: React.FC = () => {
-  const ws = useRef<WebSocket | null>(null);
-  const [alerts, setAlerts] = useState<Alert[]>([]);
 
-  // 1️⃣ Buscar alertas iniciais via REST
-  useEffect(() => {
-    const fetchAlerts = async () => {
-      try {
-        const res = await fetch(REST_ENDPOINT);
-        const data = await res.json();
-        if (Array.isArray(data)) {
-          setAlerts(
-            data.map((a: any) => ({
-              ...a,
-              localTimeRemaining: a.durationMinutes ? a.durationMinutes * 60 : 0,
-            }))
-          );
-        } else {
-          console.warn("⚠️ Resposta inesperada da API:", data);
-        }
-      } catch (err) {
-        console.error("❌ Erro ao buscar alertas:", err);
-      }
-    };
-    fetchAlerts();
-  }, []);
+def lambda_handler(event, context):
+    route = event.get("requestContext", {}).get("routeKey")
+    connection_id = event.get("requestContext", {}).get("connectionId")
 
-  // 2️⃣ Conectar WebSocket
-  useEffect(() => {
-    ws.current = new WebSocket(WS_ENDPOINT);
+    # --------------------------
+    # Cliente conecta
+    # --------------------------
+    if route == "$connect":
+        print(f"✅ Conexão estabelecida: {connection_id}")
+        CONN_TABLE.put_item(Item={"connectionId": connection_id})
+        return {"statusCode": 200}
 
-    ws.current.onopen = () => console.log("✅ WebSocket conectado");
+    # --------------------------
+    # Cliente desconecta
+    # --------------------------
+    elif route == "$disconnect":
+        print(f"❌ Conexão desconectada: {connection_id}")
+        CONN_TABLE.delete_item(Key={"connectionId": connection_id})
+        return {"statusCode": 200}
 
-    ws.current.onmessage = (msg) => {
-      const data = JSON.parse(msg.data);
-      console.log("📩 Mensagem recebida:", data);
+    # --------------------------
+    # Recebe mensagem do cliente
+    # --------------------------
+    elif route == "sendMessage":
+        body = json.loads(event.get("body", "{}"))
+        action = body.get("action")          # "startTimer" ou "pauseTimer"
+        chamado = body.get("chamado")        # id do chamado
 
-      if (data.type === "TIMER_UPDATED") {
-        setAlerts((prev) =>
-          prev.map((alert) =>
-            alert.chamado === data.chamado
-              ? {
-                  ...alert,
-                  ...data,
-                  // Inicializa o temporizador local
-                  localTimeRemaining: data.durationMinutes! * 60,
-                }
-              : alert
-          )
-        );
-      }
-    };
+        print("Mensagem recebida:", body)
 
-    ws.current.onerror = (err) => console.error("❌ Erro WebSocket:", err);
-    ws.current.onclose = () => console.log("⚠️ WebSocket desconectado");
+        if not chamado or not action:
+            print("❌ Chamado ou ação ausente")
+            return {"statusCode": 400, "body": "Chamado ou ação ausente"}
 
-    return () => ws.current?.close();
-  }, []);
+        startedAt = None
 
-  // 3️⃣ Atualizar cronômetro local a cada segundo
-  useEffect(() => {
-    const interval = setInterval(() => {
-      setAlerts((prev) =>
-        prev.map((alert) => {
-          if (alert.timerActive && alert.startedAt) {
-            const startedAt = new Date(alert.startedAt).getTime();
-            const durationMs = (alert.durationMinutes ?? 15) * 60 * 1000;
-            const elapsed = Date.now() - startedAt;
-            const remaining = Math.max(0, durationMs - elapsed);
-            return { ...alert, localTimeRemaining: Math.floor(remaining / 1000) };
-          }
-          return { ...alert, localTimeRemaining: 0 };
-        })
-      );
-    }, 1000);
-    return () => clearInterval(interval);
-  }, [alerts]);
+        try:
+            # Atualiza o cronômetro no DynamoDB
+            if action == "startTimer":
+                startedAt = datetime.utcnow().replace(tzinfo=timezone.utc).isoformat()
+                ACOMP_TABLE.update_item(
+                    Key={"chamado": str(chamado)},
+                    UpdateExpression="SET timerActive = :t, startedAt = :s",
+                    ExpressionAttributeValues={":t": True, ":s": startedAt}
+                )
+                print(f"⏱ Timer iniciado: {chamado} às {startedAt}")
+            elif action == "pauseTimer":
+                ACOMP_TABLE.update_item(
+                    Key={"chamado": str(chamado)},
+                    UpdateExpression="SET timerActive = :t",
+                    ExpressionAttributeValues={":t": False}
+                )
+                print(f"⏸ Timer pausado: {chamado}")
+            else:
+                print("❌ Ação inválida")
+                return {"statusCode": 400, "body": "Ação inválida"}
 
-  // 4️⃣ Iniciar ou pausar cronômetro via WebSocket
-  const toggleTimer = (alert: Alert) => {
-    if (!ws.current || ws.current.readyState !== WebSocket.OPEN) return;
-    const action = alert.timerActive ? "pauseTimer" : "startTimer";
-    ws.current.send(JSON.stringify({ action, chamado: alert.chamado }));
-    console.log("➡️ Mensagem enviada:", { action, chamado: alert.chamado });
-  };
+            # --------------------------
+            # Broadcast para todos os clientes conectados
+            # --------------------------
+            connections = CONN_TABLE.scan().get("Items", [])
+            print(f"🔄 Broadcast para {len(connections)} conexões")
 
-  return (
-    <div style={{ padding: "20px" }}>
-      <h1>Painel de Alertas</h1>
-      {alerts.length === 0 && <p>Nenhum alerta disponível</p>}
-      {alerts.map((alert) => (
-        <div
-          key={alert.chamado}
-          style={{
-            border: "1px solid #ccc",
-            padding: "10px",
-            marginBottom: "10px",
-            borderRadius: "5px",
-          }}
-        >
-          <h2>Alerta {alert.chamado}</h2>
-          <p>
-            Tempo restante:{" "}
-            {alert.localTimeRemaining
-              ? `${Math.floor(alert.localTimeRemaining / 60)
-                  .toString()
-                  .padStart(2, "0")}:${(alert.localTimeRemaining % 60)
-                  .toString()
-                  .padStart(2, "0")}`
-              : "00:00"}
-          </p>
-          <button onClick={() => toggleTimer(alert)}>
-            {alert.timerActive ? "Pausar" : "Iniciar"} cronômetro
-          </button>
-        </div>
-      ))}
-    </div>
-  );
-};
+            for conn in connections:
+                try:
+                    apigw.post_to_connection(
+                        Data=json.dumps({
+                            "type": "updateTimer",
+                            "chamado": chamado,
+                            "timerActive": action == "startTimer",
+                            "startedAt": startedAt if action == "startTimer" else None
+                        }),
+                        ConnectionId=conn["connectionId"]
+                    )
+                except apigw.exceptions.GoneException:
+                    # Conexão inválida, remove da tabela
+                    print(f"❌ Conexão ausente: {conn['connectionId']}")
+                    CONN_TABLE.delete_item(Key={"connectionId": conn["connectionId"]})
 
-export default Timer;
+            return {"statusCode": 200, "body": json.dumps({"message": "ok"})}
+
+        except Exception as e:
+            print("❌ Erro ao processar mensagem:", e)
+            return {"statusCode": 500, "body": str(e)}
+
+    # --------------------------
+    # Rota padrão
+    # --------------------------
+    else:
+        print(f"Rota não suportada: {route}")
+        return {"statusCode": 400, "body": "Rota não suportada"}
