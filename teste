@@ -9,10 +9,35 @@ interface Alert {
 }
 
 const WS_ENDPOINT = "wss://SEU_ENDPOINT.execute-api.us-east-1.amazonaws.com/prod";
+const REST_ENDPOINT = "https://f6ffk8e9fe.execute-api.us-east-1.amazonaws.com/prod/dados";
 
-export const Timer: React.FC = () => {
+const Timer: React.FC = () => {
   const ws = useRef<WebSocket | null>(null);
   const [alerts, setAlerts] = useState<Alert[]>([]);
+
+  // Buscar alertas iniciais via REST
+  useEffect(() => {
+    const fetchAlerts = async () => {
+      try {
+        const res = await fetch(REST_ENDPOINT);
+        const data = await res.json();
+        if (Array.isArray(data)) {
+          setAlerts(
+            data.map((a: any) => ({
+              ...a,
+              localTimeRemaining: a.durationMinutes ? a.durationMinutes * 60 : 0,
+            }))
+          );
+        } else {
+          console.warn("⚠️ Resposta inesperada da API:", data);
+        }
+      } catch (err) {
+        console.error("❌ Erro ao buscar alertas:", err);
+      }
+    };
+
+    fetchAlerts();
+  }, []);
 
   // Conectar WebSocket
   useEffect(() => {
@@ -60,7 +85,7 @@ export const Timer: React.FC = () => {
     return () => clearInterval(interval);
   }, [alerts]);
 
-  // Iniciar ou pausar cronômetro
+  // Iniciar ou pausar cronômetro via WS
   const toggleTimer = (alert: Alert) => {
     if (!ws.current || ws.current.readyState !== WebSocket.OPEN) return;
     const action = alert.timerActive ? "pauseTimer" : "startTimer";
@@ -71,6 +96,7 @@ export const Timer: React.FC = () => {
   return (
     <div style={{ padding: "20px" }}>
       <h1>Painel de Alertas</h1>
+      {alerts.length === 0 && <p>Nenhum alerta disponível</p>}
       {alerts.map((alert) => (
         <div
           key={alert.chamado}
