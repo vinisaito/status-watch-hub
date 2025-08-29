@@ -27,6 +27,11 @@ export function Timer() {
   const [pausedAt, setPausedAt] = useState<Date | null>(null);
   const [timeOffset, setTimeOffset] = useState(0);
 
+  // Chaves para localStorage
+  const PAUSE_KEY = 'timer-paused';
+  const PAUSE_TIME_KEY = 'timer-paused-at';
+  const TIME_OFFSET_KEY = 'timer-offset';
+
   // Função para buscar dados da API
   const fetchTimerData = async () => {
     try {
@@ -52,16 +57,45 @@ export function Timer() {
     }
   };
 
+  // Carregar estado do localStorage na inicialização
+  useEffect(() => {
+    const savedPaused = localStorage.getItem(PAUSE_KEY) === 'true';
+    const savedPausedAt = localStorage.getItem(PAUSE_TIME_KEY);
+    const savedOffset = parseInt(localStorage.getItem(TIME_OFFSET_KEY) || '0');
+
+    setIsPaused(savedPaused);
+    setPausedAt(savedPausedAt ? new Date(savedPausedAt) : null);
+    setTimeOffset(savedOffset);
+  }, []);
+
+  // Sincronizar mudanças do localStorage entre abas/sessões
+  useEffect(() => {
+    const handleStorageChange = (e: StorageEvent) => {
+      if (e.key === PAUSE_KEY) {
+        setIsPaused(e.newValue === 'true');
+      } else if (e.key === PAUSE_TIME_KEY) {
+        setPausedAt(e.newValue ? new Date(e.newValue) : null);
+      } else if (e.key === TIME_OFFSET_KEY) {
+        setTimeOffset(parseInt(e.newValue || '0'));
+      }
+    };
+
+    window.addEventListener('storage', handleStorageChange);
+    return () => window.removeEventListener('storage', handleStorageChange);
+  }, []);
+
   // Atualizar tempo atual a cada segundo (apenas se não pausado)
   useEffect(() => {
     const timeInterval = setInterval(() => {
-      if (!isPaused) {
+      // Verificar localStorage a cada segundo para sincronizar
+      const currentPaused = localStorage.getItem(PAUSE_KEY) === 'true';
+      if (!currentPaused) {
         setCurrentTime(new Date());
       }
     }, 1000);
 
     return () => clearInterval(timeInterval);
-  }, [isPaused]);
+  }, []);
 
   // Polling da API a cada 3 segundos para sincronização
   useEffect(() => {
@@ -119,18 +153,26 @@ export function Timer() {
 
   // Pausar/Retomar cronômetro
   const togglePause = () => {
-    if (isPaused) {
-      setIsPaused(false);
-      setPausedAt(null);
+    const newPaused = !isPaused;
+    const newPausedAt = newPaused ? new Date() : null;
+
+    setIsPaused(newPaused);
+    setPausedAt(newPausedAt);
+
+    // Salvar no localStorage para sincronizar entre sessões
+    localStorage.setItem(PAUSE_KEY, newPaused.toString());
+    if (newPausedAt) {
+      localStorage.setItem(PAUSE_TIME_KEY, newPausedAt.toISOString());
     } else {
-      setIsPaused(true);
-      setPausedAt(new Date());
+      localStorage.removeItem(PAUSE_TIME_KEY);
     }
   };
 
   // Voltar tempo em 10 segundos
   const rewindTime = () => {
-    setTimeOffset(prev => prev - 10);
+    const newOffset = timeOffset - 10;
+    setTimeOffset(newOffset);
+    localStorage.setItem(TIME_OFFSET_KEY, newOffset.toString());
   };
 
   // Resetar cronômetro
@@ -138,6 +180,11 @@ export function Timer() {
     setTimeOffset(0);
     setIsPaused(false);
     setPausedAt(null);
+
+    // Limpar localStorage
+    localStorage.removeItem(PAUSE_KEY);
+    localStorage.removeItem(PAUSE_TIME_KEY);
+    localStorage.removeItem(TIME_OFFSET_KEY);
   };
 
   // Formatar tempo em HH:MM:SS ou MM:SS
