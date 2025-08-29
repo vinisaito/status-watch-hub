@@ -1,7 +1,6 @@
 {
   "requestContext": {
-    "routeKey": "sendMessage",
+    "routeKey": "$connect",
     "connectionId": "test123"
-  },
-  "body": "{\"action\":\"startTimer\",\"chamado\":\"10418007\"}"
+  }
 }
