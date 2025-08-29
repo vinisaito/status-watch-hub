@@ -1,6 +1,5 @@
 {
-  "requestContext": {
-    "routeKey": "$connect",
-    "connectionId": "test123"
-  }
-}
+  "errorMessage": "An error occurred (AccessDeniedException) when calling the PutItem operation: User: arn:aws:sts::368696837445:assumed-role/Painelteste_acionamentos-role-mlyl4i7o/Painelteste_acionamentos is not authorized to perform: dynamodb:PutItem on resource: arn:aws:dynamodb:us-east-1:368696837445:table/painelmonitoracao_connections because no identity-based policy allows the dynamodb:PutItem action",
+  "errorType": "ClientError",
+  "requestId": "a3a673c8-aefe-4b3f-8539-546156f8c680",
+  "stackTrace": [
