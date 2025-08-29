@@ -1,118 +1,227 @@
-import React, { useEffect, useState } from "react";
+import boto3
+import json
+from datetime import datetime, timezone
+from decimal import Decimal
 
-function Timer() {
-  const [data, setData] = useState([]);
-  const [loading, setLoading] = useState(true);
+# Conecta no DynamoDB
+dynamodb = boto3.resource("dynamodb", region_name="us-east-1")
+table = dynamodb.Table("painelmonitoracao_acompanhamento")
 
-  // 🔹 Buscar dados da API
-  const fetchData = async () => {
-    try {
-      const res = await fetch(
-        "https://f6ffk8e9fe.execute-api.us-east-1.amazonaws.com/prod/acompanhamento"
-      );
-      const json = await res.json();
-      setData(json);
-      setLoading(false);
-    } catch (err) {
-      console.error("Erro ao buscar API", err);
+# Função para serializar Decimal
+def json_serial(obj):
+    if isinstance(obj, Decimal):
+        if obj % 1 == 0:
+            return int(obj)
+        else:
+            return float(obj)
+    raise TypeError
+
+# Função helper de response
+def response(status_code, body):
+    return {
+        "statusCode": status_code,
+        "headers": {
+            "Content-Type": "application/json",
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Methods": "OPTIONS,POST,GET,PATCH",
+            "Access-Control-Allow-Headers": "Content-Type"
+        },
+        "body": json.dumps(body, default=json_serial)
     }
-  };
 
-  // 🔹 Iniciar cronômetro
-  const startTimer = async (chamadoId) => {
-    const payload = {
-      chamado: chamadoId,
-      startedAt: new Date().toISOString(),
-      durationMinutes: 30, // Altere a duração como quiser
-      timerActive: true,
-    };
+def lambda_handler(event, context):
+    method = event.get("httpMethod")
+    path = event.get("path")
+    body = {}
 
-    try {
-      await fetch(
-        "https://f6ffk8e9fe.execute-api.us-east-1.amazonaws.com/prod/acompanhamento",
-        {
-          method: "PATCH", // ou PUT/POST, conforme sua API
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(payload),
-        }
-      );
-      fetchData(); // Atualiza lista
-    } catch (err) {
-      console.error("Erro ao iniciar cronômetro", err);
+    # Se vier corpo no request, tenta decodificar
+    if event.get("body"):
+        try:
+            body = json.loads(event["body"])
+        except:
+            body = {}
+
+    try:
+        # Criar novo alerta
+        if method == "POST" and path == "/acompanhamento":
+            return create_alert(body)
+
+        # Atualizar campos principais do alerta (status, cronômetro, etc)
+        if method == "PATCH" and path.startswith("/acompanhamento/") and "/escalation/" not in path:
+            alert_id = int(path.split("/")[2])
+            return update_alert(alert_id, body)
+
+        # Atualizar escalonamento específico
+        if method == "PATCH" and "/escalation/" in path:
+            parts = path.strip("/").split("/")
+            alert_id = int(parts[1])
+            level = int(parts[3])
+            return update_escalation(alert_id, level, body)
+
+        # Buscar um alerta específico
+        if method == "GET" and path.startswith("/acompanhamento/") and path != "/acompanhamento":
+            alert_id = int(path.split("/")[2])
+            return get_alert(alert_id)
+
+        # Listar alertas
+        if method == "GET" and path == "/acompanhamento":
+            return list_alerts()
+
+        return response(400, {"error": "Rota não suportada"})
+
+    except Exception as e:
+        print("Erro:", str(e))
+        return response(500, {"error": str(e)})
+
+# -------------------------------
+# Criar alerta
+# -------------------------------
+def create_alert(data):
+    chamado_raw = data.get("chamado")
+    if chamado_raw is None:
+        return response(400, {"error": "Campo 'chamado' é obrigatório"})
+
+    try:
+        chamado = int(chamado_raw)
+    except ValueError:
+        return response(400, {"error": "Campo 'chamado' deve ser numérico"})
+
+    now = datetime.utcnow().replace(tzinfo=timezone.utc).isoformat()
+
+    alert = {
+        "chamado": chamado,
+        "alertOpenTime": data.get("alertOpenTime", now),
+        "sendChat": data.get("sendChat", ""),
+        "confirmChat": data.get("confirmChat", ""),
+        "obsChat": data.get("obsChat", ""),
+        "operador": data.get("operador", ""),
+        # Campos de persistência do cronômetro e escalação
+        "status": data.get("status", "pending"),
+        "timeRemaining": data.get("timeRemaining", 0),  # só inicial
+        "timerActive": data.get("timerActive", False),
+        "observations": data.get("observations", ""),
+        "pendingChange": data.get("pendingChange", {}),
+        "currentLevel": data.get("currentLevel", 0),
+        "isAttended": data.get("isAttended", False),
+        "startedAt": data.get("startedAt", now),  # referência do cronômetro
+        "durationMinutes": data.get("durationMinutes", 15),  # tempo total do cronômetro (default 15min)
+        "updatedAt": now,
+        "escalations": [
+            {"level": i, "status": "", "observations": "", "eventTimestamp": "", "operador": ""}
+            for i in range(1, 5)
+        ],
+        "ttl": int(datetime.utcnow().timestamp()) + 60 * 60 * 24 * 180  # 6 meses
     }
-  };
 
-  useEffect(() => {
-    fetchData();
-    const interval = setInterval(fetchData, 5000);
-    return () => clearInterval(interval);
-  }, []);
+    table.put_item(Item=alert)
+    return response(201, alert)
 
-  if (loading) return <p>Carregando...</p>;
+# -------------------------------
+# Atualizar alerta (status geral)
+# -------------------------------
+def update_alert(alert_id, data):
+    timestamp = datetime.utcnow().replace(tzinfo=timezone.utc).isoformat()
 
-  return (
-    <div className="p-4">
-      <h2 className="text-xl font-bold">Chamados</h2>
-      <ul className="space-y-4 mt-4">
-        {data.map((chamado) => (
-          <li
-            key={chamado.chamado}
-            className="border rounded-xl p-4 shadow bg-white"
-          >
-            <h3 className="font-bold">Chamado: {chamado.chamado}</h3>
-            <p>Status: {chamado.status}</p>
-            <p>Operador: {chamado.operador}</p>
-            <TimerDisplay chamado={chamado} />
+    update_expression = "SET "
+    expr_names = {}
+    expr_values = {}
 
-            {/* 🔹 Botão Iniciar */}
-            {!chamado.timerActive && (
-              <button
-                onClick={() => startTimer(chamado.chamado)}
-                className="mt-2 px-4 py-2 bg-green-600 text-white rounded-lg"
-              >
-                Iniciar Cronômetro
-              </button>
-            )}
-          </li>
-        ))}
-      </ul>
-    </div>
-  );
-}
+    allowed_fields = [
+        "status", "timeRemaining", "timerActive",
+        "observations", "pendingChange", "currentLevel",
+        "isAttended", "operador", "durationMinutes"
+    ]
 
-function TimerDisplay({ chamado }) {
-  const [timeLeft, setTimeLeft] = useState(0);
+    for i, field in enumerate(allowed_fields):
+        if field in data:
+            if len(expr_values) > 0:
+                update_expression += ", "
+            update_expression += f"#{field} = :{field}"
+            expr_names[f"#{field}"] = field
+            expr_values[f":{field}"] = data[field]
 
-  useEffect(() => {
-    if (!chamado.startedAt || !chamado.durationMinutes) return;
+    # Sempre atualiza o updatedAt
+    update_expression += ", updatedAt = :updatedAt"
+    expr_values[":updatedAt"] = timestamp
 
-    const startedAt = new Date(chamado.startedAt).getTime();
-    const durationMs = chamado.durationMinutes * 60 * 1000;
+    result = table.update_item(
+        Key={"chamado": alert_id},
+        UpdateExpression=update_expression,
+        ExpressionAttributeNames=expr_names,
+        ExpressionAttributeValues=expr_values,
+        ReturnValues="ALL_NEW"
+    )
 
-    const update = () => {
-      const now = Date.now();
-      const diff = startedAt + durationMs - now;
-      setTimeLeft(diff > 0 ? diff : 0);
-    };
+    return response(200, enrich_with_timer(result["Attributes"]))
 
-    update();
-    const interval = setInterval(update, 1000);
-    return () => clearInterval(interval);
-  }, [chamado.startedAt, chamado.durationMinutes]);
+# -------------------------------
+# Atualizar escalonamento específico
+# -------------------------------
+def update_escalation(alert_id, level, data):
+    timestamp = datetime.utcnow().replace(tzinfo=timezone.utc).isoformat()
+    idx = level - 1
 
-  if (!chamado.timerActive) {
-    return <p className="text-red-500">⏸ Pausado</p>;
-  }
+    update_expression = (
+        f"SET escalations[{idx}].#s = :status, "
+        f"escalations[{idx}].observations = :obs, "
+        f"escalations[{idx}].eventTimestamp = :ts, "
+        f"escalations[{idx}].operador = :op"
+    )
+    expression_attr_names = {"#s": "status"}
+    expression_attr_values = {
+        ":status": data.get("status", ""),
+        ":obs": data.get("observations", ""),
+        ":ts": timestamp,
+        ":op": data.get("operador", "")
+    }
 
-  const minutes = Math.floor(timeLeft / 60000);
-  const seconds = Math.floor((timeLeft % 60000) / 1000);
+    result = table.update_item(
+        Key={"chamado": alert_id},
+        UpdateExpression=update_expression,
+        ExpressionAttributeNames=expression_attr_names,
+        ExpressionAttributeValues=expression_attr_values,
+        ReturnValues="ALL_NEW"
+    )
 
-  return (
-    <p className="text-green-600 font-mono text-lg">
-      ⏱ {minutes.toString().padStart(2, "0")}:
-      {seconds.toString().padStart(2, "0")}
-    </p>
-  );
-}
+    return response(200, enrich_with_timer(result["Attributes"]))
 
-export default Timer;
+# -------------------------------
+# Buscar alerta específico (com cálculo do cronômetro)
+# -------------------------------
+def get_alert(alert_id):
+    result = table.get_item(Key={"chamado": alert_id})
+    item = result.get("Item", {})
+    enriched = enrich_with_timer(item)
+    return response(200, enriched)
+
+# -------------------------------
+# Listar alertas (todos com cronômetro atualizado)
+# -------------------------------
+def list_alerts():
+    result = table.scan(Limit=50)
+    items = result.get("Items", [])
+    enriched = [enrich_with_timer(item) for item in items]
+    return response(200, enriched)
+
+# -------------------------------
+# Função auxiliar para atualizar cronômetro em tempo real
+# -------------------------------
+def enrich_with_timer(item):
+    if not item:
+        return item
+
+    started_at_str = item.get("startedAt")
+    duration_minutes = int(item.get("durationMinutes", 15))
+
+    if started_at_str:
+        try:
+            started_at = datetime.fromisoformat(started_at_str.replace("Z", "+00:00"))
+            now = datetime.utcnow().replace(tzinfo=timezone.utc)
+            elapsed = (now - started_at).total_seconds()
+            remaining = max(0, duration_minutes * 60 - elapsed)
+            item["timeRemaining"] = int(remaining)
+        except Exception as e:
+            print("Erro no cálculo do cronômetro:", e)
+            item["timeRemaining"] = item.get("timeRemaining", 0)
+
+    return item
