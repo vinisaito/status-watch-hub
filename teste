@@ -11,7 +11,7 @@ function Timer() {
         "https://f6ffk8e9fe.execute-api.us-east-1.amazonaws.com/prod/acompanhamento"
       );
       const json = await res.json();
-      setData(json); 
+      setData(json);
       setLoading(false);
     } catch (err) {
       console.error("Erro ao buscar API", err);
@@ -19,8 +19,8 @@ function Timer() {
   };
 
   useEffect(() => {
-    fetchData(); // Primeira chamada
-    const interval = setInterval(fetchData, 5000); // Atualiza a cada 5s
+    fetchData();
+    const interval = setInterval(fetchData, 5000); // Atualiza API a cada 5s
     return () => clearInterval(interval);
   }, []);
 
@@ -46,7 +46,6 @@ function Timer() {
   );
 }
 
-// Componente para exibir cronômetro
 function TimerDisplay({ chamado }) {
   const [timeLeft, setTimeLeft] = useState(0);
 
@@ -62,12 +61,14 @@ function TimerDisplay({ chamado }) {
       setTimeLeft(diff > 0 ? diff : 0);
     };
 
-    update(); // Chama uma vez
+    update();
     const interval = setInterval(update, 1000);
     return () => clearInterval(interval);
   }, [chamado.startedAt, chamado.durationMinutes]);
 
-  if (!chamado.timerActive) return <p className="text-red-500">⏸ Pausado</p>;
+  if (!chamado.timerActive) {
+    return <p className="text-red-500">⏸ Pausado</p>;
+  }
 
   const minutes = Math.floor(timeLeft / 60000);
   const seconds = Math.floor((timeLeft % 60000) / 1000);
@@ -75,9 +76,4 @@ function TimerDisplay({ chamado }) {
   return (
     <p className="text-green-600 font-mono text-lg">
       ⏱ {minutes.toString().padStart(2, "0")}:
-      {seconds.toString().padStart(2, "0")}
-    </p>
-  );
-}
-
-export default Timer;
+      {seconds.toS
