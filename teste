@@ -1,95 +1,105 @@
-import React, { useEffect, useState, useRef } from "react";
+import boto3
+import json
+from datetime import datetime, timezone
 
-const API_BASE = "https://f6ffk8e9fe.execute-api.us-east-1.amazonaws.com/prod";
-const WS_ENDPOINT = "wss://SEU_ENDPOINT_WEBSOCKET"; // substituir pelo WebSocket
+# DynamoDB
+DDB = boto3.resource("dynamodb", region_name="us-east-1")
+ACOMP_TABLE = DDB.Table("painelmonitoracao_acompanhamento")  # tabela de alertas
+CONN_TABLE = DDB.Table("painelmonitoracao_connections")       # tabela de conexões WebSocket
 
-export default function Timer() {
-  const [alerts, setAlerts] = useState([]);
-  const ws = useRef<WebSocket | null>(null);
+# API Gateway Management API para enviar mensagens via WebSocket
+APIGW_ENDPOINT = "https://SEU_ENDPOINT.execute-api.us-east-1.amazonaws.com/prod"  # substituir
+apigw = boto3.client("apigatewaymanagementapi", endpoint_url=APIGW_ENDPOINT)
 
-  useEffect(() => {
-    ws.current = new WebSocket(WS_ENDPOINT);
 
-    ws.current.onopen = () => console.log("✅ WebSocket conectado");
-    ws.current.onmessage = (msg) => {
-      const data = JSON.parse(msg.data);
-      if (data.type === "updateTimer") {
-        setAlerts((prev) =>
-          prev.map((alert) =>
-            alert.chamado === data.chamado
-              ? { ...alert, timerActive: data.timerActive, startedAt: data.startedAt ?? alert.startedAt }
-              : alert
-          )
-        );
-      }
-    };
+def lambda_handler(event, context):
+    route = event.get("requestContext", {}).get("routeKey")
+    connection_id = event.get("requestContext", {}).get("connectionId")
 
-    ws.current.onclose = () => console.log("❌ WebSocket desconectado");
+    # --------------------------
+    # Cliente conecta
+    # --------------------------
+    if route == "$connect":
+        print(f"✅ Conexão estabelecida: {connection_id}")
+        CONN_TABLE.put_item(Item={"connectionId": connection_id})
+        return {"statusCode": 200}
 
-    return () => ws.current?.close();
-  }, []);
+    # --------------------------
+    # Cliente desconecta
+    # --------------------------
+    elif route == "$disconnect":
+        print(f"❌ Conexão desconectada: {connection_id}")
+        CONN_TABLE.delete_item(Key={"connectionId": connection_id})
+        return {"statusCode": 200}
 
-  const fetchAlerts = () => {
-    fetch(`${API_BASE}/dados`)
-      .then((res) => res.json())
-      .then((data) =>
-        setAlerts(
-          data.map((alert) => ({
-            ...alert,
-            localTimeRemaining: alert.timeRemaining ?? 0,
-            timerActive: alert.timerActive ?? false
-          }))
-        )
-      )
-      .catch(console.error);
-  };
+    # --------------------------
+    # Recebe mensagem do cliente
+    # --------------------------
+    elif route == "sendMessage":
+        body = json.loads(event.get("body", "{}"))
+        action = body.get("action")          # "startTimer" ou "pauseTimer"
+        chamado = body.get("chamado")        # id do chamado
 
-  useEffect(() => fetchAlerts(), []);
+        print("Mensagem recebida:", body)
 
-  useEffect(() => {
-    const interval = setInterval(() => {
-      setAlerts((prev) =>
-        prev.map((alert) => {
-          if (alert.timerActive && alert.startedAt) {
-            const startedAt = new Date(alert.startedAt).getTime();
-            const durationMs = (alert.durationMinutes ?? 15) * 60 * 1000;
-            const elapsed = Date.now() - startedAt;
-            const remaining = Math.max(0, durationMs - elapsed);
-            return { ...alert, localTimeRemaining: Math.floor(remaining / 1000) };
-          }
-          return alert;
-        })
-      );
-    }, 1000);
-    return () => clearInterval(interval);
-  }, [alerts]);
+        if not chamado or not action:
+            print("❌ Chamado ou ação ausente")
+            return {"statusCode": 400, "body": "Chamado ou ação ausente"}
 
-  const sendAction = (chamado: string | number, action: "startTimer" | "pauseTimer") => {
-    if (ws.current && ws.current.readyState === WebSocket.OPEN) {
-      ws.current.send(JSON.stringify({ action, chamado }));
-    }
-  };
+        startedAt = None
 
-  return (
-    <div style={{ padding: "20px" }}>
-      <h1>Painel de Alertas</h1>
-      {alerts.map((alert) => (
-        <div key={alert.chamado} style={{ border: "1px solid #ccc", padding: "10px", marginBottom: "10px" }}>
-          <p><strong>Chamado:</strong> {alert.chamado}</p>
-          <p>
-            <strong>Tempo restante:</strong>{" "}
-            {Math.floor((alert.localTimeRemaining ?? 0) / 60).toString().padStart(2, "0")}:
-            {((alert.localTimeRemaining ?? 0) % 60).toString().padStart(2, "0")}
-          </p>
-          <p><strong>Status:</strong> {alert.timerActive ? "Rodando" : "Pausado"}</p>
-          <button onClick={() => sendAction(alert.chamado, "startTimer")} disabled={alert.timerActive}>
-            Iniciar
-          </button>
-          <button onClick={() => sendAction(alert.chamado, "pauseTimer")} disabled={!alert.timerActive}>
-            Pausar
-          </button>
-        </div>
-      ))}
-    </div>
-  );
-}
+        try:
+            # Atualiza o cronômetro no DynamoDB
+            if action == "startTimer":
+                startedAt = datetime.utcnow().replace(tzinfo=timezone.utc).isoformat()
+                ACOMP_TABLE.update_item(
+                    Key={"chamado": str(chamado)},
+                    UpdateExpression="SET timerActive = :t, startedAt = :s",
+                    ExpressionAttributeValues={":t": True, ":s": startedAt}
+                )
+                print(f"⏱ Timer iniciado: {chamado} às {startedAt}")
+            elif action == "pauseTimer":
+                ACOMP_TABLE.update_item(
+                    Key={"chamado": str(chamado)},
+                    UpdateExpression="SET timerActive = :t",
+                    ExpressionAttributeValues={":t": False}
+                )
+                print(f"⏸ Timer pausado: {chamado}")
+            else:
+                print("❌ Ação inválida")
+                return {"statusCode": 400, "body": "Ação inválida"}
+
+            # --------------------------
+            # Broadcast para todos os clientes conectados
+            # --------------------------
+            connections = CONN_TABLE.scan().get("Items", [])
+            print(f"🔄 Broadcast para {len(connections)} conexões")
+
+            for conn in connections:
+                try:
+                    apigw.post_to_connection(
+                        Data=json.dumps({
+                            "type": "updateTimer",
+                            "chamado": chamado,
+                            "timerActive": action == "startTimer",
+                            "startedAt": startedAt if action == "startTimer" else None
+                        }),
+                        ConnectionId=conn["connectionId"]
+                    )
+                except apigw.exceptions.GoneException:
+                    # Conexão inválida, remove da tabela
+                    print(f"❌ Conexão ausente: {conn['connectionId']}")
+                    CONN_TABLE.delete_item(Key={"connectionId": conn["connectionId"]})
+
+            return {"statusCode": 200, "body": json.dumps({"message": "ok"})}
+
+        except Exception as e:
+            print("❌ Erro ao processar mensagem:", e)
+            return {"statusCode": 500, "body": str(e)}
+
+    # --------------------------
+    # Rota padrão
+    # --------------------------
+    else:
+        print(f"Rota não suportada: {route}")
+        return {"statusCode": 400, "body": "Rota não suportada"}
