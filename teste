@@ -1,24 +1,105 @@
-{
-  "Version": "2012-10-17",
-  "Statement": [
-    {
-      "Effect": "Allow",
-      "Action": [
-        "dynamodb:PutItem",
-        "dynamodb:UpdateItem",
-        "dynamodb:GetItem",
-        "dynamodb:Scan",
-        "dynamodb:DeleteItem"
-      ],
-      "Resource": [
-        "arn:aws:dynamodb:us-east-1:368696837445:table/painelmonitoracao_acompanhamento",
-        "arn:aws:dynamodb:us-east-1:368696837445:table/painelmonitoracao_connections"
-      ]
-    },
-    {
-      "Effect": "Allow",
-      "Action": "execute-api:ManageConnections",
-      "Resource": "arn:aws:execute-api:us-east-1:368696837445:*/*/@connections/*"
-    }
-  ]
+import React, { useEffect, useState } from "react";
+
+const WS_ENDPOINT = "wss://SEU_ENDPOINT.execute-api.us-east-1.amazonaws.com/dev";
+const API_BASE = "https://f6ffk8e9fe.execute-api.us-east-1.amazonaws.com/prod";
+
+export default function Painel() {
+  const [alerts, setAlerts] = useState([]);
+  const [ws, setWs] = useState(null);
+
+  // Conecta WebSocket
+  useEffect(() => {
+    const socket = new WebSocket(WS_ENDPOINT);
+
+    socket.onopen = () => console.log("✅ WebSocket conectado");
+    socket.onmessage = (msg) => {
+      const data = JSON.parse(msg.data);
+      if (data.type === "update") {
+        // Sempre busca dados atualizados da API
+        fetchAlerts();
+      }
+    };
+    socket.onclose = () => console.log("❌ WebSocket desconectado");
+
+    setWs(socket);
+
+    return () => socket.close();
+  }, []);
+
+  // Busca lista de alertas
+  const fetchAlerts = () => {
+    fetch(`${API_BASE}/acompanhamento`)
+      .then((res) => res.json())
+      .then(setAlerts);
+  };
+
+  useEffect(() => {
+    fetchAlerts();
+    const interval = setInterval(fetchAlerts, 5000); // fallback a cada 5s
+    return () => clearInterval(interval);
+  }, []);
+
+  // Iniciar cronômetro
+  const startTimer = (chamado) => {
+    fetch(`${API_BASE}/acompanhamento/${chamado}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        timerActive: true,
+        startedAt: new Date().toISOString(),
+      }),
+    }).then(() => {
+      // Opcional: enviar mensagem via WS para atualizar todos
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ action: "startTimer", chamado }));
+      }
+    });
+  };
+
+  // Pausar cronômetro
+  const pauseTimer = (chamado) => {
+    fetch(`${API_BASE}/acompanhamento/${chamado}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ timerActive: false }),
+    }).then(() => {
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ action: "pauseTimer", chamado }));
+      }
+    });
+  };
+
+  // Renderiza os alertas
+  return (
+    <div style={{ padding: "20px" }}>
+      <h1>Painel de Alertas</h1>
+      {alerts.map((alert) => (
+        <div
+          key={alert.chamado}
+          style={{
+            border: "1px solid #ccc",
+            padding: "10px",
+            marginBottom: "10px",
+          }}
+        >
+          <p><strong>Chamado:</strong> {alert.chamado}</p>
+          <p>
+            <strong>Tempo restante:</strong>{" "}
+            {Math.floor(alert.timeRemaining / 60)
+              .toString()
+              .padStart(2, "0")}
+            :
+            {(alert.timeRemaining % 60).toString().padStart(2, "0")}
+          </p>
+          <p><strong>Status:</strong> {alert.timerActive ? "Rodando" : "Pausado"}</p>
+          <button onClick={() => startTimer(alert.chamado)} disabled={alert.timerActive}>
+            Iniciar
+          </button>
+          <button onClick={() => pauseTimer(alert.chamado)} disabled={!alert.timerActive}>
+            Pausar
+          </button>
+        </div>
+      ))}
+    </div>
+  );
 }
