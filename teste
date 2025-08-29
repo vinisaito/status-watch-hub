@@ -1,9 +1,7 @@
-(índice):1 
- Access to fetch at 'https://f6ffk8e9fe.execute-api.us-east-1.amazonaws.com/prod/dados/10418007' from origin 'http://localhost:8080' has been blocked by CORS policy: Response to preflight request doesn't pass access control check: It does not have HTTP ok status.
-Timer.tsx:70 
- 
- PATCH https://f6ffk8e9fe.execute-api.us-east-1.amazonaws.com/prod/dados/10418007 net::ERR_FAILED
-Timer.tsx:86 
- ❌ Erro ao iniciar cronômetro: TypeError: Failed to fetch
-    at startTimer (Timer.tsx:70:25)
-    at onClick (Timer.tsx:138:28)
+PATCH https://f6ffk8e9fe.execute-api.us-east-1.amazonaws.com/prod/dados/10418007
+Content-Type: application/json
+
+{
+  "timerActive": true,
+  "startedAt": "2025-08-29T18:00:00Z"
+}
