@@ -5,14 +5,43 @@ interface TimerData {
   startedAt: string | null;
   durationMinutes: number;
   timerActive: boolean;
-  remaining: number; // adicionamos aqui
+  remaining: number;
 }
 
-const WS_URL = "wss://SEU_ENDPOINT.execute-api.us-east-1.amazonaws.com/dev"; // substitua
+const WS_URL = "wss://SEU_ENDPOINT.execute-api.us-east-1.amazonaws.com/dev"; // substituir
+const API_URL = "https://SEU_ENDPOINT.execute-api.us-east-1.amazonaws.com/prod/dados"; // endpoint REST que retorna todos os alertas
 
 export const Timer: React.FC = () => {
   const [timers, setTimers] = useState<TimerData[]>([]);
   const ws = useRef<WebSocket | null>(null);
+
+  // Carregar timers iniciais do back-end
+  useEffect(() => {
+    fetch(API_URL)
+      .then((res) => res.json())
+      .then((data) => {
+        // Supondo que cada item tenha chamado, startedAt, durationMinutes, timerActive
+        const initialTimers: TimerData[] = data.map((item: any) => {
+          const remaining = item.startedAt
+            ? Math.max(
+                0,
+                item.durationMinutes * 60 -
+                  (new Date().getTime() - new Date(item.startedAt).getTime()) / 1000
+              )
+            : item.durationMinutes * 60;
+
+          return {
+            chamado: item.chamado,
+            startedAt: item.startedAt,
+            durationMinutes: item.durationMinutes,
+            timerActive: item.timerActive,
+            remaining,
+          };
+        });
+        setTimers(initialTimers);
+      })
+      .catch((err) => console.error("Erro ao buscar alertas:", err));
+  }, []);
 
   // Conexão WebSocket
   useEffect(() => {
@@ -24,8 +53,6 @@ export const Timer: React.FC = () => {
 
     ws.current.onmessage = (event) => {
       const data = JSON.parse(event.data);
-      console.log("📩 Mensagem recebida:", data);
-
       if (data.type === "TIMER_UPDATED") {
         setTimers((prev) => {
           const exists = prev.find((t) => t.chamado === data.chamado);
@@ -65,16 +92,12 @@ export const Timer: React.FC = () => {
       }
     };
 
-    ws.current.onclose = () => {
-      console.log("❌ WebSocket desconectado");
-    };
+    ws.current.onclose = () => console.log("❌ WebSocket desconectado");
 
-    return () => {
-      ws.current?.close();
-    };
+    return () => ws.current?.close();
   }, []);
 
-  // Intervalo para atualizar tempo restante
+  // Atualizar timer a cada segundo
   useEffect(() => {
     const interval = setInterval(() => {
       setTimers((prev) =>
@@ -101,11 +124,9 @@ export const Timer: React.FC = () => {
   return (
     <div>
       <h1>Painel de Alertas</h1>
+      {timers.length === 0 && <p>Carregando alertas...</p>}
       {timers.map((t) => (
-        <div
-          key={t.chamado}
-          style={{ border: "1px solid gray", padding: 10, margin: 5 }}
-        >
+        <div key={t.chamado} style={{ border: "1px solid gray", padding: 10, margin: 5 }}>
           <p>Chamado: {t.chamado}</p>
           <p>Status: {t.timerActive ? "Rodando" : "Pausado"}</p>
           <p>
@@ -118,12 +139,8 @@ export const Timer: React.FC = () => {
                   .padStart(2, "0")}`
               : "00:00"}
           </p>
-          <button onClick={() => sendAction(t.chamado, "startTimer")}>
-            Iniciar
-          </button>
-          <button onClick={() => sendAction(t.chamado, "pauseTimer")}>
-            Pausar
-          </button>
+          <button onClick={() => sendAction(t.chamado, "startTimer")}>Iniciar</button>
+          <button onClick={() => sendAction(t.chamado, "pauseTimer")}>Pausar</button>
         </div>
       ))}
     </div>
