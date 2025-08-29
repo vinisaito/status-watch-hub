@@ -1,7 +1,4 @@
 {
-  "requestContext": {
-    "routeKey": "sendMessage",
-    "connectionId": "teste-connection-1"
-  },
-  "body": "{\"action\": \"startTimer\", \"chamado\": 10418007}"
+  "statusCode": 500,
+  "body": "Object of type Decimal is not JSON serializable"
 }
