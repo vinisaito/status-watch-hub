@@ -1,13 +1,10 @@
-{
-  "errorMessage": "An error occurred (ResourceNotFoundException) when calling the PutItem operation: Requested resource not found",
-  "errorType": "ResourceNotFoundException",
-  "requestId": "270d03e7-bfb3-44bc-ab88-0713142ac86b",
-  "stackTrace": [
-    "  File \"/var/task/lambda_function.py\", line 24, in lambda_handler\n    CONN_TABLE.put_item(Item={\"connectionId\": connection_id})\n",
-    "  File \"/var/lang/lib/python3.11/site-packages/boto3/resources/factory.py\", line 581, in do_action\n    response = action(self, *args, **kwargs)\n",
-    "  File \"/var/lang/lib/python3.11/site-packages/boto3/resources/action.py\", line 88, in __call__\n    response = getattr(parent.meta.client, operation_name)(*args, **params)\n",
-    "  File \"/var/lang/lib/python3.11/site-packages/botocore/client.py\", line 602, in _api_call\n    return self._make_api_call(operation_name, kwargs)\n",
-    "  File \"/var/lang/lib/python3.11/site-packages/botocore/context.py\", line 123, in wrapper\n    return func(*args, **kwargs)\n",
-    "  File \"/var/lang/lib/python3.11/site-packages/botocore/client.py\", line 1078, in _make_api_call\n    raise error_class(parsed_response, operation_name)\n"
-  ]
-}
+useEffect(() => {
+  ws.current = new WebSocket(WS_ENDPOINT);
+
+  ws.current.onopen = () => console.log("✅ WebSocket conectado");
+  ws.current.onmessage = (msg) => console.log("📩 Mensagem recebida:", msg.data);
+  ws.current.onerror = (err) => console.error("❌ Erro WebSocket:", err);
+  ws.current.onclose = () => console.log("⚠️ WebSocket desconectado");
+
+  return () => ws.current?.close();
+}, []);
