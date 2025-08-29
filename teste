@@ -1,108 +1,26 @@
-import os
-import json
-import boto3
-from datetime import datetime, timezone
-from boto3.dynamodb.conditions import Key
-
-DDB = boto3.resource("dynamodb", region_name="us-east-1")
-ACOMP_TABLE = DDB.Table(os.environ["ACOMP_TABLE"])
-CONN_TABLE = DDB.Table(os.environ["CONN_TABLE"])
-
-# IMPORTANTÍSSIMO: endpoint do *Management API* é HTTPS, não WSS.
-# Formato: https://{api-id}.execute-api.{region}.amazonaws.com/{stage}
-APIGW_MGMT = boto3.client(
-    "apigatewaymanagementapi",
-    endpoint_url=os.environ["WS_MANAGEMENT_ENDPOINT"]
-)
-
-def lambda_handler(event, context):
-    route = event.get("requestContext", {}).get("routeKey")
-    connection_id = event.get("requestContext", {}).get("connectionId")
-
-    # body do WebSocket (JSON) vira string; decodifica quando precisar
-    raw_body = event.get("body") or "{}"
-    try:
-        body = json.loads(raw_body)
-    except:
-        body = {}
-
-    if route == "$connect":
-        return on_connect(connection_id)
-    elif route == "$disconnect":
-        return on_disconnect(connection_id)
-    elif route == "$default":
-        # útil para debug
-        return ok({"echo": body})
-    elif route == "startTimer":
-        return start_timer(body)
-    else:
-        return err(400, f"Rota não suportada: {route}")
-
-def on_connect(connection_id):
-    CONN_TABLE.put_item(Item={"connectionId": connection_id})
-    # (Opcional) enviar estado inicial só para essa conexão
-    # send_to(connection_id, {"type":"CONNECTED"})
-    return ok({"connected": True})
-
-def on_disconnect(connection_id):
-    CONN_TABLE.delete_item(Key={"connectionId": connection_id})
-    return ok({"disconnected": True})
-
-def start_timer(body):
-    # validação
-    if "chamado" not in body:
-        return err(400, "Campo 'chamado' é obrigatório")
-    chamado = int(body["chamado"])
-    duration = int(body.get("durationMinutes", 15))
-    now_iso = datetime.utcnow().replace(tzinfo=timezone.utc).isoformat()
-
-    # Atualiza na tabela de acompanhamento
-    ACOMP_TABLE.update_item(
-        Key={"chamado": chamado},
-        UpdateExpression=("SET startedAt=:s, durationMinutes=:d, "
-                          "timerActive=:t, updatedAt=:u"),
-        ExpressionAttributeValues={
-            ":s": now_iso,
-            ":d": duration,
-            ":t": True,
-            ":u": now_iso
-        }
-        # Se quiser garantir que o item exista, adicione:
-        # ,ConditionExpression="attribute_exists(chamado)"
-    )
-
-    # Mensagem padronizada para todos os clientes
-    msg = {
-        "type": "TIMER_UPDATED",
-        "chamado": chamado,
-        "startedAt": now_iso,
-        "durationMinutes": duration,
-        "timerActive": True
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "DynamoDBAccess",
+      "Effect": "Allow",
+      "Action": [
+        "dynamodb:PutItem",
+        "dynamodb:DeleteItem",
+        "dynamodb:UpdateItem",
+        "dynamodb:Scan",
+        "dynamodb:GetItem"
+      ],
+      "Resource": [
+        "arn:aws:dynamodb:us-east-1:*:table/painelmonitoracao_acompanhamento",
+        "arn:aws:dynamodb:us-east-1:*:table/wsConnections"
+      ]
+    },
+    {
+      "Sid": "ManageWSConnections",
+      "Effect": "Allow",
+      "Action": "execute-api:ManageConnections",
+      "Resource": "arn:aws:execute-api:us-east-1:*:{api-id}/dev/POST/@connections/*"
     }
-
-    broadcast(msg)
-    return ok({"message": "Timer iniciado", "payload": msg})
-
-# ---------- utilitários ----------
-
-def ok(body):
-    return {"statusCode": 200, "body": json.dumps(body)}
-
-def err(status, message):
-    return {"statusCode": status, "body": json.dumps({"error": message})}
-
-def broadcast(message: dict):
-    data = json.dumps(message)
-    # pega todas as conexões
-    scan = CONN_TABLE.scan()
-    for item in scan.get("Items", []):
-        cid = item["connectionId"]
-        try:
-            APIGW_MGMT.post_to_connection(ConnectionId=cid, Data=data)
-        except Exception as e:
-            # conexão quebrada → remove
-            print(f"Falha ao enviar para {cid}: {e}")
-            CONN_TABLE.delete_item(Key={"connectionId": cid})
-
-def send_to(connection_id: str, payload: dict):
-    APIGW_MGMT.post_to_connection(ConnectionId=connection_id, Data=json.dumps(payload))
+  ]
+}
