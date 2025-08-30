@@ -1,14 +1,21 @@
-useEffect(() => {
-  let interval: number; // ⬅️ usar number, não NodeJS.Timer
-  if (alert && alert.startedAt) {
-    interval = window.setInterval(() => {  // ⬅️ usar window.setInterval
-      const startedAtDate = new Date(alert.startedAt!);
-      const elapsed = (Date.now() - startedAtDate.getTime()) / 1000; // segundos
-      const remaining = Math.max(0, alert.durationMinutes * 60 - elapsed);
-      setTimeRemaining(remaining);
-    }, 1000);
-  } else {
-    setTimeRemaining(alert?.durationMinutes ? alert.durationMinutes * 60 : 0);
-  }
-  return () => clearInterval(interval);
-}, [alert]);
+Timer.tsx:26   GET https://f6ffk8e9fe.execute-api.us-east-1.amazonaws.com/prod/dados/10418007 403 (Forbidden)
+fetchAlert @ Timer.tsx:26
+(anônimo) @ Timer.tsx:39
+commitHookEffectListMount @ react-dom.development.js:23189
+commitPassiveMountOnFiber @ react-dom.development.js:24965
+commitPassiveMountEffects_complete @ react-dom.development.js:24930
+commitPassiveMountEffects_begin @ react-dom.development.js:24917
+commitPassiveMountEffects @ react-dom.development.js:24905
+flushPassiveEffectsImpl @ react-dom.development.js:27078
+flushPassiveEffects @ react-dom.development.js:27023
+performSyncWorkOnRoot @ react-dom.development.js:26115
+flushSyncCallbacks @ react-dom.development.js:12042
+commitRootImpl @ react-dom.development.js:26998
+commitRoot @ react-dom.development.js:26721
+finishConcurrentRender @ react-dom.development.js:26020
+performConcurrentWorkOnRoot @ react-dom.development.js:25848
+workLoop @ scheduler.development.js:266
+flushWork @ scheduler.development.js:239
+performWorkUntilDeadline @ scheduler.development.js:533
+Timer.tsx:36  Erro ao buscar alerta: Error: Falha ao buscar alerta
+    at fetchAlert (Timer.tsx:27:28)
