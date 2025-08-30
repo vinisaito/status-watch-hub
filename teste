@@ -1,554 +1,143 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
-import { Button } from '@/components/ui/button';
-import { Card } from '@/components/ui/card';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { useToast } from '@/hooks/use-toast';
-import { Play, Pause, RotateCcw, Settings } from 'lucide-react';
-import { cn } from '@/lib/utils';
+import boto3
+import json
+from datetime import datetime, timezone
+from decimal import Decimal
 
-const WS_URL = "wss://tgwtw1v4rg.execute-api.us-east-1.amazonaws.com/dev/";
-const API_URL = "https://f6ffk8e9fe.execute-api.us-east-1.amazonaws.com/prod/dados";
+# Conexão DynamoDB
+DDB = boto3.resource("dynamodb", region_name="us-east-1")
+ACOMP_TABLE = DDB.Table("painelmonitoracao_acompanhamento")  # Tabela de alertas
+CONN_TABLE = DDB.Table("painelmonitoracao_connections")       # Tabela de conexões WebSocket
 
-interface TimerState {
-  chamado: string;
-  timerActive: boolean;
-  startedAt: string;
-  durationMinutes: number;
-  timeRemaining: number;
-}
+# API Gateway Management API (WebSocket)
+APIGW_ENDPOINT = "https://tgwtw1v4rg.execute-api.us-east-1.amazonaws.com/dev"  # Substitua pelo seu endpoint
+apigw = boto3.client("apigatewaymanagementapi", endpoint_url=APIGW_ENDPOINT)
 
-const Timer = () => {
-  const [timerState, setTimerState] = useState<TimerState | null>(null);
-  const [displayTime, setDisplayTime] = useState(0);
-  const [isActive, setIsActive] = useState(false);
-  const [duration, setDuration] = useState(25); // Default 25 minutes
-  const [chamado, setChamado] = useState<string>('');
-  const [showSettings, setShowSettings] = useState(false);
-  const [isConnected, setIsConnected] = useState(false);
-  const [initialLoad, setInitialLoad] = useState(true);
-  
-  const ws = useRef<WebSocket | null>(null);
-  const intervalRef = useRef<NodeJS.Timeout | null>(null);
-  const { toast } = useToast();
+# Serialização Decimal
+def json_serial(obj):
+    if isinstance(obj, Decimal):
+        return int(obj) if obj % 1 == 0 else float(obj)
+    raise TypeError
 
-  // Generate unique chamado ID
-  const generateChamado = useCallback(() => {
-    return `timer_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-  }, []);
+# Calcula tempo restante
+# Calcula tempo restante
+def calculate_remaining(alerta):
+    started_at = alerta.get("startedAt")
+    duration = float(alerta.get("durationMinutes", 15))  # converter Decimal para float
+    timer_active = alerta.get("timerActive", False)
 
-  // Format time for display
-  const formatTime = useCallback((seconds: number) => {
-    const mins = Math.floor(seconds / 60);
-    const secs = seconds % 60;
-    return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
-  }, []);
+    remaining = duration * 60  # valor padrão
+    try:
+        if started_at and timer_active:
+            # Substitui Z por +00:00 se necessário
+            started_dt = datetime.fromisoformat(str(started_at).replace("Z", "+00:00"))
+            now = datetime.utcnow().replace(tzinfo=timezone.utc)
+            elapsed = (now - started_dt).total_seconds()
+            remaining = max(0, duration * 60 - elapsed)
+            print(f"⏱ Cálculo remaining: elapsed={elapsed}, remaining={remaining}")
+        else:
+            print("⏱ Timer não ativo ou startedAt ausente")
+    except Exception as e:
+        print(f"❌ Erro no cálculo de remaining: {e}")
+        remaining = duration * 60
 
-  // Connect to WebSocket
-  const connectWebSocket = useCallback(() => {
-    try {
-      ws.current = new WebSocket(WS_URL);
-      
-      ws.current.onopen = () => {
-        console.log('WebSocket connected');
-        setIsConnected(true);
-      };
+    return int(remaining), timer_active
 
-      ws.current.onmessage = (event) => {
-        try {
-          const data = JSON.parse(event.data);
-          if (data.chamado === timerState?.chamado) {
-            setTimerState(data);
-            setIsActive(data.timerActive);
-            
-            // Calculate time remaining
-            if (data.timerActive && data.startedAt) {
-              const elapsed = Math.floor((Date.now() - new Date(data.startedAt).getTime()) / 1000);
-              const remaining = Math.max(0, (data.durationMinutes * 60) - elapsed);
-              setDisplayTime(remaining);
-            }
-          }
-        } catch (error) {
-          console.error('Error parsing WebSocket message:', error);
-        }
-      };
+# Lambda handler
+def lambda_handler(event, context):
+    route = event.get("requestContext", {}).get("routeKey")
+    connection_id = event.get("requestContext", {}).get("connectionId")
 
-      ws.current.onclose = () => {
-        console.log('WebSocket disconnected');
-        setIsConnected(false);
-        // Reconnect after 3 seconds
-        setTimeout(connectWebSocket, 3000);
-      };
+    # ---------------- Connect
+    if route == "$connect":
+        CONN_TABLE.put_item(Item={"connectionId": connection_id})
+        print(f"✅ Conexão estabelecida: {connection_id}")
+        return {"statusCode": 200}
 
-      ws.current.onerror = (error) => {
-        console.error('WebSocket error:', error);
-        setIsConnected(false);
-      };
-    } catch (error) {
-      console.error('Failed to connect WebSocket:', error);
-      setTimeout(connectWebSocket, 3000);
-    }
-  }, [timerState?.chamado]);
+    # ---------------- Disconnect
+    elif route == "$disconnect":
+        CONN_TABLE.delete_item(Key={"connectionId": connection_id})
+        print(f"❌ Conexão desconectada: {connection_id}")
+        return {"statusCode": 200}
 
-  // API calls
-  const saveTimerState = useCallback(async (state: Partial<TimerState>) => {
-    try {
-      const response = await fetch(API_URL, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(state),
-      });
-      
-      if (!response.ok) {
-        throw new Error('Failed to save timer state');
-      }
-      
-      const result = await response.json();
-      return result;
-    } catch (error) {
-      console.error('Error saving timer state:', error);
-      toast({
-        title: "Erro de Conexão",
-        description: "Não foi possível salvar o estado do timer",
-        variant: "destructive",
-      });
-    }
-  }, [toast]);
+    # ---------------- Receber mensagem
+    elif route == "sendMessage":
+        body = json.loads(event.get("body", "{}"))
+        action = body.get("action")          # "startTimer" ou "pauseTimer"
+        chamado = body.get("chamado")        # id do chamado
 
-  const loadTimerState = useCallback(async (chamadoId: string) => {
-    try {
-      const response = await fetch(`${API_URL}?chamado=${chamadoId}`);
-      
-      if (response.ok) {
-        const data = await response.json();
-        console.log('API Response:', data);
-        
-        // Check if data is valid timer state (has the expected timer properties)
-        if (data && data.chamado && typeof data.timerActive === 'boolean' && typeof data.durationMinutes === 'number') {
-          console.log('Valid timer data found:', data);
-          setTimerState(data);
-          setIsActive(data.timerActive);
-          setDuration(data.durationMinutes);
-          
-          // Calculate current time remaining
-          if (data.timerActive && data.startedAt) {
-            const elapsed = Math.floor((Date.now() - new Date(data.startedAt).getTime()) / 1000);
-            const remaining = Math.max(0, (data.durationMinutes * 60) - elapsed);
-            setDisplayTime(remaining);
-            console.log('Timer is active, calculated remaining time:', remaining);
-          } else {
-            const timeRemaining = data.timeRemaining || data.durationMinutes * 60;
-            setDisplayTime(timeRemaining);
-            console.log('Timer is not active, using stored time:', timeRemaining);
-          }
-          
-          return data;
-        } else {
-          console.log('Invalid timer data received, API returned:', data);
-          // If API returns array or invalid data, return null to create new timer
-          return null;
-        }
-      } else {
-        console.log('API request failed with status:', response.status);
-      }
-    } catch (error) {
-      console.error('Error loading timer state:', error);
-    }
-    return null;
-  }, []);
+        if not chamado or not action:
+            return {"statusCode": 400, "body": "Chamado ou ação ausente"}
 
-  // Timer logic
-  useEffect(() => {
-    if (isActive && displayTime > 0) {
-      intervalRef.current = setInterval(() => {
-        setDisplayTime((prevTime) => {
-          if (prevTime <= 1) {
-            setIsActive(false);
-            toast({
-              title: "Tempo Esgotado!",
-              description: "Seu cronômetro chegou ao fim.",
-            });
-            
-            // Update server state
-            if (timerState) {
-              saveTimerState({
-                ...timerState,
-                timerActive: false,
-                timeRemaining: 0,
-              });
-            }
-            
-            return 0;
-          }
-          return prevTime - 1;
-        });
-      }, 1000);
-    } else {
-      if (intervalRef.current) {
-        clearInterval(intervalRef.current);
-        intervalRef.current = null;
-      }
-    }
+        # Pega o alerta atual
+        alerta_resp = ACOMP_TABLE.get_item(Key={"chamado": int(chamado)})
+        alerta = alerta_resp.get("Item")
+        if not alerta:
+            return {"statusCode": 404, "body": "Chamado não encontrado"}
 
-    return () => {
-      if (intervalRef.current) {
-        clearInterval(intervalRef.current);
-        intervalRef.current = null;
-      }
-    };
-  }, [isActive, displayTime, timerState, saveTimerState, toast]);
+        now_iso = datetime.utcnow().replace(tzinfo=timezone.utc).isoformat()
 
-  // Initialize timer
-  useEffect(() => {
-    if (initialLoad) {
-      const savedChamado = localStorage.getItem('timer_chamado');
-      console.log('Initializing timer with saved chamado:', savedChamado);
-      
-      if (savedChamado) {
-        setChamado(savedChamado);
-        loadTimerState(savedChamado).then((data) => {
-          if (!data) {
-            // Create new timer if no saved state or invalid data
-            console.log('No valid data found, creating new timer');
-            const newChamado = generateChamado();
-            setChamado(newChamado);
-            localStorage.setItem('timer_chamado', newChamado);
-            setDisplayTime(duration * 60);
-            console.log('New timer initialized with time:', duration * 60);
-          }
-        }).catch(() => {
-          // If error loading, fallback to new timer
-          console.log('Error loading state, creating new timer');
-          const newChamado = generateChamado();
-          setChamado(newChamado);
-          localStorage.setItem('timer_chamado', newChamado);
-          setDisplayTime(duration * 60);
-        });
-      } else {
-        console.log('No saved chamado, creating new timer');
-        const newChamado = generateChamado();
-        setChamado(newChamado);
-        localStorage.setItem('timer_chamado', newChamado);
-        setDisplayTime(duration * 60);
-        console.log('Fresh timer initialized with time:', duration * 60);
-      }
-      setInitialLoad(false);
-    }
-  }, [initialLoad, duration, generateChamado, loadTimerState]);
+        # Atualiza timer no DynamoDB
+        if action == "startTimer":
+            ACOMP_TABLE.update_item(
+                Key={"chamado": int(chamado)},
+                UpdateExpression="SET timerActive = :t, startedAt = :s",
+                ExpressionAttributeValues={":t": True, ":s": now_iso}
+            )
+            print(f"⏱ Timer iniciado para chamado {chamado} às {now_iso}")
+        elif action == "pauseTimer":
+            ACOMP_TABLE.update_item(
+                Key={"chamado": int(chamado)},
+                UpdateExpression="SET timerActive = :t",
+                ExpressionAttributeValues={":t": False}
+            )
+            print(f"⏸ Timer pausado para chamado {chamado}")
+        else:
+            return {"statusCode": 400, "body": "Ação inválida"}
 
-  // Connect WebSocket when chamado is available
-  useEffect(() => {
-    if (chamado && !ws.current) {
-      connectWebSocket();
-    }
+        # Busca estado atualizado
+        alerta_resp = ACOMP_TABLE.get_item(Key={"chamado": int(chamado)})
+        alerta = alerta_resp.get("Item")
+        remaining, timer_active = calculate_remaining(alerta)
 
-    return () => {
-      if (ws.current) {
-        ws.current.close();
-        ws.current = null;
-      }
-    };
-  }, [chamado, connectWebSocket]);
+        # Broadcast para todos os clientes conectados
+        connections = CONN_TABLE.scan().get("Items", [])
+        for conn in connections:
+            try:
+                apigw.post_to_connection(
+                    ConnectionId=conn["connectionId"],
+                    Data=json.dumps({
+                        "type": "TIMER_UPDATED",
+                        "chamado": alerta["chamado"],
+                        "timerActive": timer_active,
+                        "startedAt": alerta.get("startedAt"),
+                        "durationMinutes": alerta.get("durationMinutes", 15),
+                        "timeRemaining": remaining
+                    }, default=json_serial)
+                )
+            except apigw.exceptions.GoneException:
+                print(f"❌ Conexão ausente: {conn['connectionId']}")
+                CONN_TABLE.delete_item(Key={"connectionId": conn["connectionId"]})
 
-  // Control functions
-  const startTimer = async () => {
-    const now = new Date().toISOString();
-    const newState = {
-      chamado,
-      timerActive: true,
-      startedAt: now,
-      durationMinutes: duration,
-      timeRemaining: displayTime,
-    };
+        return {"statusCode": 200, "body": json.dumps({"message": "ok"})}
 
-    setIsActive(true);
-    setTimerState(newState);
-    await saveTimerState(newState);
-    
-    toast({
-      title: "Timer Iniciado",
-      description: `Cronômetro de ${duration} minutos ativado!`,
-    });
-  };
+    # ---------------- GET estado atual (nova sessão)
+    elif route == "getState":
+        chamado = event.get("queryStringParameters", {}).get("chamado")
+        if not chamado:
+            return {"statusCode": 400, "body": "Chamado ausente"}
 
-  const pauseTimer = async () => {
-    if (timerState) {
-      const updatedState = {
-        ...timerState,
-        timerActive: false,
-        timeRemaining: displayTime,
-      };
+        alerta_resp = ACOMP_TABLE.get_item(Key={"chamado": int(chamado)})
+        alerta = alerta_resp.get("Item")
+        if not alerta:
+            return {"statusCode": 404, "body": "Chamado não encontrado"}
 
-      setIsActive(false);
-      setTimerState(updatedState);
-      await saveTimerState(updatedState);
-      
-      toast({
-        title: "Timer Pausado",
-        description: "Cronômetro pausado com sucesso.",
-      });
-    }
-  };
+        remaining, timer_active = calculate_remaining(alerta)
+        alerta["timeRemaining"] = remaining
+        alerta["timerActive"] = timer_active
 
-  const resetTimer = async () => {
-    const newTime = duration * 60;
-    setDisplayTime(newTime);
-    setIsActive(false);
-    
-    if (timerState) {
-      const updatedState = {
-        ...timerState,
-        timerActive: false,
-        timeRemaining: newTime,
-        startedAt: new Date().toISOString(),
-      };
+        print(f"📡 Estado retornado para chamado {chamado}: remaining={remaining}, timerActive={timer_active}")
+        return {"statusCode": 200, "body": json.dumps(alerta, default=json_serial)}
 
-      setTimerState(updatedState);
-      await saveTimerState(updatedState);
-    }
-    
-    toast({
-      title: "Timer Resetado",
-      description: `Cronômetro resetado para ${duration} minutos.`,
-    });
-  };
-
-  const updateDuration = (newDuration: number) => {
-    if (newDuration > 0 && newDuration <= 180) { // Max 3 hours
-      setDuration(newDuration);
-      if (!isActive) {
-        setDisplayTime(newDuration * 60);
-      }
-    }
-  };
-
-  const clearSession = () => {
-    // Clear localStorage
-    localStorage.removeItem('timer_chamado');
-    
-    // Generate new chamado and reset state
-    const newChamado = generateChamado();
-    setChamado(newChamado);
-    localStorage.setItem('timer_chamado', newChamado);
-    
-    // Reset timer to default values
-    setDisplayTime(duration * 60);
-    setIsActive(false);
-    setTimerState(null);
-    
-    toast({
-      title: "Sessão Limpa",
-      description: "Nova sessão criada com sucesso.",
-    });
-    
-    console.log('Session cleared, new chamado:', newChamado);
-  };
-
-  // Calculate progress percentage
-  const progress = duration > 0 ? ((duration * 60 - displayTime) / (duration * 60)) * 100 : 0;
-  
-  // Determine timer status for styling
-  const getTimerStatus = () => {
-    const percentage = (displayTime / (duration * 60)) * 100;
-    if (percentage > 50) return 'success';
-    if (percentage > 20) return 'warning';
-    return 'danger';
-  };
-
-  const timerStatus = getTimerStatus();
-
-  return (
-    <div className="min-h-screen bg-background flex items-center justify-center p-6">
-      <div className="w-full max-w-2xl mx-auto space-y-8">
-        {/* Connection Status */}
-        <div className="flex items-center justify-center gap-2 text-sm">
-          <div className={cn(
-            "w-2 h-2 rounded-full transition-colors",
-            isConnected ? "bg-timer-success" : "bg-timer-danger"
-          )} />
-          <span className="text-muted-foreground">
-            {isConnected ? "Conectado" : "Desconectado"}
-          </span>
-        </div>
-
-        {/* Main Timer Card */}
-        <Card className="relative overflow-hidden border-none bg-timer-gradient shadow-timer">
-          <div className="absolute inset-0 bg-black/20" />
-          <div className="relative z-10 p-12 text-center">
-            {/* Timer Circle */}
-            <div className="relative w-80 h-80 mx-auto mb-8">
-              <svg
-                className="w-full h-full transform -rotate-90"
-                viewBox="0 0 120 120"
-              >
-                {/* Background circle */}
-                <circle
-                  cx="60"
-                  cy="60"
-                  r="54"
-                  fill="none"
-                  stroke="rgba(255, 255, 255, 0.1)"
-                  strokeWidth="12"
-                />
-                {/* Progress circle */}
-                <circle
-                  cx="60"
-                  cy="60"
-                  r="54"
-                  fill="none"
-                  stroke="rgba(255, 255, 255, 0.9)"
-                  strokeWidth="12"
-                  strokeDasharray="339.292"
-                  strokeDashoffset={339.292 - (339.292 * progress) / 100}
-                  className="transition-all duration-1000 ease-out"
-                  strokeLinecap="round"
-                />
-              </svg>
-              
-              {/* Time Display */}
-              <div className="absolute inset-0 flex items-center justify-center">
-                <div className={cn(
-                  "text-center transition-all duration-500",
-                  isActive && "animate-pulse-glow"
-                )}>
-                  <div className="text-6xl font-bold text-white mb-2 font-mono tracking-wider">
-                    {formatTime(displayTime)}
-                  </div>
-                  <div className="text-white/80 text-lg">
-                    {isActive ? "Em andamento" : "Pausado"}
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            {/* Control Buttons */}
-            <div className="flex items-center justify-center gap-4 mb-6">
-              <Button
-                onClick={isActive ? pauseTimer : startTimer}
-                size="lg"
-                className="bg-white/20 hover:bg-white/30 border border-white/30 text-white backdrop-blur-sm transition-all duration-300 hover:scale-105"
-                disabled={displayTime === 0 && !isActive}
-              >
-                {isActive ? (
-                  <>
-                    <Pause className="w-5 h-5 mr-2" />
-                    Pausar
-                  </>
-                ) : (
-                  <>
-                    <Play className="w-5 h-5 mr-2" />
-                    Iniciar
-                  </>
-                )}
-              </Button>
-
-              <Button
-                onClick={resetTimer}
-                variant="outline"
-                size="lg"
-                className="bg-white/10 hover:bg-white/20 border border-white/30 text-white backdrop-blur-sm transition-all duration-300 hover:scale-105"
-              >
-                <RotateCcw className="w-5 h-5 mr-2" />
-                Resetar
-              </Button>
-
-              <Button
-                onClick={() => setShowSettings(!showSettings)}
-                variant="outline"
-                size="lg"
-                className="bg-white/10 hover:bg-white/20 border border-white/30 text-white backdrop-blur-sm transition-all duration-300 hover:scale-105"
-              >
-                <Settings className="w-5 h-5" />
-              </Button>
-            </div>
-          </div>
-        </Card>
-
-        {/* Settings Panel */}
-        {showSettings && (
-          <Card className="bg-card border-border animate-in slide-in-from-top-2 duration-300">
-            <div className="p-6 space-y-4">
-              <h3 className="text-lg font-semibold text-foreground">Configurações</h3>
-              
-              <div className="space-y-2">
-                <Label htmlFor="duration" className="text-sm font-medium text-foreground">
-                  Duração (minutos)
-                </Label>
-                <Input
-                  id="duration"
-                  type="number"
-                  min="1"
-                  max="180"
-                  value={duration}
-                  onChange={(e) => updateDuration(parseInt(e.target.value) || 1)}
-                  className="bg-background border-border"
-                  disabled={isActive}
-                />
-              </div>
-
-              <div className="space-y-2">
-                <Label className="text-sm font-medium text-foreground">ID da Sessão</Label>
-                <div className="text-xs text-muted-foreground font-mono bg-muted p-2 rounded">
-                  {chamado}
-                </div>
-              </div>
-
-              <div className="flex gap-2 flex-wrap">
-                <Button
-                  onClick={() => updateDuration(15)}
-                  variant="outline"
-                  size="sm"
-                  disabled={isActive}
-                >
-                  15 min
-                </Button>
-                <Button
-                  onClick={() => updateDuration(25)}
-                  variant="outline"
-                  size="sm"
-                  disabled={isActive}
-                >
-                  25 min
-                </Button>
-                <Button
-                  onClick={() => updateDuration(45)}
-                  variant="outline"
-                  size="sm"
-                  disabled={isActive}
-                >
-                  45 min
-                </Button>
-                <Button
-                  onClick={() => updateDuration(60)}
-                  variant="outline"
-                  size="sm"
-                  disabled={isActive}
-                >
-                  1 hora
-                </Button>
-              </div>
-
-              <div className="pt-4 border-t border-border">
-                <Button
-                  onClick={clearSession}
-                  variant="destructive"
-                  size="sm"
-                  className="w-full"
-                >
-                  Limpar Sessão
-                </Button>
-                <p className="text-xs text-muted-foreground mt-2">
-                  Use apenas se o tempo estiver mostrando "NaN:NaN" ou problemas similares
-                </p>
-              </div>
-            </div>
-          </Card>
-        )}
-      </div>
-    </div>
-  );
-};
-
-export default Timer;
+    else:
+        print(f"❌ Rota não suportada: {route}")
+        return {"statusCode": 400, "body": "Rota não suportada"}
