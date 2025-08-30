@@ -1,76 +1,80 @@
-import React, { useEffect, useState, useRef } from "react";
+import React, { useEffect, useRef, useState } from "react";
 
-// ================= CONFIGURAÇÕES =================
-// URLs que você pode definir diretamente aqui
-const WS_URL = "wss://SEU_ENDPOINT_WS.execute-api.us-east-1.amazonaws.com/prod";
-const REST_URL = "https://SEU_ENDPOINT_REST.execute-api.us-east-1.amazonaws.com/prod/getState";
+const WS_URL = "wss://m89s04n9ve.execute-api.us-east-1.amazonaws.com/prod";
+const REST_URL = "https://m89s04n9ve.execute-api.us-east-1.amazonaws.com/prod/getState";
+const CHAMADO = 123; // 🔹 Defina o ID do chamado fixo para teste
 
-interface TimerProps {
-  chamado: number; // ID do chamado
-}
-
-const Timer: React.FC<TimerProps> = ({ chamado }) => {
-  const [timerActive, setTimerActive] = useState(false);
-  const [timeRemaining, setTimeRemaining] = useState(0); // segundos
-  const [durationMinutes, setDurationMinutes] = useState(15);
-  const [startedAt, setStartedAt] = useState<string | null>(null);
-
+const Timer: React.FC = () => {
+  const [timeRemaining, setTimeRemaining] = useState<number>(0);
+  const [timerActive, setTimerActive] = useState<boolean>(false);
+  const [connected, setConnected] = useState<boolean>(false);
   const wsRef = useRef<WebSocket | null>(null);
-  const intervalRef = useRef<NodeJS.Timer | null>(null);
+  const intervalRef = useRef<NodeJS.Timeout | null>(null);
 
-  // --------- Conecta WebSocket
+  // 🔹 Conecta no WebSocket
   useEffect(() => {
-    console.log("🔌 Conectando no WebSocket...");
+    console.log("🔌 Conectando ao WebSocket...");
     const ws = new WebSocket(WS_URL);
     wsRef.current = ws;
 
     ws.onopen = () => {
-      console.log("✅ WebSocket conectado");
-
-      // Buscar estado inicial via REST
-      fetch(`${REST_URL}?chamado=${chamado}`)
-        .then(res => res.json())
-        .then(data => {
-          console.log("📡 Estado inicial recebido:", data);
-          setTimerActive(data.timerActive);
-          setTimeRemaining(data.timeRemaining || data.durationMinutes * 60);
-          setDurationMinutes(data.durationMinutes || 15);
-          setStartedAt(data.startedAt || null);
-        })
-        .catch(err => console.error("❌ Erro ao buscar estado inicial:", err));
+      console.log("✅ WebSocket conectado!");
+      setConnected(true);
     };
 
-    ws.onmessage = (event) => {
+    ws.onmessage = (msg) => {
       try {
-        const msg = JSON.parse(event.data);
-        if (msg.type === "TIMER_UPDATED" && msg.chamado === chamado) {
-          console.log("📩 Mensagem recebida do WS:", msg);
-          setTimerActive(msg.timerActive);
-          setTimeRemaining(msg.timeRemaining || msg.durationMinutes * 60);
-          setDurationMinutes(msg.durationMinutes || 15);
-          setStartedAt(msg.startedAt || null);
+        const data = JSON.parse(msg.data);
+        console.log("📩 Mensagem recebida do WS:", data);
+
+        if (data.type === "TIMER_UPDATED") {
+          setTimeRemaining(data.timeRemaining);
+          setTimerActive(data.timerActive);
         }
       } catch (err) {
-        console.error("❌ Erro ao processar mensagem WS:", err);
+        console.error("❌ Erro ao parsear mensagem:", err);
       }
     };
 
-    ws.onclose = () => console.log("❌ WebSocket desconectado");
-    ws.onerror = (err) => console.error("❌ WebSocket erro:", err);
+    ws.onerror = (err) => {
+      console.error("❌ Erro no WebSocket:", err);
+    };
+
+    ws.onclose = () => {
+      console.warn("⚠️ WebSocket fechado!");
+      setConnected(false);
+    };
 
     return () => {
+      console.log("🔌 Fechando WebSocket...");
       ws.close();
     };
-  }, [chamado]);
+  }, []);
 
-  // --------- Intervalo para decrementar tempo localmente
+  // 🔹 Busca estado inicial do timer
+  useEffect(() => {
+    console.log(`🌐 Buscando estado inicial de ${CHAMADO}...`);
+    fetch(`${REST_URL}?chamado=${CHAMADO}`)
+      .then((res) => res.json())
+      .then((data) => {
+        console.log("📥 Estado inicial:", data);
+        setTimeRemaining(data.timeRemaining || 0);
+        setTimerActive(data.timerActive || false);
+      })
+      .catch((err) => console.error("❌ Erro ao buscar estado inicial:", err));
+  }, []);
+
+  // 🔹 Atualiza cronômetro localmente
   useEffect(() => {
     if (intervalRef.current) clearInterval(intervalRef.current);
 
     if (timerActive) {
+      console.log("▶️ Timer rodando...");
       intervalRef.current = setInterval(() => {
-        setTimeRemaining(prev => Math.max(prev - 1, 0));
+        setTimeRemaining((prev) => Math.max(prev - 1, 0));
       }, 1000);
+    } else {
+      console.log("⏸️ Timer pausado.");
     }
 
     return () => {
@@ -78,33 +82,47 @@ const Timer: React.FC<TimerProps> = ({ chamado }) => {
     };
   }, [timerActive]);
 
-  // --------- Função para enviar ação ao WS
-  const sendAction = (action: "startTimer" | "pauseTimer") => {
+  // 🔹 Envia ação pelo WebSocket
+  const sendAction = (action: string) => {
     if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
-      console.log("⏳ WebSocket ainda não conectado");
+      console.error("❌ WebSocket não está pronto para enviar!");
       return;
     }
 
-    console.log(`✉️ Enviando ${action}...`);
-    wsRef.current.send(JSON.stringify({ action, chamado }));
+    const payload = JSON.stringify({ action, chamado: CHAMADO });
+    console.log(`📤 Enviando para WS:`, payload);
+    wsRef.current.send(payload);
   };
 
-  // --------- Formata tempo em MM:SS
+  // 🔹 Alterna entre iniciar e pausar
+  const toggleTimer = () => {
+    if (!connected) {
+      console.error("❌ Não conectado ao WebSocket!");
+      return;
+    }
+    if (timerActive) {
+      sendAction("pauseTimer");
+    } else {
+      sendAction("startTimer");
+    }
+  };
+
+  // 🔹 Formata tempo
   const formatTime = (seconds: number) => {
-    const m = Math.floor(seconds / 60).toString().padStart(2, "0");
-    const s = Math.floor(seconds % 60).toString().padStart(2, "0");
-    return `${m}:${s}`;
+    const m = Math.floor(seconds / 60);
+    const s = seconds % 60;
+    return `${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`;
   };
 
   return (
-    <div style={{ border: "1px solid #ccc", padding: "1rem", width: "220px" }}>
-      <h3>Chamado {chamado}</h3>
-      <p>Tempo restante: {formatTime(timeRemaining)}</p>
-      <p>Status: {timerActive ? "🟢 Rodando" : "⏸ Pausado"}</p>
-      <button onClick={() => sendAction("startTimer")} style={{ marginRight: "0.5rem" }}>
-        Iniciar
+    <div style={{ fontFamily: "Arial", padding: "20px" }}>
+      <h2>🕒 Timer Chamado {CHAMADO}</h2>
+      <p>Status: {timerActive ? "Ativo" : "Pausado"}</p>
+      <p>Tempo Restante: {formatTime(timeRemaining)}</p>
+      <p>WS: {connected ? "✅ Conectado" : "❌ Desconectado"}</p>
+      <button onClick={toggleTimer} style={{ padding: "10px", fontSize: "16px" }}>
+        {timerActive ? "Pausar" : "Iniciar"}
       </button>
-      <button onClick={() => sendAction("pauseTimer")}>Pausar</button>
     </div>
   );
 };
