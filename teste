@@ -1,22 +1,6 @@
-# Calcula tempo restante
-def calculate_remaining(alerta):
-    started_at = alerta.get("startedAt")
-    duration = float(alerta.get("durationMinutes", 15))  # converter Decimal para float
-    timer_active = alerta.get("timerActive", False)
-
-    remaining = duration * 60  # valor padrão
-    try:
-        if started_at and timer_active:
-            # Substitui Z por +00:00 se necessário
-            started_dt = datetime.fromisoformat(str(started_at).replace("Z", "+00:00"))
-            now = datetime.utcnow().replace(tzinfo=timezone.utc)
-            elapsed = (now - started_dt).total_seconds()
-            remaining = max(0, duration * 60 - elapsed)
-            print(f"⏱ Cálculo remaining: elapsed={elapsed}, remaining={remaining}")
-        else:
-            print("⏱ Timer não ativo ou startedAt ausente")
-    except Exception as e:
-        print(f"❌ Erro no cálculo de remaining: {e}")
-        remaining = duration * 60
-
-    return int(remaining), timer_active
+curl -X POST "https://<seu-api-id>.execute-api.us-east-1.amazonaws.com/dev/sendMessage" \
+  -H "Content-Type: application/json" \
+  -d '{
+        "action": "startTimer",
+        "chamado": "10418007"
+      }'
