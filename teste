@@ -1,134 +1,27 @@
-import boto3
-import json
-from datetime import datetime, timezone
-from decimal import Decimal
-
-# Conexão DynamoDB
-DDB = boto3.resource("dynamodb", region_name="us-east-1")
-ACOMP_TABLE = DDB.Table("painelmonitoracao_acompanhamento")
-CONN_TABLE = DDB.Table("painelmonitoracao_connections")
-
-# API Gateway Management API (WebSocket)
-APIGW_ENDPOINT = "https://tgwtw1v4rg.execute-api.us-east-1.amazonaws.com/dev"
-apigw = boto3.client("apigatewaymanagementapi", endpoint_url=APIGW_ENDPOINT)
-
-# Serialização Decimal
-def json_serial(obj):
-    if isinstance(obj, Decimal):
-        return int(obj) if obj % 1 == 0 else float(obj)
-    raise TypeError
-
-# Converte float para Decimal para DynamoDB
-def to_decimal(value):
-    return Decimal(str(value))
-
-# Calcula tempo restante considerando elapsedSeconds
-def calculate_remaining(alerta):
-    duration = Decimal(str(alerta.get("durationMinutes", 15)))
-    timer_active = alerta.get("timerActive", False)
-    elapsed = Decimal(str(alerta.get("elapsedSeconds", 0)))
-    started_at = alerta.get("startedAt")
-
-    if timer_active and started_at:
-        try:
-            started_dt = datetime.fromisoformat(str(started_at).replace("Z", "+00:00"))
-            now = datetime.utcnow().replace(tzinfo=timezone.utc)
-            elapsed += Decimal(str((now - started_dt).total_seconds()))
-        except Exception as e:
-            print(f"❌ Erro no cálculo de elapsed: {e}")
-
-    remaining = max(0, float(duration * 60 - elapsed))
-    return int(remaining), timer_active, elapsed
-
-def lambda_handler(event, context):
-    route = event.get("requestContext", {}).get("routeKey")
-    connection_id = event.get("requestContext", {}).get("connectionId")
-
-    if route == "$connect":
-        CONN_TABLE.put_item(Item={"connectionId": connection_id})
-        return {"statusCode": 200}
-
-    elif route == "$disconnect":
-        CONN_TABLE.delete_item(Key={"connectionId": connection_id})
-        return {"statusCode": 200}
-
-    elif route == "sendMessage":
-        body = json.loads(event.get("body", "{}"))
-        action = body.get("action")
-        chamado = body.get("chamado")
-
-        if not chamado or not action:
-            return {"statusCode": 400, "body": "Chamado ou ação ausente"}
-
-        alerta_resp = ACOMP_TABLE.get_item(Key={"chamado": int(chamado)})
-        alerta = alerta_resp.get("Item")
-        if not alerta:
-            return {"statusCode": 404, "body": "Chamado não encontrado"}
-
-        now_iso = datetime.utcnow().replace(tzinfo=timezone.utc).isoformat()
-        remaining, timer_active, elapsed = calculate_remaining(alerta)
-
-        if action == "startTimer":
-            ACOMP_TABLE.update_item(
-                Key={"chamado": int(chamado)},
-                UpdateExpression="SET timerActive=:t, startedAt=:s, elapsedSeconds=:e",
-                ExpressionAttributeValues={
-                    ":t": True,
-                    ":s": now_iso,
-                    ":e": to_decimal(elapsed)
-                }
-            )
-        elif action == "pauseTimer":
-            ACOMP_TABLE.update_item(
-                Key={"chamado": int(chamado)},
-                UpdateExpression="SET timerActive=:t, elapsedSeconds=:e",
-                ExpressionAttributeValues={
-                    ":t": False,
-                    ":e": to_decimal(elapsed)
-                }
-            )
-        else:
-            return {"statusCode": 400, "body": "Ação inválida"}
-
-        # Broadcast
-        alerta_resp = ACOMP_TABLE.get_item(Key={"chamado": int(chamado)})
-        alerta = alerta_resp.get("Item")
-        remaining, timer_active, _ = calculate_remaining(alerta)
-
-        connections = CONN_TABLE.scan().get("Items", [])
-        for conn in connections:
-            try:
-                apigw.post_to_connection(
-                    ConnectionId=conn["connectionId"],
-                    Data=json.dumps({
-                        "type": "TIMER_UPDATED",
-                        "chamado": alerta["chamado"],
-                        "timerActive": timer_active,
-                        "startedAt": alerta.get("startedAt"),
-                        "durationMinutes": alerta.get("durationMinutes", 15),
-                        "timeRemaining": remaining
-                    }, default=json_serial)
-                )
-            except apigw.exceptions.GoneException:
-                CONN_TABLE.delete_item(Key={"connectionId": conn["connectionId"]})
-
-        return {"statusCode": 200, "body": json.dumps({"message": "ok"})}
-
-    elif route == "getState":
-        chamado = event.get("queryStringParameters", {}).get("chamado")
-        if not chamado:
-            return {"statusCode": 400, "body": "Chamado ausente"}
-
-        alerta_resp = ACOMP_TABLE.get_item(Key={"chamado": int(chamado)})
-        alerta = alerta_resp.get("Item")
-        if not alerta:
-            return {"statusCode": 404, "body": "Chamado não encontrado"}
-
-        remaining, timer_active, _ = calculate_remaining(alerta)
-        alerta["timeRemaining"] = remaining
-        alerta["timerActive"] = timer_active
-
-        return {"statusCode": 200, "body": json.dumps(alerta, default=json_serial)}
-
-    else:
-        return {"statusCode": 400, "body": "Rota não suportada"}
+{
+  "errorMessage": "An HTTP Client raised an unhandled exception: Not supported URL scheme wss",
+  "errorType": "HTTPClientError",
+  "requestId": "2dfbc338-e470-498b-8fd2-cf96735f44e2",
+  "stackTrace": [
+    "  File \"/var/task/lambda_function.py\", line 101, in lambda_handler\n    apigw.post_to_connection(\n",
+    "  File \"/var/lang/lib/python3.11/site-packages/botocore/client.py\", line 602, in _api_call\n    return self._make_api_call(operation_name, kwargs)\n",
+    "  File \"/var/lang/lib/python3.11/site-packages/botocore/context.py\", line 123, in wrapper\n    return func(*args, **kwargs)\n",
+    "  File \"/var/lang/lib/python3.11/site-packages/botocore/client.py\", line 1060, in _make_api_call\n    http, parsed_response = self._make_request(\n",
+    "  File \"/var/lang/lib/python3.11/site-packages/botocore/client.py\", line 1084, in _make_request\n    return self._endpoint.make_request(operation_model, request_dict)\n",
+    "  File \"/var/lang/lib/python3.11/site-packages/botocore/endpoint.py\", line 119, in make_request\n    return self._send_request(request_dict, operation_model)\n",
+    "  File \"/var/lang/lib/python3.11/site-packages/botocore/endpoint.py\", line 200, in _send_request\n    while self._needs_retry(\n",
+    "  File \"/var/lang/lib/python3.11/site-packages/botocore/endpoint.py\", line 360, in _needs_retry\n    responses = self._event_emitter.emit(\n",
+    "  File \"/var/lang/lib/python3.11/site-packages/botocore/hooks.py\", line 412, in emit\n    return self._emitter.emit(aliased_event_name, **kwargs)\n",
+    "  File \"/var/lang/lib/python3.11/site-packages/botocore/hooks.py\", line 256, in emit\n    return self._emit(event_name, kwargs)\n",
+    "  File \"/var/lang/lib/python3.11/site-packages/botocore/hooks.py\", line 239, in _emit\n    response = handler(**kwargs)\n",
+    "  File \"/var/lang/lib/python3.11/site-packages/botocore/retryhandler.py\", line 207, in __call__\n    if self._checker(**checker_kwargs):\n",
+    "  File \"/var/lang/lib/python3.11/site-packages/botocore/retryhandler.py\", line 284, in __call__\n    should_retry = self._should_retry(\n",
+    "  File \"/var/lang/lib/python3.11/site-packages/botocore/retryhandler.py\", line 307, in _should_retry\n    return self._checker(\n",
+    "  File \"/var/lang/lib/python3.11/site-packages/botocore/retryhandler.py\", line 363, in __call__\n    checker_response = checker(\n",
+    "  File \"/var/lang/lib/python3.11/site-packages/botocore/retryhandler.py\", line 247, in __call__\n    return self._check_caught_exception(\n",
+    "  File \"/var/lang/lib/python3.11/site-packages/botocore/retryhandler.py\", line 416, in _check_caught_exception\n    raise caught_exception\n",
+    "  File \"/var/lang/lib/python3.11/site-packages/botocore/endpoint.py\", line 279, in _do_get_response\n    http_response = self._send(request)\n",
+    "  File \"/var/lang/lib/python3.11/site-packages/botocore/endpoint.py\", line 383, in _send\n    return self.http_session.send(request)\n",
+    "  File \"/var/lang/lib/python3.11/site-packages/botocore/httpsession.py\", line 509, in send\n    raise HTTPClientError(error=e)\n"
+  ]
+}
