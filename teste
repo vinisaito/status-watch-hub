@@ -1,3 +1,19 @@
-Timer.tsx:56  Erro ao parsear mensagem: SyntaxError: Unexpected token 'M', "Mensagem enviada" is not valid JSON
-    at JSON.parse (<anonymous>)
-    at ws.onmessage (Timer.tsx:42:27)
+ws.onmessage = (event) => {
+  try {
+    const data = JSON.parse(event.data);
+    console.log("Mensagem recebida:", data);
+
+    if (data.action === "timerStarted") {
+      setTimerStart(Number(data.timerStart));
+      setChamadoId(Number(data.chamado));
+    } else if (data.action === "statusUpdated") {
+      setStatus(data.status);
+    } else if (data.action === "currentState") {
+      setTimerStart(Number(data.timerStart));
+      setChamadoId(Number(data.chamado));
+      setStatus(data.status);
+    }
+  } catch (err) {
+    console.warn("Mensagem não era JSON, ignorada:", event.data);
+  }
+};
