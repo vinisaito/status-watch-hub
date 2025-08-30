@@ -59,100 +59,76 @@ def lambda_handler(event, context):
         CONN_TABLE.delete_item(Key={"connectionId": connection_id})
         return {"statusCode": 200}
 
-    elif route == "sendMessage":
-        print("📨 Mensagem recebida pelo WS")
+    # Rota: startTimer
+    elif route == "startTimer":
         body = json.loads(event.get("body", "{}"))
-        print("📦 Conteúdo do body:", body)
-        action = body.get("action")
         chamado = body.get("chamado")
-
-        if not chamado or not action:
-            print("⚠️ Falta 'chamado' ou 'action'")
-            return {"statusCode": 400, "body": "Chamado ou ação ausente"}
-
-        # Busca chamado
-        alerta_resp = ACOMP_TABLE.get_item(Key={"chamado": int(chamado)})
-        alerta = alerta_resp.get("Item")
-        print(f"🔎 Alerta encontrado: {alerta}")
-        if not alerta:
-            print("❌ Chamado não encontrado")
-            return {"statusCode": 404, "body": "Chamado não encontrado"}
-
-        now_iso = datetime.utcnow().replace(tzinfo=timezone.utc).isoformat()
-        remaining, timer_active, elapsed = calculate_remaining(alerta)
-        print(f"📊 Estado antes da ação: remaining={remaining}, timer_active={timer_active}, elapsed={elapsed}")
-
-        # Ações
-        if action == "startTimer":
-            print("▶️ Iniciando timer")
-            ACOMP_TABLE.update_item(
-                Key={"chamado": int(chamado)},
-                UpdateExpression="SET timerActive=:t, startedAt=:s, elapsedSeconds=:e",
-                ExpressionAttributeValues={
-                    ":t": True,
-                    ":s": now_iso,
-                    ":e": to_decimal(elapsed)
-                }
-            )
-        elif action == "pauseTimer":
-            print("⏸️ Pausando timer")
-            ACOMP_TABLE.update_item(
-                Key={"chamado": int(chamado)},
-                UpdateExpression="SET timerActive=:t, elapsedSeconds=:e",
-                ExpressionAttributeValues={
-                    ":t": False,
-                    ":e": to_decimal(elapsed)
-                }
-            )
-        else:
-            print("⚠️ Ação inválida")
-            return {"statusCode": 400, "body": "Ação inválida"}
-
-        # Atualiza alerta para broadcast
-        alerta_resp = ACOMP_TABLE.get_item(Key={"chamado": int(chamado)})
-        alerta = alerta_resp.get("Item")
-        print(f"📦 Alerta atualizado: {alerta}")
-        remaining, timer_active, _ = calculate_remaining(alerta)
-
-        # Broadcast
-        connections = CONN_TABLE.scan().get("Items", [])
-        print(f"📡 Enviando atualização para {len(connections)} conexões")
-        for conn in connections:
-            try:
-                apigw.post_to_connection(
-                    ConnectionId=conn["connectionId"],
-                    Data=json.dumps({
-                        "type": "TIMER_UPDATED",
-                        "chamado": alerta["chamado"],
-                        "timerActive": timer_active,
-                        "startedAt": alerta.get("startedAt"),
-                        "durationMinutes": alerta.get("durationMinutes", 15),
-                        "timeRemaining": remaining
-                    }, default=json_serial)
-                )
-                print(f"✅ Mensagem enviada para {conn['connectionId']}")
-            except apigw.exceptions.GoneException:
-                print(f"⚠️ Conexão {conn['connectionId']} não existe mais, removendo")
-                CONN_TABLE.delete_item(Key={"connectionId": conn["connectionId"]})
-
-        return {"statusCode": 200, "body": json.dumps({"message": "ok"})}
-
-    elif route == "getState":
-        chamado = event.get("queryStringParameters", {}).get("chamado")
-        print(f"🌐 Requisição getState para chamado: {chamado}")
         if not chamado:
             return {"statusCode": 400, "body": "Chamado ausente"}
-
+        
         alerta_resp = ACOMP_TABLE.get_item(Key={"chamado": int(chamado)})
         alerta = alerta_resp.get("Item")
-        print(f"🔍 Estado encontrado: {alerta}")
         if not alerta:
             return {"statusCode": 404, "body": "Chamado não encontrado"}
+        
+        now_iso = datetime.utcnow().replace(tzinfo=timezone.utc).isoformat()
+        remaining, timer_active, elapsed = calculate_remaining(alerta)
+        
+        # Atualiza o timer
+        ACOMP_TABLE.update_item(
+            Key={"chamado": int(chamado)},
+            UpdateExpression="SET timerActive=:t, startedAt=:s, elapsedSeconds=:e",
+            ExpressionAttributeValues={
+                ":t": True,
+                ":s": now_iso,
+                ":e": to_decimal(elapsed)
+            }
+        )
+        print(f"▶️ Timer iniciado para chamado {chamado} às {now_iso}")
+        
+        return {"statusCode": 200, "body": json.dumps({"message": "ok"})}
 
+    # Rota: pauseTimer
+    elif route == "pauseTimer":
+        body = json.loads(event.get("body", "{}"))
+        chamado = body.get("chamado")
+        if not chamado:
+            return {"statusCode": 400, "body": "Chamado ausente"}
+        
+        alerta_resp = ACOMP_TABLE.get_item(Key={"chamado": int(chamado)})
+        alerta = alerta_resp.get("Item")
+        if not alerta:
+            return {"statusCode": 404, "body": "Chamado não encontrado"}
+        
+        remaining, timer_active, elapsed = calculate_remaining(alerta)
+        
+        ACOMP_TABLE.update_item(
+            Key={"chamado": int(chamado)},
+            UpdateExpression="SET timerActive=:t, elapsedSeconds=:e",
+            ExpressionAttributeValues={
+                ":t": False,
+                ":e": to_decimal(elapsed)
+            }
+        )
+        print(f"⏸️ Timer pausado para chamado {chamado}")
+        
+        return {"statusCode": 200, "body": json.dumps({"message": "ok"})}
+
+    # Rota: getState
+    elif route == "getState":
+        chamado = event.get("queryStringParameters", {}).get("chamado")
+        if not chamado:
+            return {"statusCode": 400, "body": "Chamado ausente"}
+        
+        alerta_resp = ACOMP_TABLE.get_item(Key={"chamado": int(chamado)})
+        alerta = alerta_resp.get("Item")
+        if not alerta:
+            return {"statusCode": 404, "body": "Chamado não encontrado"}
+        
         remaining, timer_active, _ = calculate_remaining(alerta)
         alerta["timeRemaining"] = remaining
         alerta["timerActive"] = timer_active
-
+        
         return {"statusCode": 200, "body": json.dumps(alerta, default=json_serial)}
 
     else:
