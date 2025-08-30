@@ -43,19 +43,23 @@ def calculate_remaining(alerta):
 def lambda_handler(event, context):
     route = event.get("requestContext", {}).get("routeKey")
     connection_id = event.get("requestContext", {}).get("connectionId")
+    print(f"📡 Route: {route}, ConnectionId: {connection_id}")
 
     if route == "$connect":
         CONN_TABLE.put_item(Item={"connectionId": connection_id})
+        print(f"✅ Conexão estabelecida: {connection_id}")
         return {"statusCode": 200}
 
     elif route == "$disconnect":
         CONN_TABLE.delete_item(Key={"connectionId": connection_id})
+        print(f"❌ Conexão desconectada: {connection_id}")
         return {"statusCode": 200}
 
     elif route == "sendMessage":
         body = json.loads(event.get("body", "{}"))
         action = body.get("action")
         chamado = body.get("chamado")
+        print(f"📩 Mensagem recebida: action={action}, chamado={chamado}")
 
         if not chamado or not action:
             return {"statusCode": 400, "body": "Chamado ou ação ausente"}
@@ -78,6 +82,7 @@ def lambda_handler(event, context):
                     ":e": to_decimal(elapsed)
                 }
             )
+            print(f"⏱ Timer iniciado para chamado {chamado} às {now_iso}")
         elif action == "pauseTimer":
             ACOMP_TABLE.update_item(
                 Key={"chamado": int(chamado)},
@@ -87,10 +92,11 @@ def lambda_handler(event, context):
                     ":e": to_decimal(elapsed)
                 }
             )
+            print(f"⏸ Timer pausado para chamado {chamado}")
         else:
             return {"statusCode": 400, "body": "Ação inválida"}
 
-        # Broadcast
+        # Broadcast para todos os clientes
         alerta_resp = ACOMP_TABLE.get_item(Key={"chamado": int(chamado)})
         alerta = alerta_resp.get("Item")
         remaining, timer_active, _ = calculate_remaining(alerta)
@@ -109,7 +115,9 @@ def lambda_handler(event, context):
                         "timeRemaining": remaining
                     }, default=json_serial)
                 )
+                print(f"📤 Enviado TIMER_UPDATED para {conn['connectionId']}")
             except apigw.exceptions.GoneException:
+                print(f"❌ Conexão ausente: {conn['connectionId']}")
                 CONN_TABLE.delete_item(Key={"connectionId": conn["connectionId"]})
 
         return {"statusCode": 200, "body": json.dumps({"message": "ok"})}
@@ -128,7 +136,9 @@ def lambda_handler(event, context):
         alerta["timeRemaining"] = remaining
         alerta["timerActive"] = timer_active
 
+        print(f"📡 Estado retornado para chamado {chamado}: remaining={remaining}, timerActive={timer_active}")
         return {"statusCode": 200, "body": json.dumps(alerta, default=json_serial)}
 
     else:
+        print(f"❌ Rota não suportada: {route}")
         return {"statusCode": 400, "body": "Rota não suportada"}
