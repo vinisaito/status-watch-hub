@@ -1,93 +1,93 @@
-import React, { useEffect, useState, useRef } from "react";
+import React, { useEffect, useRef, useState } from "react";
 
-interface TimerProps {
+// Defina a URL do WebSocket direto aqui
+const WS_URL = "wss://seu-endpoint.execute-api.us-east-1.amazonaws.com/prod";
+
+interface TimerData {
   chamado: number;
+  timerActive: boolean;
+  startedAt: string | null;
+  durationMinutes: number;
+  timeRemaining: number;
 }
 
-// Defina a URL do WebSocket diretamente aqui
-const WS_URL = "wss://YOUR_API_ID.execute-api.us-east-1.amazonaws.com/prod";
-
-const Timer: React.FC<TimerProps> = ({ chamado }) => {
-  const [timeRemaining, setTimeRemaining] = useState<number>(0);
-  const [timerActive, setTimerActive] = useState<boolean>(false);
-  const [durationMinutes, setDurationMinutes] = useState<number>(15);
+const Timer: React.FC<{ chamado: number }> = ({ chamado }) => {
+  const ws = useRef<WebSocket | null>(null);
+  const [connected, setConnected] = useState(false);
+  const [timerActive, setTimerActive] = useState(false);
+  const [timeRemaining, setTimeRemaining] = useState(0);
   const [startedAt, setStartedAt] = useState<string | null>(null);
 
-  const ws = useRef<WebSocket | null>(null);
-  const intervalRef = useRef<NodeJS.Timeout | null>(null);
-
-  // Conectar ao WebSocket
+  // Conecta no WebSocket
   useEffect(() => {
-    console.log("🌐 Conectando ao WebSocket...");
+    console.log("🌐 Conectando no WS...");
     ws.current = new WebSocket(WS_URL);
 
     ws.current.onopen = () => {
       console.log("✅ WebSocket conectado");
-      // Solicita o estado atual
-      ws.current?.send(
-        JSON.stringify({ action: "getState", chamado })
-      );
+      setConnected(true);
+
+      // Pede estado atual do chamado
+      const msg = { action: "getState", chamado };
+      ws.current?.send(JSON.stringify(msg));
+      console.log("📨 Solicitando estado inicial:", msg);
     };
 
     ws.current.onmessage = (event) => {
-      console.log("📩 Mensagem recebida:", event.data);
       try {
         const data = JSON.parse(event.data);
-        if (data.type === "TIMER_UPDATED" || data.timeRemaining !== undefined) {
-          setTimeRemaining(data.timeRemaining);
+        console.log("📡 Mensagem recebida do WS:", data);
+        if (data.type === "TIMER_UPDATED" && data.chamado === chamado) {
           setTimerActive(data.timerActive);
-          setDurationMinutes(data.durationMinutes);
-          setStartedAt(data.startedAt);
+          setTimeRemaining(data.timeRemaining);
+          setStartedAt(data.startedAt || null);
         }
       } catch (e) {
         console.error("❌ Erro ao processar mensagem WS:", e);
       }
     };
 
-    ws.current.onerror = (err) => {
-      console.error("❌ WebSocket erro:", err);
+    ws.current.onclose = () => {
+      console.log("🔌 WebSocket desconectado");
+      setConnected(false);
     };
 
-    ws.current.onclose = () => {
-      console.log("⚠️ WebSocket desconectado");
+    ws.current.onerror = (err) => {
+      console.error("❌ Erro no WebSocket:", err);
     };
 
     return () => {
-      if (ws.current) {
-        ws.current.close();
-      }
+      ws.current?.close();
     };
   }, [chamado]);
 
-  // Intervalo local para exibir contagem regressiva
+  // Timer local decrementando
   useEffect(() => {
-    if (intervalRef.current) clearInterval(intervalRef.current);
-
-    intervalRef.current = setInterval(() => {
-      setTimeRemaining(prev => (timerActive && prev > 0 ? prev - 1 : prev));
+    if (!timerActive) return;
+    const interval = setInterval(() => {
+      setTimeRemaining((prev) => Math.max(prev - 1, 0));
     }, 1000);
-
-    return () => {
-      if (intervalRef.current) clearInterval(intervalRef.current);
-    };
+    return () => clearInterval(interval);
   }, [timerActive]);
 
   const handleStart = () => {
-    if (ws.current?.readyState === WebSocket.OPEN) {
-      console.log("▶️ Enviando startTimer");
-      ws.current.send(JSON.stringify({ action: "startTimer", chamado }));
-    } else {
-      console.warn("⚠️ WebSocket não conectado ainda");
+    if (!connected || !ws.current || ws.current.readyState !== WebSocket.OPEN) {
+      console.warn("⏳ WS não conectado ainda!");
+      return;
     }
+    const msg = { action: "startTimer", chamado };
+    console.log("▶️ Enviando startTimer:", msg);
+    ws.current.send(JSON.stringify(msg));
   };
 
   const handlePause = () => {
-    if (ws.current?.readyState === WebSocket.OPEN) {
-      console.log("⏸ Enviando pauseTimer");
-      ws.current.send(JSON.stringify({ action: "pauseTimer", chamado }));
-    } else {
-      console.warn("⚠️ WebSocket não conectado ainda");
+    if (!connected || !ws.current || ws.current.readyState !== WebSocket.OPEN) {
+      console.warn("⏳ WS não conectado ainda!");
+      return;
     }
+    const msg = { action: "pauseTimer", chamado };
+    console.log("⏸ Enviando pauseTimer:", msg);
+    ws.current.send(JSON.stringify(msg));
   };
 
   const formatTime = (seconds: number) => {
@@ -99,16 +99,17 @@ const Timer: React.FC<TimerProps> = ({ chamado }) => {
   };
 
   return (
-    <div style={{ padding: "1rem", border: "1px solid #ccc", width: 200 }}>
+    <div style={{ border: "1px solid #ccc", padding: "1rem", width: "250px" }}>
       <h3>Chamado: {chamado}</h3>
+      <p>Status: {timerActive ? "⏱️ Ativo" : "⏸ Pausado"}</p>
       <p>Tempo restante: {formatTime(timeRemaining)}</p>
-      <p>Timer ativo: {timerActive ? "Sim" : "Não"}</p>
-      <button onClick={handleStart} disabled={timerActive}>
+      <button onClick={handleStart} disabled={!connected}>
         Iniciar
       </button>
-      <button onClick={handlePause} disabled={!timerActive}>
+      <button onClick={handlePause} disabled={!connected}>
         Pausar
       </button>
+      <p>WS: {connected ? "Conectado ✅" : "Desconectado ❌"}</p>
     </div>
   );
 };
