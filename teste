@@ -5,30 +5,117 @@ from datetime import datetime
 
 dynamodb = boto3.resource("dynamodb")
 connections_table = dynamodb.Table(os.environ["CONNECTIONS_TABLE"])
+chamados_table = dynamodb.Table(os.environ["CHAMADOS_TABLE"])
 
 def lambda_handler(event, context):
-    print("CONNECT EVENT:", event)
+    print("EVENT:", event)
 
+    route = event["requestContext"]["routeKey"]
+
+    if route == "$connect":
+        return on_connect(event)
+
+    elif route == "$disconnect":
+        return on_disconnect(event)
+
+    elif route == "startTimer":
+        return start_timer(event)
+
+    elif route == "updateStatus":
+        return update_status(event)
+
+    else:
+        return {"statusCode": 400, "body": "Rota desconhecida"}
+
+
+# 🔹 Conexão
+def on_connect(event):
     connection_id = event["requestContext"]["connectionId"]
-
-    try:
-        # Salva conexão no DynamoDB
-        connections_table.put_item(
-            Item={
-                "connectionId": connection_id,
-                "connectedAt": int(datetime.utcnow().timestamp())
-            }
-        )
-        print(f"Conexão registrada: {connection_id}")
-
-        return {
-            "statusCode": 200,
-            "body": "Connected."
+    connections_table.put_item(
+        Item={
+            "connectionId": connection_id,
+            "connectedAt": int(datetime.utcnow().timestamp())
         }
+    )
+    print(f"Conexão registrada: {connection_id}")
+    return {"statusCode": 200, "body": "Connected"}
 
-    except Exception as e:
-        print("Erro ao salvar conexão:", str(e))
-        return {
-            "statusCode": 500,
-            "body": "Erro ao conectar."
-        }
+
+# 🔹 Desconexão
+def on_disconnect(event):
+    connection_id = event["requestContext"]["connectionId"]
+    connections_table.delete_item(Key={"connectionId": connection_id})
+    print(f"Conexão removida: {connection_id}")
+    return {"statusCode": 200, "body": "Disconnected"}
+
+
+# 🔹 Iniciar Timer
+def start_timer(event):
+    body = json.loads(event.get("body", "{}"))
+    chamado = body.get("chamado")
+
+    if chamado is None:
+        return {"statusCode": 400, "body": "chamado é obrigatório"}
+
+    timer_start = int(datetime.utcnow().timestamp())
+
+    chamados_table.update_item(
+        Key={"chamado": chamado},
+        UpdateExpression="SET timerStart = :t",
+        ExpressionAttributeValues={":t": timer_start}
+    )
+
+    message = {
+        "action": "timerStarted",
+        "chamado": chamado,
+        "timerStart": timer_start
+    }
+
+    send_to_all_connections(message)
+    return {"statusCode": 200, "body": json.dumps(message)}
+
+
+# 🔹 Atualizar Status
+def update_status(event):
+    body = json.loads(event.get("body", "{}"))
+    chamado = body.get("chamado")
+    status = body.get("status")
+
+    if chamado is None or status is None:
+        return {"statusCode": 400, "body": "chamado e status são obrigatórios"}
+
+    chamados_table.update_item(
+        Key={"chamado": chamado},
+        UpdateExpression="SET #s = :s",
+        ExpressionAttributeNames={"#s": "status"},
+        ExpressionAttributeValues={":s": status}
+    )
+
+    message = {
+        "action": "statusUpdated",
+        "chamado": chamado,
+        "status": status
+    }
+
+    send_to_all_connections(message)
+    return {"statusCode": 200, "body": json.dumps(message)}
+
+
+# 🔹 Broadcast
+def send_to_all_connections(message: dict):
+    apigw = boto3.client(
+        "apigatewaymanagementapi",
+        endpoint_url=os.environ["WS_ENDPOINT"]
+    )
+
+    response = connections_table.scan()
+    for item in response.get("Items", []):
+        connection_id = item["connectionId"]
+        try:
+            apigw.post_to_connection(
+                Data=json.dumps(message),
+                ConnectionId=connection_id
+            )
+        except apigw.exceptions.GoneException:
+            print(f"Conexão expirada removida: {connection_id}")
+            connections_table.delete_item(Key={"connectionId": connection_id})
