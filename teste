@@ -1,89 +1,73 @@
-import React, { useEffect, useState, useRef } from "react";
+import boto3
+import json
+from datetime import datetime, timezone
+from decimal import Decimal
 
-interface TimerData {
-  chamado: number;
-  startedAt: string | null;
-  durationMinutes: number;
-  timerActive: boolean;
-  timeRemaining?: number;
-}
+dynamodb = boto3.resource("dynamodb")
+acomp_table = dynamodb.Table("painelmonitoracao_acompanhamento")
+conn_table = dynamodb.Table("painelmonitoracao_connections")
 
-const WS_URL = "wss://SEU_ENDPOINT.execute-api.us-east-1.amazonaws.com/dev"; // substituir
-const API_URL = "https://SEU_ENDPOINT.execute-api.us-east-1.amazonaws.com/prod/dados"; // substituir
+APIGW_ENDPOINT = "https://SEU_ENDPOINT.execute-api.us-east-1.amazonaws.com/dev"
+apigw = boto3.client("apigatewaymanagementapi", endpoint_url=APIGW_ENDPOINT)
 
-const Timer: React.FC = () => {
-  const [timers, setTimers] = useState<TimerData[]>([]);
-  const ws = useRef<WebSocket | null>(null);
+def lambda_handler(event, context):
+    route = event["requestContext"]["routeKey"]
+    connection_id = event["requestContext"]["connectionId"]
 
-  // Busca timers persistentes
-  useEffect(() => {
-    fetch(API_URL)
-      .then((res) => res.json())
-      .then((data) => setTimers(data))
-      .catch(console.error);
-  }, []);
+    if route == "$connect":
+        conn_table.put_item(Item={"connectionId": connection_id})
+        return {"statusCode": 200}
 
-  // Conexão WebSocket
-  useEffect(() => {
-    ws.current = new WebSocket(WS_URL);
+    if route == "$disconnect":
+        conn_table.delete_item(Key={"connectionId": connection_id})
+        return {"statusCode": 200}
 
-    ws.current.onmessage = (event) => {
-      const data = JSON.parse(event.data);
-      if (data.type === "TIMER_UPDATED") {
-        setTimers((prev) =>
-          prev.map((t) => (t.chamado === data.chamado ? { ...t, ...data } : t))
-        );
-      }
-    };
+    if route == "sendMessage":
+        body = json.loads(event["body"])
+        action = body["action"]
+        chamado = int(body["chamado"])
 
-    return () => ws.current?.close();
-  }, []);
+        item = acomp_table.get_item(Key={"chamado": chamado}).get("Item", {})
+        if not item:
+            return {"statusCode": 404, "body": "Chamado não encontrado"}
 
-  // Atualiza a interface a cada segundo
-  useEffect(() => {
-    const interval = setInterval(() => setTimers((prev) => [...prev]), 1000);
-    return () => clearInterval(interval);
-  }, []);
+        now = datetime.utcnow().replace(tzinfo=timezone.utc).isoformat()
+        duration = item.get("durationMinutes", 15)
 
-  const getRemaining = (timer: TimerData) => {
-    if (!timer.startedAt) return timer.timeRemaining ?? timer.durationMinutes * 60;
+        if action == "startTimer":
+            acomp_table.update_item(
+                Key={"chamado": chamado},
+                UpdateExpression="SET timerActive=:t, startedAt=:s",
+                ExpressionAttributeValues={":t": True, ":s": now}
+            )
+            item["timerActive"] = True
+            item["startedAt"] = now
+        elif action == "pauseTimer":
+            acomp_table.update_item(
+                Key={"chamado": chamado},
+                UpdateExpression="SET timerActive=:t",
+                ExpressionAttributeValues={":t": False}
+            )
+            item["timerActive"] = False
 
-    const startedAtDate = new Date(timer.startedAt);
-    if (isNaN(startedAtDate.getTime())) return timer.timeRemaining ?? timer.durationMinutes * 60;
+        broadcast = {
+            "type": "TIMER_UPDATED",
+            "chamado": chamado,
+            "timerActive": item["timerActive"],
+            "startedAt": item.get("startedAt", now),
+            "durationMinutes": duration
+        }
 
-    if (!timer.timerActive) return timer.timeRemaining ?? timer.durationMinutes * 60;
+        connections = conn_table.scan().get("Items", [])
+        for conn in connections:
+            try:
+                apigw.post_to_connection(
+                    Data=json.dumps(broadcast),
+                    ConnectionId=conn["connectionId"]
+                )
+            except apigw.exceptions.GoneException:
+                conn_table.delete_item(Key={"connectionId": conn["connectionId"]})
 
-    const elapsed = (new Date().getTime() - startedAtDate.getTime()) / 1000;
-    return Math.max(0, (timer.durationMinutes * 60) - elapsed);
-  };
+        return {"statusCode": 200, "body": json.dumps({"message": "OK"})}
 
-  const sendAction = (chamado: number, action: "startTimer" | "pauseTimer") => {
-    if (ws.current?.readyState === WebSocket.OPEN) {
-      ws.current.send(JSON.stringify({ action, chamado }));
-    }
-  };
-
-  return (
-    <div>
-      <h1>Painel de Alertas</h1>
-      {timers.map((t) => (
-        <div key={t.chamado} style={{ border: "1px solid gray", padding: 10, margin: 5 }}>
-          <p>Chamado: {t.chamado}</p>
-          <p>Status: {t.timerActive ? "Rodando" : "Pausado"}</p>
-          <p>
-            Tempo restante:{" "}
-            {`${Math.floor(getRemaining(t) / 60)
-              .toString()
-              .padStart(2, "0")}:${Math.floor(getRemaining(t) % 60)
-              .toString()
-              .padStart(2, "0")}`}
-          </p>
-          <button onClick={() => sendAction(t.chamado, "startTimer")}>Iniciar</button>
-          <button onClick={() => sendAction(t.chamado, "pauseTimer")}>Pausar</button>
-        </div>
-      ))}
-    </div>
-  );
-};
-
-export default Timer;
+    return {"statusCode": 400, "body": "Rota inválida"}
