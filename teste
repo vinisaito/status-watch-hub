@@ -1,138 +1,26 @@
-import boto3
-import json
-from datetime import datetime, timezone
-from decimal import Decimal
-
-# Conexão DynamoDB
-DDB = boto3.resource("dynamodb", region_name="us-east-1")
-ACOMP_TABLE = DDB.Table("painelmonitoracao_acompanhamento")  # Tabela de alertas
-CONN_TABLE = DDB.Table("painelmonitoracao_connections")       # Tabela de conexões WebSocket
-
-# API Gateway Management API (WebSocket)
-APIGW_ENDPOINT = "https://tgwtw1v4rg.execute-api.us-east-1.amazonaws.com/dev"  # Substitua pelo seu endpoint
-apigw = boto3.client("apigatewaymanagementapi", endpoint_url=APIGW_ENDPOINT)
-
-# Serialização Decimal
-def json_serial(obj):
-    if isinstance(obj, Decimal):
-        return int(obj) if obj % 1 == 0 else float(obj)
-    raise TypeError
-
-# Calcula tempo restante considerando elapsedSeconds
-def calculate_remaining(alerta):
-    duration = float(alerta.get("durationMinutes", 15))  # converter Decimal para float
-    timer_active = alerta.get("timerActive", False)
-    elapsed = float(alerta.get("elapsedSeconds", 0))
-    started_at = alerta.get("startedAt")
-
-    if timer_active and started_at:
-        try:
-            started_dt = datetime.fromisoformat(str(started_at).replace("Z", "+00:00"))
-            now = datetime.utcnow().replace(tzinfo=timezone.utc)
-            elapsed += (now - started_dt).total_seconds()
-        except Exception as e:
-            print(f"❌ Erro no cálculo de elapsed: {e}")
-
-    remaining = max(0, duration * 60 - elapsed)
-    return int(remaining), timer_active, elapsed
-
-# Lambda handler
-def lambda_handler(event, context):
-    route = event.get("requestContext", {}).get("routeKey")
-    connection_id = event.get("requestContext", {}).get("connectionId")
-
-    # ---------------- Connect
-    if route == "$connect":
-        CONN_TABLE.put_item(Item={"connectionId": connection_id})
-        print(f"✅ Conexão estabelecida: {connection_id}")
-        return {"statusCode": 200}
-
-    # ---------------- Disconnect
-    elif route == "$disconnect":
-        CONN_TABLE.delete_item(Key={"connectionId": connection_id})
-        print(f"❌ Conexão desconectada: {connection_id}")
-        return {"statusCode": 200}
-
-    # ---------------- Receber mensagem
-    elif route == "sendMessage":
-        body = json.loads(event.get("body", "{}"))
-        action = body.get("action")          # "startTimer" ou "pauseTimer"
-        chamado = body.get("chamado")        # id do chamado
-
-        if not chamado or not action:
-            return {"statusCode": 400, "body": "Chamado ou ação ausente"}
-
-        alerta_resp = ACOMP_TABLE.get_item(Key={"chamado": int(chamado)})
-        alerta = alerta_resp.get("Item")
-        if not alerta:
-            return {"statusCode": 404, "body": "Chamado não encontrado"}
-
-        now_iso = datetime.utcnow().replace(tzinfo=timezone.utc).isoformat()
-        remaining, timer_active, elapsed = calculate_remaining(alerta)
-
-        if action == "startTimer":
-            # Reinicia o startedAt mas mantém elapsed acumulado
-            ACOMP_TABLE.update_item(
-                Key={"chamado": int(chamado)},
-                UpdateExpression="SET timerActive=:t, startedAt=:s, elapsedSeconds=:e",
-                ExpressionAttributeValues={":t": True, ":s": now_iso, ":e": elapsed}
-            )
-            print(f"⏱ Timer iniciado para chamado {chamado} às {now_iso}")
-        elif action == "pauseTimer":
-            # Atualiza elapsed acumulado e desativa timer
-            ACOMP_TABLE.update_item(
-                Key={"chamado": int(chamado)},
-                UpdateExpression="SET timerActive=:t, elapsedSeconds=:e",
-                ExpressionAttributeValues={":t": False, ":e": elapsed}
-            )
-            print(f"⏸ Timer pausado para chamado {chamado}")
-        else:
-            return {"statusCode": 400, "body": "Ação inválida"}
-
-        # Busca estado atualizado
-        alerta_resp = ACOMP_TABLE.get_item(Key={"chamado": int(chamado)})
-        alerta = alerta_resp.get("Item")
-        remaining, timer_active, _ = calculate_remaining(alerta)
-
-        # Broadcast para todos os clientes conectados
-        connections = CONN_TABLE.scan().get("Items", [])
-        for conn in connections:
-            try:
-                apigw.post_to_connection(
-                    ConnectionId=conn["connectionId"],
-                    Data=json.dumps({
-                        "type": "TIMER_UPDATED",
-                        "chamado": alerta["chamado"],
-                        "timerActive": timer_active,
-                        "startedAt": alerta.get("startedAt"),
-                        "durationMinutes": alerta.get("durationMinutes", 15),
-                        "timeRemaining": remaining
-                    }, default=json_serial)
-                )
-            except apigw.exceptions.GoneException:
-                print(f"❌ Conexão ausente: {conn['connectionId']}")
-                CONN_TABLE.delete_item(Key={"connectionId": conn["connectionId"]})
-
-        return {"statusCode": 200, "body": json.dumps({"message": "ok"})}
-
-    # ---------------- GET estado atual (nova sessão)
-    elif route == "getState":
-        chamado = event.get("queryStringParameters", {}).get("chamado")
-        if not chamado:
-            return {"statusCode": 400, "body": "Chamado ausente"}
-
-        alerta_resp = ACOMP_TABLE.get_item(Key={"chamado": int(chamado)})
-        alerta = alerta_resp.get("Item")
-        if not alerta:
-            return {"statusCode": 404, "body": "Chamado não encontrado"}
-
-        remaining, timer_active, _ = calculate_remaining(alerta)
-        alerta["timeRemaining"] = remaining
-        alerta["timerActive"] = timer_active
-
-        print(f"📡 Estado retornado para chamado {chamado}: remaining={remaining}, timerActive={timer_active}")
-        return {"statusCode": 200, "body": json.dumps(alerta, default=json_serial)}
-
-    else:
-        print(f"❌ Rota não suportada: {route}")
-        return {"statusCode": 400, "body": "Rota não suportada"}
+{
+  "errorMessage": "Float types are not supported. Use Decimal types instead.",
+  "errorType": "TypeError",
+  "requestId": "849a55cc-0222-4b81-b193-6c25109a37c5",
+  "stackTrace": [
+    "  File \"/var/task/lambda_function.py\", line 75, in lambda_handler\n    ACOMP_TABLE.update_item(\n",
+    "  File \"/var/lang/lib/python3.11/site-packages/boto3/resources/factory.py\", line 581, in do_action\n    response = action(self, *args, **kwargs)\n",
+    "  File \"/var/lang/lib/python3.11/site-packages/boto3/resources/action.py\", line 88, in __call__\n    response = getattr(parent.meta.client, operation_name)(*args, **params)\n",
+    "  File \"/var/lang/lib/python3.11/site-packages/botocore/client.py\", line 602, in _api_call\n    return self._make_api_call(operation_name, kwargs)\n",
+    "  File \"/var/lang/lib/python3.11/site-packages/botocore/context.py\", line 123, in wrapper\n    return func(*args, **kwargs)\n",
+    "  File \"/var/lang/lib/python3.11/site-packages/botocore/client.py\", line 1019, in _make_api_call\n    api_params = self._emit_api_params(\n",
+    "  File \"/var/lang/lib/python3.11/site-packages/botocore/client.py\", line 1138, in _emit_api_params\n    self.meta.events.emit(\n",
+    "  File \"/var/lang/lib/python3.11/site-packages/botocore/hooks.py\", line 412, in emit\n    return self._emitter.emit(aliased_event_name, **kwargs)\n",
+    "  File \"/var/lang/lib/python3.11/site-packages/botocore/hooks.py\", line 256, in emit\n    return self._emit(event_name, kwargs)\n",
+    "  File \"/var/lang/lib/python3.11/site-packages/botocore/hooks.py\", line 239, in _emit\n    response = handler(**kwargs)\n",
+    "  File \"/var/lang/lib/python3.11/site-packages/boto3/dynamodb/transform.py\", line 217, in inject_attribute_value_input\n    self._transformer.transform(\n",
+    "  File \"/var/lang/lib/python3.11/site-packages/boto3/dynamodb/transform.py\", line 289, in transform\n    self._transform_parameters(model, params, transformation, target_shape)\n",
+    "  File \"/var/lang/lib/python3.11/site-packages/boto3/dynamodb/transform.py\", line 296, in _transform_parameters\n    getattr(self, f'_transform_{type_name}')(\n",
+    "  File \"/var/lang/lib/python3.11/site-packages/boto3/dynamodb/transform.py\", line 312, in _transform_structure\n    self._transform_parameters(\n",
+    "  File \"/var/lang/lib/python3.11/site-packages/boto3/dynamodb/transform.py\", line 296, in _transform_parameters\n    getattr(self, f'_transform_{type_name}')(\n",
+    "  File \"/var/lang/lib/python3.11/site-packages/boto3/dynamodb/transform.py\", line 326, in _transform_map\n    params[key] = transformation(value)\n",
+    "  File \"/var/lang/lib/python3.11/site-packages/boto3/dynamodb/types.py\", line 114, in serialize\n    dynamodb_type = self._get_dynamodb_type(value)\n",
+    "  File \"/var/lang/lib/python3.11/site-packages/boto3/dynamodb/types.py\", line 127, in _get_dynamodb_type\n    elif self._is_number(value):\n",
+    "  File \"/var/lang/lib/python3.11/site-packages/boto3/dynamodb/types.py\", line 171, in _is_number\n    raise TypeError(\n"
+  ]
+}
