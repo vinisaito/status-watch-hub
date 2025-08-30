@@ -1,3 +1,24 @@
-Timer.tsx:41 
- Mensagem não era JSON, ignorada: 
-ws.onmessage	@	Timer.tsx:41
+ws.onmessage = (event) => {
+  if (!event.data || event.data.trim() === "") {
+    console.warn("📭 Mensagem vazia recebida, ignorando.");
+    return;
+  }
+
+  try {
+    const data: MessageData = JSON.parse(event.data);
+    console.log("📩 Mensagem recebida:", data);
+
+    if (data.action === "timerStarted") {
+      timerStartRef.current = data.timerStart ?? null;
+      setChamadoId(data.chamado ?? null);
+    } else if (data.action === "statusUpdated") {
+      setStatus(data.status ?? "pendente");
+    } else if (data.action === "currentState") {
+      timerStartRef.current = data.timerStart ?? null;
+      setChamadoId(data.chamado ?? null);
+      setStatus(data.status ?? "pendente");
+    }
+  } catch (err) {
+    console.warn("⚠️ Mensagem não era JSON, ignorada:", event.data);
+  }
+};
