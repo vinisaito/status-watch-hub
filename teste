@@ -18,29 +18,23 @@ def json_serial(obj):
         return int(obj) if obj % 1 == 0 else float(obj)
     raise TypeError
 
-# Calcula tempo restante
-# Calcula tempo restante
+# Calcula tempo restante considerando elapsedSeconds
 def calculate_remaining(alerta):
-    started_at = alerta.get("startedAt")
     duration = float(alerta.get("durationMinutes", 15))  # converter Decimal para float
     timer_active = alerta.get("timerActive", False)
+    elapsed = float(alerta.get("elapsedSeconds", 0))
+    started_at = alerta.get("startedAt")
 
-    remaining = duration * 60  # valor padrão
-    try:
-        if started_at and timer_active:
-            # Substitui Z por +00:00 se necessário
+    if timer_active and started_at:
+        try:
             started_dt = datetime.fromisoformat(str(started_at).replace("Z", "+00:00"))
             now = datetime.utcnow().replace(tzinfo=timezone.utc)
-            elapsed = (now - started_dt).total_seconds()
-            remaining = max(0, duration * 60 - elapsed)
-            print(f"⏱ Cálculo remaining: elapsed={elapsed}, remaining={remaining}")
-        else:
-            print("⏱ Timer não ativo ou startedAt ausente")
-    except Exception as e:
-        print(f"❌ Erro no cálculo de remaining: {e}")
-        remaining = duration * 60
+            elapsed += (now - started_dt).total_seconds()
+        except Exception as e:
+            print(f"❌ Erro no cálculo de elapsed: {e}")
 
-    return int(remaining), timer_active
+    remaining = max(0, duration * 60 - elapsed)
+    return int(remaining), timer_active, elapsed
 
 # Lambda handler
 def lambda_handler(event, context):
@@ -68,27 +62,28 @@ def lambda_handler(event, context):
         if not chamado or not action:
             return {"statusCode": 400, "body": "Chamado ou ação ausente"}
 
-        # Pega o alerta atual
         alerta_resp = ACOMP_TABLE.get_item(Key={"chamado": int(chamado)})
         alerta = alerta_resp.get("Item")
         if not alerta:
             return {"statusCode": 404, "body": "Chamado não encontrado"}
 
         now_iso = datetime.utcnow().replace(tzinfo=timezone.utc).isoformat()
+        remaining, timer_active, elapsed = calculate_remaining(alerta)
 
-        # Atualiza timer no DynamoDB
         if action == "startTimer":
+            # Reinicia o startedAt mas mantém elapsed acumulado
             ACOMP_TABLE.update_item(
                 Key={"chamado": int(chamado)},
-                UpdateExpression="SET timerActive = :t, startedAt = :s",
-                ExpressionAttributeValues={":t": True, ":s": now_iso}
+                UpdateExpression="SET timerActive=:t, startedAt=:s, elapsedSeconds=:e",
+                ExpressionAttributeValues={":t": True, ":s": now_iso, ":e": elapsed}
             )
             print(f"⏱ Timer iniciado para chamado {chamado} às {now_iso}")
         elif action == "pauseTimer":
+            # Atualiza elapsed acumulado e desativa timer
             ACOMP_TABLE.update_item(
                 Key={"chamado": int(chamado)},
-                UpdateExpression="SET timerActive = :t",
-                ExpressionAttributeValues={":t": False}
+                UpdateExpression="SET timerActive=:t, elapsedSeconds=:e",
+                ExpressionAttributeValues={":t": False, ":e": elapsed}
             )
             print(f"⏸ Timer pausado para chamado {chamado}")
         else:
@@ -97,7 +92,7 @@ def lambda_handler(event, context):
         # Busca estado atualizado
         alerta_resp = ACOMP_TABLE.get_item(Key={"chamado": int(chamado)})
         alerta = alerta_resp.get("Item")
-        remaining, timer_active = calculate_remaining(alerta)
+        remaining, timer_active, _ = calculate_remaining(alerta)
 
         # Broadcast para todos os clientes conectados
         connections = CONN_TABLE.scan().get("Items", [])
@@ -131,7 +126,7 @@ def lambda_handler(event, context):
         if not alerta:
             return {"statusCode": 404, "body": "Chamado não encontrado"}
 
-        remaining, timer_active = calculate_remaining(alerta)
+        remaining, timer_active, _ = calculate_remaining(alerta)
         alerta["timeRemaining"] = remaining
         alerta["timerActive"] = timer_active
 
