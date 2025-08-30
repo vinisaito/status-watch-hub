@@ -1,2 +1,116 @@
-Type 'string' is not assignable to type 'WebSocket'.ts(2322)
-Timer.tsx(14, 3): The expected type comes from property 'ws' which is declared here on type 'IntrinsicAttributes & TimerProps'
+// Timer.tsx
+import React, { useEffect, useState, useRef } from "react";
+
+interface TimerProps {
+  chamado: number;
+  ws: WebSocket;
+  apiBaseUrl: string;
+}
+
+interface TimerData {
+  chamado: number;
+  startedAt: string | null;
+  durationMinutes: number;
+  timerActive: boolean;
+}
+
+const Timer: React.FC<TimerProps> = ({ chamado, ws, apiBaseUrl }) => {
+  const [timeRemaining, setTimeRemaining] = useState<number>(0);
+  const [timerActive, setTimerActive] = useState<boolean>(false);
+  const [duration, setDuration] = useState<number>(15);
+  const intervalRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Converte startedAt em segundos restantes
+  const calculateRemaining = (startedAt: string | null, durationMinutes: number) => {
+    if (!startedAt) return durationMinutes * 60;
+    const startedAtDate = new Date(startedAt);
+    const now = new Date();
+    const elapsed = (now.getTime() - startedAtDate.getTime()) / 1000;
+    const remaining = Math.max(durationMinutes * 60 - elapsed, 0);
+    return remaining;
+  };
+
+  // Atualiza o cronômetro a cada segundo
+  useEffect(() => {
+    if (timerActive) {
+      intervalRef.current = setInterval(() => {
+        setTimeRemaining(prev => Math.max(prev - 1, 0));
+      }, 1000);
+    } else if (intervalRef.current) {
+      clearInterval(intervalRef.current);
+      intervalRef.current = null;
+    }
+    return () => {
+      if (intervalRef.current) clearInterval(intervalRef.current);
+    };
+  }, [timerActive]);
+
+  // Busca o estado inicial do cronômetro da API
+  const fetchAlert = async () => {
+    try {
+      const res = await fetch(`${apiBaseUrl}/dados/${chamado}`);
+      if (!res.ok) throw new Error("Falha ao buscar alerta");
+      const data: TimerData = await res.json();
+      setTimerActive(data.timerActive);
+      setDuration(data.durationMinutes);
+      setTimeRemaining(calculateRemaining(data.startedAt, data.durationMinutes));
+    } catch (err) {
+      console.error("Erro ao buscar alerta:", err);
+    }
+  };
+
+  // WebSocket: recebe atualizações do cronômetro
+  useEffect(() => {
+    const handleMessage = (event: MessageEvent) => {
+      const msg = JSON.parse(event.data);
+      if (msg.chamado !== chamado) return;
+
+      if (msg.type === "TIMER_UPDATED" || msg.type === "updateTimer") {
+        setTimerActive(msg.timerActive);
+        setDuration(msg.durationMinutes || duration);
+        setTimeRemaining(calculateRemaining(msg.startedAt, msg.durationMinutes || duration));
+      }
+    };
+    ws.addEventListener("message", handleMessage);
+    return () => ws.removeEventListener("message", handleMessage);
+  }, [ws, chamado, duration]);
+
+  // Inicializa ao montar
+  useEffect(() => {
+    fetchAlert();
+  }, []);
+
+  const startTimer = () => {
+    ws.send(JSON.stringify({ action: "startTimer", chamado }));
+  };
+
+  const pauseTimer = () => {
+    ws.send(JSON.stringify({ action: "pauseTimer", chamado }));
+  };
+
+  const formatTime = (seconds: number) => {
+    const m = Math.floor(seconds / 60)
+      .toString()
+      .padStart(2, "0");
+    const s = Math.floor(seconds % 60)
+      .toString()
+      .padStart(2, "0");
+    return `${m}:${s}`;
+  };
+
+  return (
+    <div style={{ border: "1px solid #ccc", padding: "10px", margin: "10px" }}>
+      <h3>Chamado: {chamado}</h3>
+      <p>Status: {timerActive ? "Em andamento" : "Pausado"}</p>
+      <p>Tempo restante: {formatTime(timeRemaining)}</p>
+      <button onClick={startTimer} disabled={timerActive}>
+        Iniciar
+      </button>
+      <button onClick={pauseTimer} disabled={!timerActive}>
+        Pausar
+      </button>
+    </div>
+  );
+};
+
+export default Timer;
