@@ -1,31 +1,53 @@
+import json
+import boto3
+import os
+from datetime import datetime
+
+dynamodb = boto3.resource("dynamodb")
+connections_table = dynamodb.Table(os.environ["CONNECTIONS_TABLE"])
+chamados_table = dynamodb.Table(os.environ["CHAMADOS_TABLE"])
+
+apigw = boto3.client(
+    "apigatewaymanagementapi",
+    endpoint_url=os.environ["WS_ENDPOINT"]  # ex: https://xxxx.execute-api.us-east-1.amazonaws.com/dev
+)
+
+def lambda_handler(event, context):
+    route = event["requestContext"]["routeKey"]
+
+    if route == "$connect":
+        return on_connect(event)
+    elif route == "$disconnect":
+        return on_disconnect(event)
+    elif route == "startTimer":
+        return start_timer(event)
+    elif route == "updateStatus":
+        return update_status(event)
+    else:
+        return {"statusCode": 200, "body": "ok"}
+
+
 def on_connect(event):
     connection_id = event["requestContext"]["connectionId"]
+
+    # Salva conexão
     connections_table.put_item(
-        Item={
-            "connectionId": connection_id,
-            "connectedAt": int(datetime.utcnow().timestamp())
-        }
+        Item={"connectionId": connection_id, "connectedAt": int(datetime.utcnow().timestamp())}
     )
     print(f"Conexão registrada: {connection_id}")
 
-    # 🔹 Buscar estado atual dos chamados e enviar para o novo cliente
-    apigw = boto3.client(
-        "apigatewaymanagementapi",
-        endpoint_url=os.environ["WS_ENDPOINT"]
-    )
-
-    # Aqui pode ser todos os chamados ou só os que estão ativos
+    # 🔹 Envia estado atual de todos os chamados
     response = chamados_table.scan()
     for item in response.get("Items", []):
         try:
             apigw.post_to_connection(
+                ConnectionId=connection_id,
                 Data=json.dumps({
                     "action": "currentState",
                     "chamado": item["chamado"],
                     "status": item.get("status", "pendente"),
                     "timerStart": item.get("timerStart")
-                }),
-                ConnectionId=connection_id
+                })
             )
         except Exception as e:
             print(f"Erro ao enviar estado inicial: {e}")
@@ -33,13 +55,204 @@ def on_connect(event):
     return {"statusCode": 200, "body": "Connected"}
 
 
+def on_disconnect(event):
+    connection_id = event["requestContext"]["connectionId"]
+    connections_table.delete_item(Key={"connectionId": connection_id})
+    print(f"Conexão removida: {connection_id}")
+    return {"statusCode": 200, "body": "Disconnected"}
 
 
-if (data.action === "currentState" && data.chamado === chamado) {
-  if (data.timerStart) {
-    setTimerStart(data.timerStart);
-  }
-  if (data.status) {
-    setStatus(data.status);
-  }
-}
+def start_timer(event):
+    body = json.loads(event.get("body", "{}"))
+    chamado = int(body["chamado"])
+    timer_start = int(datetime.utcnow().timestamp())
+
+    # Atualiza DynamoDB
+    chamados_table.update_item(
+        Key={"chamado": chamado},
+        UpdateExpression="SET timerStart = :ts",
+        ExpressionAttributeValues={":ts": timer_start}
+    )
+
+    # Broadcast
+    broadcast({
+        "action": "timerStarted",
+        "chamado": chamado,
+        "timerStart": timer_start
+    })
+
+    return {"statusCode": 200, "body": "Timer iniciado"}
+
+
+def update_status(event):
+    body = json.loads(event.get("body", "{}"))
+    chamado = int(body["chamado"])
+    status = body["status"]
+
+    # Atualiza DynamoDB
+    chamados_table.update_item(
+        Key={"chamado": chamado},
+        UpdateExpression="SET #s = :st",
+        ExpressionAttributeNames={"#s": "status"},
+        ExpressionAttributeValues={":st": status}
+    )
+
+    # Broadcast
+    broadcast({
+        "action": "statusUpdated",
+        "chamado": chamado,
+        "status": status
+    })
+
+    return {"statusCode": 200, "body": "Status atualizado"}
+
+
+def broadcast(message: dict):
+    connections = connections_table.scan().get("Items", [])
+    data = json.dumps(message)
+
+    for conn in connections:
+        try:
+            apigw.post_to_connection(ConnectionId=conn["connectionId"], Data=data)
+        except Exception as e:
+            print(f"Erro ao enviar para {conn['connectionId']}: {e}")
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+import React, { useEffect, useRef, useState } from "react";
+
+type Props = {
+  wsUrl: string; // ex: wss://xxxx.execute-api.us-east-1.amazonaws.com/dev
+  chamado: number;
+};
+
+const Timer: React.FC<Props> = ({ wsUrl, chamado }) => {
+  const wsRef = useRef<WebSocket | null>(null);
+  const [connected, setConnected] = useState(false);
+  const [status, setStatus] = useState<string>("pendente");
+  const [timerStart, setTimerStart] = useState<number | null>(null);
+  const [elapsed, setElapsed] = useState<number>(0);
+
+  // Atualiza cronômetro a cada segundo
+  useEffect(() => {
+    let interval: NodeJS.Timer | null = null;
+    if (timerStart) {
+      interval = setInterval(() => {
+        setElapsed(Math.floor(Date.now() / 1000) - timerStart);
+      }, 1000);
+    } else {
+      setElapsed(0);
+    }
+    return () => {
+      if (interval) clearInterval(interval);
+    };
+  }, [timerStart]);
+
+  // Conectar WebSocket
+  useEffect(() => {
+    const ws = new WebSocket(wsUrl);
+    wsRef.current = ws;
+
+    ws.onopen = () => {
+      console.log("✅ WebSocket conectado");
+      setConnected(true);
+    };
+
+    ws.onmessage = (msg) => {
+      try {
+        const data = JSON.parse(msg.data.toString());
+        console.log("📩 Mensagem recebida:", data);
+
+        if (data.action === "timerStarted" && data.chamado === chamado) {
+          setTimerStart(data.timerStart);
+        }
+        if (data.action === "statusUpdated" && data.chamado === chamado) {
+          setStatus(data.status);
+        }
+        if (data.action === "currentState" && data.chamado === chamado) {
+          if (data.timerStart) setTimerStart(data.timerStart);
+          if (data.status) setStatus(data.status);
+        }
+      } catch (err) {
+        console.error("Erro ao parsear mensagem:", err);
+      }
+    };
+
+    ws.onclose = () => {
+      console.log("❌ WebSocket desconectado");
+      setConnected(false);
+    };
+
+    return () => {
+      ws.close();
+    };
+  }, [wsUrl, chamado]);
+
+  // Envia mensagens
+  const sendMessage = (msg: object) => {
+    if (wsRef.current && connected) {
+      wsRef.current.send(JSON.stringify(msg));
+    }
+  };
+
+  const startTimer = () => {
+    sendMessage({ action: "startTimer", chamado });
+  };
+
+  const updateStatus = (newStatus: string) => {
+    sendMessage({ action: "updateStatus", chamado, status: newStatus });
+  };
+
+  return (
+    <div className="p-4 rounded-xl shadow-lg bg-white border max-w-md mx-auto">
+      <h2 className="text-xl font-bold mb-2">Chamado #{chamado}</h2>
+      <p className="mb-1">
+        Status: <span className="font-semibold">{status}</span>
+      </p>
+      <p className="mb-4">
+        Tempo:{" "}
+        {timerStart ? (
+          <span className="font-mono">{elapsed}s</span>
+        ) : (
+          "Aguardando iniciar"
+        )}
+      </p>
+
+      <div className="flex gap-2">
+        <button
+          onClick={startTimer}
+          className="px-4 py-2 rounded-lg bg-green-500 text-white hover:bg-green-600"
+        >
+          Iniciar Timer
+        </button>
+        <button
+          onClick={() => updateStatus("acionado")}
+          className="px-4 py-2 rounded-lg bg-blue-500 text-white hover:bg-blue-600"
+        >
+          Acionar
+        </button>
+        <button
+          onClick={() => updateStatus("escalado")}
+          className="px-4 py-2 rounded-lg bg-red-500 text-white hover:bg-red-600"
+        >
+          Escalar
+        </button>
+      </div>
+    </div>
+  );
+};
+
+export default Timer;
+
