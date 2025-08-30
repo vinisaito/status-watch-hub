@@ -1,68 +1,225 @@
-import React, { useEffect, useState, useRef } from "react";
+// src/components/Timer.tsx
+import React, { useEffect, useRef, useState } from "react";
 
-const WS_URL = "wss://SEU_ENDPOINT.execute-api.us-east-1.amazonaws.com/dev";
-const API_URL = "https://SEU_ENDPOINT.execute-api.us-east-1.amazonaws.com/prod/dados";
+type RawItem = any;
 
-interface Timer {
+interface TimerData {
   chamado: number;
   startedAt: string | null;
   durationMinutes: number;
   timerActive: boolean;
+  // opcional: se backend enviar timeRemaining (quando pausado)
+  timeRemaining?: number;
 }
 
+const WS_URL = "wss://SEU_ENDPOINT.execute-api.us-east-1.amazonaws.com/dev"; // <<===== ajustar
+const API_URL = "https://SEU_ENDPOINT.execute-api.us-east-1.amazonaws.com/prod/dados"; // <<===== ajustar
+
 const Timer: React.FC = () => {
-  const [timers, setTimers] = useState<Timer[]>([]);
-  const ws = useRef<WebSocket | null>(null);
+  const [timers, setTimers] = useState<TimerData[]>([]);
+  const [wsConnected, setWsConnected] = useState(false);
+  const [now, setNow] = useState<number>(Date.now());
+  const wsRef = useRef<WebSocket | null>(null);
+  const reconnectRef = useRef<number>(0);
 
-  useEffect(() => {
-    fetch(API_URL)
-      .then((res) => res.json())
-      .then((data) => setTimers(data))
-      .catch(console.error);
-  }, []);
-
-  useEffect(() => {
-    ws.current = new WebSocket(WS_URL);
-
-    ws.current.onmessage = (e) => {
-      const msg = JSON.parse(e.data);
-      if (msg.type === "TIMER_UPDATED") {
-        setTimers((prev) =>
-          prev.map((t) => (t.chamado === msg.chamado ? { ...t, ...msg } : t))
-        );
-      }
+  // util: garante formato do item vindo do REST / WS
+  const normalize = (raw: RawItem): TimerData => {
+    const chamado = Number(raw.chamado);
+    return {
+      chamado: isNaN(chamado) ? -1 : chamado,
+      startedAt: raw.startedAt ?? null,
+      durationMinutes: Number(raw.durationMinutes ?? 15) || 15,
+      timerActive: !!raw.timerActive,
+      timeRemaining:
+        raw.timeRemaining !== undefined ? Number(raw.timeRemaining) : undefined,
     };
-
-    return () => ws.current?.close();
-  }, []);
-
-  const sendAction = (chamado: number, action: "startTimer" | "pauseTimer") => {
-    ws.current?.send(JSON.stringify({ action, chamado }));
   };
 
-  const getRemaining = (timer: Timer) => {
-    if (!timer.startedAt) return timer.durationMinutes * 60;
-    const started = new Date(timer.startedAt).getTime();
-    const now = Date.now();
-    const elapsed = (now - started) / 1000;
-    return Math.max(0, timer.durationMinutes * 60 - elapsed);
+  // fetch inicial (REST) - torna tolerante a formatos inesperados
+  useEffect(() => {
+    async function load() {
+      try {
+        console.log("[Timer] fetch inicial ->", API_URL);
+        const res = await fetch(API_URL, { cache: "no-store" });
+        const json = await res.json();
+        console.log("[Timer] resposta REST bruta:", json);
+
+        const arr = Array.isArray(json) ? json : json.Items ?? json.data ?? [];
+        const normalized: TimerData[] = (arr || []).map(normalize).filter(t => t.chamado !== -1);
+        setTimers(normalized);
+        console.log("[Timer] timers setados:", normalized.length);
+      } catch (err) {
+        console.error("[Timer] erro ao buscar /dados:", err);
+      }
+    }
+    load();
+  }, []);
+
+  // conecta WebSocket (com reconexão simples)
+  useEffect(() => {
+    function connect() {
+      console.log("[Timer] conectando WS ->", WS_URL);
+      const ws = new WebSocket(WS_URL);
+      wsRef.current = ws;
+
+      ws.onopen = () => {
+        console.log("[Timer] WS aberto");
+        setWsConnected(true);
+        reconnectRef.current = 0;
+      };
+
+      ws.onmessage = (ev) => {
+        try {
+          const data = JSON.parse(ev.data);
+          console.log("[Timer] MSG recebida do WS:", data);
+
+          if (data.type === "TIMER_UPDATED") {
+            // garante chamado numérico
+            const chamadoNum = Number(data.chamado);
+            if (isNaN(chamadoNum)) {
+              console.warn("[Timer] TIMER_UPDATED com chamado inválido:", data.chamado);
+              return;
+            }
+
+            const incoming = normalize({
+              chamado: chamadoNum,
+              startedAt: data.startedAt ?? null,
+              durationMinutes: data.durationMinutes ?? 15,
+              timerActive: data.timerActive ?? false,
+              timeRemaining: data.timeRemaining,
+            });
+
+            // atualiza ou insere (sem duplicar)
+            setTimers(prev => {
+              const idx = prev.findIndex(t => t.chamado === incoming.chamado);
+              if (idx >= 0) {
+                const copy = [...prev];
+                copy[idx] = { ...copy[idx], ...incoming };
+                return copy;
+              } else {
+                return [...prev, incoming];
+              }
+            });
+          } else {
+            console.log("[Timer] Mensagem WS não tratada (type):", data.type ?? data);
+          }
+        } catch (err) {
+          console.error("[Timer] erro parsing WS message:", err, ev.data);
+        }
+      };
+
+      ws.onerror = (err) => {
+        console.error("[Timer] WS erro:", err);
+      };
+
+      ws.onclose = (ev) => {
+        console.warn("[Timer] WS fechado", ev.reason, "code", ev.code);
+        setWsConnected(false);
+        // reconectar exponencial simples
+        const tries = reconnectRef.current++;
+        const backoff = Math.min(30000, 1000 * Math.pow(2, Math.min(6, tries)));
+        console.log("[Timer] tentando reconectar em", backoff, "ms");
+        setTimeout(connect, backoff);
+      };
+    }
+
+    connect();
+    return () => {
+      wsRef.current?.close();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // rodar uma vez
+
+  // tick para re-render a cada segundo
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, []);
+
+  // cálculo seguro do tempo restante
+  const getRemaining = (t: TimerData) => {
+    const duration = Number(t.durationMinutes ?? 15) || 15;
+
+    // se backend forneceu timeRemaining (ex: quando pausou), usa isso quando timer não ativo
+    if (!t.timerActive && typeof t.timeRemaining === "number") {
+      return Math.max(0, Math.floor(t.timeRemaining));
+    }
+
+    if (!t.startedAt) return duration * 60;
+
+    const s = new Date(t.startedAt).getTime();
+    if (isNaN(s)) return duration * 60;
+
+    const elapsed = (now - s) / 1000;
+    const remaining = Math.max(0, duration * 60 - elapsed);
+    return Math.floor(remaining);
+  };
+
+  const format = (sec: number) => {
+    const m = Math.floor(sec / 60).toString().padStart(2, "0");
+    const s = Math.floor(sec % 60).toString().padStart(2, "0");
+    return `${m}:${s}`;
+  };
+
+  // envia ação para backend via WS
+  const sendAction = (chamado: number, action: "startTimer" | "pauseTimer") => {
+    if (!wsRef.current) {
+      console.warn("[Timer] WS nulo. Não foi possível enviar.", { action, chamado });
+      alert("WebSocket não inicializado.");
+      return;
+    }
+    if (wsRef.current.readyState !== WebSocket.OPEN) {
+      console.warn("[Timer] WS não aberto. Estado:", wsRef.current.readyState);
+      alert("WebSocket não está conectado.");
+      return;
+    }
+    const payload = { action, chamado };
+    try {
+      wsRef.current.send(JSON.stringify(payload));
+      console.log("[Timer] enviado via WS:", payload);
+    } catch (err) {
+      console.error("[Timer] erro ao enviar via WS:", err);
+    }
   };
 
   return (
-    <div>
-      <h1>Painel</h1>
-      {timers.map((t) => (
-        <div key={t.chamado} style={{ border: "1px solid black", padding: 10 }}>
-          <p>Chamado: {t.chamado}</p>
-          <p>Status: {t.timerActive ? "Rodando" : "Pausado"}</p>
-          <p>
-            Tempo restante:{" "}
-            {new Date(getRemaining(t) * 1000).toISOString().substr(14, 5)}
-          </p>
-          <button onClick={() => sendAction(t.chamado, "startTimer")}>Iniciar</button>
-          <button onClick={() => sendAction(t.chamado, "pauseTimer")}>Pausar</button>
-        </div>
-      ))}
+    <div style={{ padding: 12 }}>
+      <h2>Painel de Alertas</h2>
+      <div style={{ marginBottom: 8 }}>
+        <strong>WebSocket:</strong>{" "}
+        <span style={{ color: wsConnected ? "green" : "red" }}>
+          {wsConnected ? "conectado" : "desconectado"}
+        </span>
+      </div>
+
+      {timers.length === 0 ? (
+        <div>Carregando alertas...</div>
+      ) : (
+        timers
+          .slice()
+          .sort((a, b) => a.chamado - b.chamado)
+          .map((t) => {
+            const rem = getRemaining(t);
+            return (
+              <div key={t.chamado} style={{ border: "1px solid #ddd", padding: 10, marginBottom: 8 }}>
+                <div><strong>Chamado:</strong> {t.chamado}</div>
+                <div><strong>Status:</strong> {t.timerActive ? "Rodando" : "Pausado"}</div>
+                <div>
+                  <strong>Tempo restante:</strong> {format(rem)}
+                </div>
+                <div style={{ marginTop: 8 }}>
+                  <button onClick={() => sendAction(t.chamado, "startTimer")} style={{ marginRight: 8 }}>
+                    Iniciar
+                  </button>
+                  <button onClick={() => sendAction(t.chamado, "pauseTimer")}>Pausar</button>
+                </div>
+                <small style={{ display: "block", marginTop: 8, color: "#666" }}>
+                  startedAt: {String(t.startedAt)} • duration: {t.durationMinutes} min • timeRemaining (persistido): {t.timeRemaining ?? "—"}
+                </small>
+              </div>
+            );
+          })
+      )}
     </div>
   );
 };
