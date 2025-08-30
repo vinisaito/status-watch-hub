@@ -1,15 +1,12 @@
-// App.jsx
+// Timer.jsx
 import React, { useEffect, useState, useRef } from "react";
 
 const WS_URL = "wss://cn8i8z6f81.execute-api.us-east-1.amazonaws.com/prod";
 const API_URL = "https://cn8i8z6f81.execute-api.us-east-1.amazonaws.com/prod";
 
-function App() {
+function Timer({ chamados = [101, 102, 103] }) {
   const [timers, setTimers] = useState({});
   const ws = useRef(null);
-
-  // Lista de chamados que queremos monitorar
-  const chamados = [101, 102, 103]; // substitua pelos seus chamados reais
 
   // Função para buscar estado atual via REST
   const fetchInitialTimers = async () => {
@@ -58,6 +55,28 @@ function App() {
     return () => {
       ws.current.close();
     };
+  }, []);
+
+  // Decrementa timers localmente a cada segundo
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setTimers((prev) => {
+        const updated = {};
+        Object.entries(prev).forEach(([chamado, timer]) => {
+          if (timer.timerActive && timer.timeRemaining > 0) {
+            updated[chamado] = {
+              ...timer,
+              timeRemaining: timer.timeRemaining - 1,
+            };
+          } else {
+            updated[chamado] = timer;
+          }
+        });
+        return updated;
+      });
+    }, 1000);
+
+    return () => clearInterval(interval);
   }, []);
 
   const sendAction = (chamado, action) => {
@@ -109,4 +128,4 @@ function App() {
   );
 }
 
-export default App;
+export default Timer;
