@@ -1,5 +1,160 @@
-aws lambda add-permission \
-  --function-name Painelteste_acionamentos \
-  --statement-id websocket-access \
-  --action lambda:InvokeFunction \
-  --principal apigateway.amazonaws.com
+import boto3
+import json
+from datetime import datetime, timezone
+from decimal import Decimal
+
+# DynamoDB
+DDB = boto3.resource("dynamodb", region_name="us-east-1")
+ACOMP_TABLE = DDB.Table("painelmonitoracao_acompanhamento")
+CONN_TABLE = DDB.Table("painelmonitoracao_connections")
+
+# API Gateway Management API (WebSocket)
+APIGW_ENDPOINT = "https://cn8i8z6f81.execute-api.us-east-1.amazonaws.com/prod"
+apigw = boto3.client("apigatewaymanagementapi", endpoint_url=APIGW_ENDPOINT)
+
+# Serialização Decimal
+def json_serial(obj):
+    if isinstance(obj, Decimal):
+        return int(obj) if obj % 1 == 0 else float(obj)
+    raise TypeError
+
+def to_decimal(value):
+    return Decimal(str(value))
+
+# Cálculo do tempo restante
+def calculate_remaining(alerta):
+    try:
+        duration = Decimal(str(alerta.get("durationMinutes", 15)))
+        timer_active = alerta.get("timerActive", False)
+        elapsed = Decimal(str(alerta.get("elapsedSeconds", 0)))
+        started_at = alerta.get("startedAt")
+
+        print(f"🔍 calculate_remaining(): duration={duration}, timer_active={timer_active}, elapsed={elapsed}, started_at={started_at}")
+
+        if timer_active and started_at:
+            started_dt = datetime.fromisoformat(str(started_at).replace("Z", "+00:00"))
+            now = datetime.utcnow().replace(tzinfo=timezone.utc)
+            elapsed += Decimal(str((now - started_dt).total_seconds()))
+            print(f"⏱️ Tempo decorrido atualizado: {elapsed}")
+
+        remaining = max(0, float(duration * 60 - elapsed))
+        print(f"⏳ Tempo restante: {remaining}")
+        return int(remaining), timer_active, elapsed
+    except Exception as e:
+        print(f"❌ Erro em calculate_remaining: {e}")
+        return 0, False, Decimal(0)
+
+def lambda_handler(event, context):
+    print("📥 Evento recebido:", json.dumps(event))
+    route = event.get("requestContext", {}).get("routeKey")
+    connection_id = event.get("requestContext", {}).get("connectionId")
+
+    if route == "$connect":
+        print(f"🔌 Nova conexão: {connection_id}")
+        CONN_TABLE.put_item(Item={"connectionId": connection_id})
+        return {"statusCode": 200}
+
+    elif route == "$disconnect":
+        print(f"🔌 Desconectando: {connection_id}")
+        CONN_TABLE.delete_item(Key={"connectionId": connection_id})
+        return {"statusCode": 200}
+
+    elif route == "sendMessage":
+        print("📨 Mensagem recebida pelo WS")
+        body = json.loads(event.get("body", "{}"))
+        print("📦 Conteúdo do body:", body)
+        action = body.get("action")
+        chamado = body.get("chamado")
+
+        if not chamado or not action:
+            print("⚠️ Falta 'chamado' ou 'action'")
+            return {"statusCode": 400, "body": "Chamado ou ação ausente"}
+
+        # Busca chamado
+        alerta_resp = ACOMP_TABLE.get_item(Key={"chamado": int(chamado)})
+        alerta = alerta_resp.get("Item")
+        print(f"🔎 Alerta encontrado: {alerta}")
+        if not alerta:
+            print("❌ Chamado não encontrado")
+            return {"statusCode": 404, "body": "Chamado não encontrado"}
+
+        now_iso = datetime.utcnow().replace(tzinfo=timezone.utc).isoformat()
+        remaining, timer_active, elapsed = calculate_remaining(alerta)
+        print(f"📊 Estado antes da ação: remaining={remaining}, timer_active={timer_active}, elapsed={elapsed}")
+
+        # Ações
+        if action == "startTimer":
+            print("▶️ Iniciando timer")
+            ACOMP_TABLE.update_item(
+                Key={"chamado": int(chamado)},
+                UpdateExpression="SET timerActive=:t, startedAt=:s, elapsedSeconds=:e",
+                ExpressionAttributeValues={
+                    ":t": True,
+                    ":s": now_iso,
+                    ":e": to_decimal(elapsed)
+                }
+            )
+        elif action == "pauseTimer":
+            print("⏸️ Pausando timer")
+            ACOMP_TABLE.update_item(
+                Key={"chamado": int(chamado)},
+                UpdateExpression="SET timerActive=:t, elapsedSeconds=:e",
+                ExpressionAttributeValues={
+                    ":t": False,
+                    ":e": to_decimal(elapsed)
+                }
+            )
+        else:
+            print("⚠️ Ação inválida")
+            return {"statusCode": 400, "body": "Ação inválida"}
+
+        # Atualiza alerta para broadcast
+        alerta_resp = ACOMP_TABLE.get_item(Key={"chamado": int(chamado)})
+        alerta = alerta_resp.get("Item")
+        print(f"📦 Alerta atualizado: {alerta}")
+        remaining, timer_active, _ = calculate_remaining(alerta)
+
+        # Broadcast
+        connections = CONN_TABLE.scan().get("Items", [])
+        print(f"📡 Enviando atualização para {len(connections)} conexões")
+        for conn in connections:
+            try:
+                apigw.post_to_connection(
+                    ConnectionId=conn["connectionId"],
+                    Data=json.dumps({
+                        "type": "TIMER_UPDATED",
+                        "chamado": alerta["chamado"],
+                        "timerActive": timer_active,
+                        "startedAt": alerta.get("startedAt"),
+                        "durationMinutes": alerta.get("durationMinutes", 15),
+                        "timeRemaining": remaining
+                    }, default=json_serial)
+                )
+                print(f"✅ Mensagem enviada para {conn['connectionId']}")
+            except apigw.exceptions.GoneException:
+                print(f"⚠️ Conexão {conn['connectionId']} não existe mais, removendo")
+                CONN_TABLE.delete_item(Key={"connectionId": conn["connectionId"]})
+
+        return {"statusCode": 200, "body": json.dumps({"message": "ok"})}
+
+    elif route == "getState":
+        chamado = event.get("queryStringParameters", {}).get("chamado")
+        print(f"🌐 Requisição getState para chamado: {chamado}")
+        if not chamado:
+            return {"statusCode": 400, "body": "Chamado ausente"}
+
+        alerta_resp = ACOMP_TABLE.get_item(Key={"chamado": int(chamado)})
+        alerta = alerta_resp.get("Item")
+        print(f"🔍 Estado encontrado: {alerta}")
+        if not alerta:
+            return {"statusCode": 404, "body": "Chamado não encontrado"}
+
+        remaining, timer_active, _ = calculate_remaining(alerta)
+        alerta["timeRemaining"] = remaining
+        alerta["timerActive"] = timer_active
+
+        return {"statusCode": 200, "body": json.dumps(alerta, default=json_serial)}
+
+    else:
+        print(f"⚠️ Rota {route} não suportada")
+        return {"statusCode": 400, "body": "Rota não suportada"}
