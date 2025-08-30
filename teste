@@ -18,21 +18,25 @@ def json_serial(obj):
         return int(obj) if obj % 1 == 0 else float(obj)
     raise TypeError
 
-# Calcula tempo restante do cronômetro
+# Calcula tempo restante
 def calculate_remaining(alerta):
     started_at = alerta.get("startedAt")
     duration = alerta.get("durationMinutes", 15)
     timer_active = alerta.get("timerActive", False)
 
-    if started_at and timer_active:
-        try:
+    remaining = duration * 60  # valor padrão
+    try:
+        if started_at and timer_active:
+            # Substitui Z por +00:00 se necessário
             started_dt = datetime.fromisoformat(started_at.replace("Z", "+00:00"))
             now = datetime.utcnow().replace(tzinfo=timezone.utc)
             elapsed = (now - started_dt).total_seconds()
             remaining = max(0, duration * 60 - elapsed)
-        except Exception:
-            remaining = duration * 60
-    else:
+            print(f"⏱ Cálculo remaining: elapsed={elapsed}, remaining={remaining}")
+        else:
+            print("⏱ Timer não ativo ou startedAt ausente")
+    except Exception as e:
+        print(f"❌ Erro no cálculo de remaining: {e}")
         remaining = duration * 60
 
     return int(remaining), timer_active
@@ -45,14 +49,16 @@ def lambda_handler(event, context):
     # ---------------- Connect
     if route == "$connect":
         CONN_TABLE.put_item(Item={"connectionId": connection_id})
+        print(f"✅ Conexão estabelecida: {connection_id}")
         return {"statusCode": 200}
 
     # ---------------- Disconnect
     elif route == "$disconnect":
         CONN_TABLE.delete_item(Key={"connectionId": connection_id})
+        print(f"❌ Conexão desconectada: {connection_id}")
         return {"statusCode": 200}
 
-    # ---------------- Receber mensagem do front-end
+    # ---------------- Receber mensagem
     elif route == "sendMessage":
         body = json.loads(event.get("body", "{}"))
         action = body.get("action")          # "startTimer" ou "pauseTimer"
@@ -76,12 +82,14 @@ def lambda_handler(event, context):
                 UpdateExpression="SET timerActive = :t, startedAt = :s",
                 ExpressionAttributeValues={":t": True, ":s": now_iso}
             )
+            print(f"⏱ Timer iniciado para chamado {chamado} às {now_iso}")
         elif action == "pauseTimer":
             ACOMP_TABLE.update_item(
                 Key={"chamado": int(chamado)},
                 UpdateExpression="SET timerActive = :t",
                 ExpressionAttributeValues={":t": False}
             )
+            print(f"⏸ Timer pausado para chamado {chamado}")
         else:
             return {"statusCode": 400, "body": "Ação inválida"}
 
@@ -106,7 +114,7 @@ def lambda_handler(event, context):
                     }, default=json_serial)
                 )
             except apigw.exceptions.GoneException:
-                # Remove conexões inválidas
+                print(f"❌ Conexão ausente: {conn['connectionId']}")
                 CONN_TABLE.delete_item(Key={"connectionId": conn["connectionId"]})
 
         return {"statusCode": 200, "body": json.dumps({"message": "ok"})}
@@ -126,7 +134,9 @@ def lambda_handler(event, context):
         alerta["timeRemaining"] = remaining
         alerta["timerActive"] = timer_active
 
+        print(f"📡 Estado retornado para chamado {chamado}: remaining={remaining}, timerActive={timer_active}")
         return {"statusCode": 200, "body": json.dumps(alerta, default=json_serial)}
 
     else:
+        print(f"❌ Rota não suportada: {route}")
         return {"statusCode": 400, "body": "Rota não suportada"}
