@@ -143,5 +143,8 @@ def broadcast(message):
                 ConnectionId=conn["connectionId"]
             )
         except Exception as e:
-            print(f"Erro ao enviar para {conn
+            print(f"Erro ao enviar para {conn['connectionId']}: {e}")
+            # Remove conexões quebradas
+            connections_table.delete_item(Key={"connectionId": conn["connectionId"]})
 
+    return {"statusCode": 200, "body": "Mensagem enviada"}
