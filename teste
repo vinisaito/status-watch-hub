@@ -18,7 +18,26 @@ def json_serial(obj):
         return int(obj) if obj % 1 == 0 else float(obj)
     raise TypeError
 
-# Função Lambda
+# Calcula tempo restante
+def calculate_remaining(alerta):
+    started_at = alerta.get("startedAt")
+    duration = alerta.get("durationMinutes", 15)
+    timer_active = alerta.get("timerActive", False)
+
+    if started_at:
+        try:
+            started_dt = datetime.fromisoformat(started_at.replace("Z", "+00:00"))
+            now = datetime.utcnow().replace(tzinfo=timezone.utc)
+            elapsed = (now - started_dt).total_seconds()
+            remaining = max(0, duration * 60 - elapsed)
+        except Exception:
+            remaining = duration * 60
+    else:
+        remaining = duration * 60
+
+    return int(remaining), timer_active
+
+# Lambda handler
 def lambda_handler(event, context):
     route = event.get("requestContext", {}).get("routeKey")
     connection_id = event.get("requestContext", {}).get("connectionId")
@@ -45,34 +64,31 @@ def lambda_handler(event, context):
         # Pega o alerta atual
         alerta_resp = ACOMP_TABLE.get_item(Key={"chamado": int(chamado)})
         alerta = alerta_resp.get("Item")
-
         if not alerta:
             return {"statusCode": 404, "body": "Chamado não encontrado"}
 
         now_iso = datetime.utcnow().replace(tzinfo=timezone.utc).isoformat()
 
-        update_expr = ""
-        expr_values = {}
-
+        # Atualiza timer no DynamoDB
         if action == "startTimer":
-            update_expr = "SET timerActive = :t, startedAt = :s"
-            expr_values = {":t": True, ":s": now_iso}
+            ACOMP_TABLE.update_item(
+                Key={"chamado": int(chamado)},
+                UpdateExpression="SET timerActive = :t, startedAt = :s",
+                ExpressionAttributeValues={":t": True, ":s": now_iso}
+            )
         elif action == "pauseTimer":
-            update_expr = "SET timerActive = :t"
-            expr_values = {":t": False}
+            ACOMP_TABLE.update_item(
+                Key={"chamado": int(chamado)},
+                UpdateExpression="SET timerActive = :t",
+                ExpressionAttributeValues={":t": False}
+            )
         else:
             return {"statusCode": 400, "body": "Ação inválida"}
-
-        # Atualiza DynamoDB
-        ACOMP_TABLE.update_item(
-            Key={"chamado": int(chamado)},
-            UpdateExpression=update_expr,
-            ExpressionAttributeValues=expr_values
-        )
 
         # Busca estado atualizado
         alerta_resp = ACOMP_TABLE.get_item(Key={"chamado": int(chamado)})
         alerta = alerta_resp.get("Item")
+        remaining, timer_active = calculate_remaining(alerta)
 
         # Broadcast para todos os clientes conectados
         connections = CONN_TABLE.scan().get("Items", [])
@@ -83,9 +99,10 @@ def lambda_handler(event, context):
                     Data=json.dumps({
                         "type": "TIMER_UPDATED",
                         "chamado": alerta["chamado"],
-                        "timerActive": alerta.get("timerActive", False),
+                        "timerActive": timer_active,
                         "startedAt": alerta.get("startedAt"),
-                        "durationMinutes": alerta.get("durationMinutes", 15)
+                        "durationMinutes": alerta.get("durationMinutes", 15),
+                        "timeRemaining": remaining
                     }, default=json_serial)
                 )
             except apigw.exceptions.GoneException:
@@ -103,6 +120,10 @@ def lambda_handler(event, context):
         alerta = alerta_resp.get("Item")
         if not alerta:
             return {"statusCode": 404, "body": "Chamado não encontrado"}
+
+        remaining, timer_active = calculate_remaining(alerta)
+        alerta["timeRemaining"] = remaining
+        alerta["timerActive"] = timer_active
 
         return {"statusCode": 200, "body": json.dumps(alerta, default=json_serial)}
 
