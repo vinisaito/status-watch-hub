@@ -1,16 +1,3 @@
-    for item in response.get("Items", []):
-        try:
-            apigw.post_to_connection(
-                Data=to_json({
-                    "action": "currentState",
-                    "chamado": int(item["chamado"]),
-                    "status": str(item.get("status", "pendente")),
-                    "timerStart": int(item["timerStart"]) if "timerStart" in item else None
-                }),
-                ConnectionId=connection_id
-            )
-        except apigw.exceptions.GoneException:
-            print(f"[WARN] Conexão {connection_id} está morta, removendo.")
-            connections_table.delete_item(Key={"connectionId": connection_id})
-        except Exception as e:
-            print(f"Erro ao enviar estado inicial para {connection_id}: {e}")
+Timer.tsx:56  Erro ao parsear mensagem: SyntaxError: Unexpected token 'M', "Mensagem enviada" is not valid JSON
+    at JSON.parse (<anonymous>)
+    at ws.onmessage (Timer.tsx:42:27)
