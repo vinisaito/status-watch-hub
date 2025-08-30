@@ -1,109 +1,14 @@
-// Timer.tsx
-import React, { useEffect, useState } from "react";
-
-interface Alert {
-  chamado: number;
-  timerActive: boolean;
-  startedAt: string | null;
-  durationMinutes: number;
-}
-
-interface TimerProps {
-  chamado: number;
-  apiBaseUrl: string; // Ex: https://f6ffk8e9fe.execute-api.us-east-1.amazonaws.com/prod
-  wsUrl: string;      // Ex: wss://tgwtw1v4rg.execute-api.us-east-1.amazonaws.com/dev
-}
-
-const Timer: React.FC<TimerProps> = ({ chamado, apiBaseUrl, wsUrl }) => {
-  const [alert, setAlert] = useState<Alert | null>(null);
-  const [timeRemaining, setTimeRemaining] = useState<number>(0);
-  const [ws, setWs] = useState<WebSocket | null>(null);
-
-  // 1️⃣ Busca estado inicial
-  useEffect(() => {
-    const fetchAlert = async () => {
-      try {
-        const res = await fetch(`${apiBaseUrl}/dados/${chamado}`);
-        if (!res.ok) throw new Error("Falha ao buscar alerta");
-        const data = await res.json();
-        setAlert({
-          chamado: data.chamado,
-          timerActive: data.timerActive,
-          startedAt: data.startedAt,
-          durationMinutes: data.durationMinutes
-        });
-      } catch (err) {
-        console.error("Erro ao buscar alerta:", err);
-      }
-    };
-    fetchAlert();
-  }, [apiBaseUrl, chamado]);
-
-  // 2️⃣ Calcula timeRemaining
-  useEffect(() => {
-    let interval: NodeJS.Timer;
-    if (alert && alert.startedAt) {
-      interval = setInterval(() => {
-        const startedAtDate = new Date(alert.startedAt!);
-        const elapsed = (Date.now() - startedAtDate.getTime()) / 1000; // segundos
-        const remaining = Math.max(0, alert.durationMinutes * 60 - elapsed);
-        setTimeRemaining(remaining);
-      }, 1000);
-    } else {
-      setTimeRemaining(alert?.durationMinutes ? alert.durationMinutes * 60 : 0);
-    }
-    return () => clearInterval(interval);
-  }, [alert]);
-
-  // 3️⃣ Conecta WebSocket
-  useEffect(() => {
-    const socket = new WebSocket(wsUrl);
-    setWs(socket);
-
-    socket.onopen = () => console.log("✅ WebSocket conectado");
-
-    socket.onmessage = (event) => {
-      const msg = JSON.parse(event.data);
-      if (msg.chamado === chamado && msg.type === "updateTimer") {
-        setAlert(prev => ({
-          ...prev!,
-          timerActive: msg.timerActive,
-          startedAt: msg.startedAt || prev!.startedAt
-        }));
-      }
-    };
-
-    socket.onclose = () => console.log("❌ WebSocket desconectado");
-
-    return () => socket.close();
-  }, [wsUrl, chamado]);
-
-  // 4️⃣ Start / Pause
-  const sendAction = (action: "startTimer" | "pauseTimer") => {
-    if (!ws || ws.readyState !== WebSocket.OPEN) return;
-    ws.send(JSON.stringify({ action, chamado }));
-  };
-
-  const formatTime = (seconds: number) => {
-    const m = Math.floor(seconds / 60).toString().padStart(2, "0");
-    const s = Math.floor(seconds % 60).toString().padStart(2, "0");
-    return `${m}:${s}`;
-  };
-
-  if (!alert) return <div>Carregando alerta...</div>;
-
-  return (
-    <div>
-      <h2>Painel de Alertas</h2>
-      <div>
-        <p>Chamado: {alert.chamado}</p>
-        <p>Status do cronômetro: {alert.timerActive ? "Ativo" : "Pausado"}</p>
-        <p>Tempo restante: {formatTime(timeRemaining)}</p>
-        <button onClick={() => sendAction("startTimer")}>Iniciar</button>
-        <button onClick={() => sendAction("pauseTimer")}>Pausar</button>
-      </div>
-    </div>
-  );
-};
-
-export default Timer;
+useEffect(() => {
+  let interval: number; // ⬅️ usar number, não NodeJS.Timer
+  if (alert && alert.startedAt) {
+    interval = window.setInterval(() => {  // ⬅️ usar window.setInterval
+      const startedAtDate = new Date(alert.startedAt!);
+      const elapsed = (Date.now() - startedAtDate.getTime()) / 1000; // segundos
+      const remaining = Math.max(0, alert.durationMinutes * 60 - elapsed);
+      setTimeRemaining(remaining);
+    }, 1000);
+  } else {
+    setTimeRemaining(alert?.durationMinutes ? alert.durationMinutes * 60 : 0);
+  }
+  return () => clearInterval(interval);
+}, [alert]);
