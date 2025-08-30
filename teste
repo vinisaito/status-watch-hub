@@ -1,4 +1,116 @@
-{
-  "action": "startTimer",
-  "chamado": "10418007"
+import React, { useEffect, useState, useRef } from "react";
+
+interface TimerData {
+  chamado: number;
+  timerActive: boolean;
+  startedAt?: string;
+  durationMinutes: number;
+  timeRemaining: number;
 }
+
+const WS_URL = "wss://<seu-api-id>.execute-api.us-east-1.amazonaws.com/dev";
+const API_URL = "https://<seu-api-id>.execute-api.us-east-1.amazonaws.com/prod/dados";
+
+const Timer: React.FC = () => {
+  const [timers, setTimers] = useState<TimerData[]>([]);
+  const ws = useRef<WebSocket | null>(null);
+
+  // Busca dados iniciais da API
+  useEffect(() => {
+    fetch(API_URL)
+      .then((res) => res.json())
+      .then((data: any[]) => {
+        // Transformar dados para o formato TimerData
+        const transformed = data.map((item) => ({
+          chamado: item.chamado,
+          timerActive: item.timerActive || false,
+          startedAt: item.startedAt,
+          durationMinutes: item.durationMinutes || 15,
+          timeRemaining: item.timeRemaining || item.durationMinutes * 60,
+        }));
+        setTimers(transformed);
+      })
+      .catch((err) => console.error("Erro ao buscar chamados:", err));
+  }, []);
+
+  // Conecta ao WebSocket
+  useEffect(() => {
+    ws.current = new WebSocket(WS_URL);
+
+    ws.current.onopen = () => {
+      console.log("WebSocket conectado");
+    };
+
+    ws.current.onmessage = (event) => {
+      const data = JSON.parse(event.data);
+      if (data.type === "TIMER_UPDATED") {
+        setTimers((prev) => {
+          const index = prev.findIndex((t) => t.chamado === data.chamado);
+          const newTimer = {
+            chamado: data.chamado,
+            timerActive: data.timerActive,
+            startedAt: data.startedAt,
+            durationMinutes: data.durationMinutes,
+            timeRemaining: data.timeRemaining,
+          };
+          if (index >= 0) {
+            const updated = [...prev];
+            updated[index] = newTimer;
+            return updated;
+          }
+          return [...prev, newTimer];
+        });
+      }
+    };
+
+    ws.current.onclose = () => console.log("WebSocket desconectado");
+    return () => ws.current?.close();
+  }, []);
+
+  // Atualiza tempo restante a cada segundo
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setTimers((prev) =>
+        prev.map((t) => {
+          if (t.timerActive && t.timeRemaining > 0) {
+            return { ...t, timeRemaining: t.timeRemaining - 1 };
+          }
+          return t;
+        })
+      );
+    }, 1000);
+    return () => clearInterval(interval);
+  }, []);
+
+  const sendAction = (chamado: number, action: "startTimer" | "pauseTimer") => {
+    if (ws.current?.readyState === WebSocket.OPEN) {
+      ws.current.send(JSON.stringify({ action, chamado }));
+    }
+  };
+
+  const formatTime = (seconds: number) => {
+    const m = Math.floor(seconds / 60);
+    const s = seconds % 60;
+    return `${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`;
+  };
+
+  return (
+    <div>
+      <h1>Painel de Alertas</h1>
+      {timers.map((t) => (
+        <div
+          key={t.chamado}
+          style={{ border: "1px solid #ccc", padding: 10, margin: 5 }}
+        >
+          <div>Chamado: {t.chamado}</div>
+          <div>Status: {t.timerActive ? "Ativo" : "Pausado"}</div>
+          <div>Tempo restante: {formatTime(t.timeRemaining)}</div>
+          <button onClick={() => sendAction(t.chamado, "startTimer")}>Iniciar</button>
+          <button onClick={() => sendAction(t.chamado, "pauseTimer")}>Pausar</button>
+        </div>
+      ))}
+    </div>
+  );
+};
+
+export default Timer;
