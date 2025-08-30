@@ -1,180 +1,139 @@
-// Lambda handler para WebSocket + API Gateway + DynamoDB
-const AWS = require("aws-sdk");
-const dynamo = new AWS.DynamoDB.DocumentClient();
-const api = new AWS.ApiGatewayManagementApi({
-  endpoint: process.env.WEBSOCKET_API_ENDPOINT
-});
+import os
+import json
+import boto3
+from datetime import datetime, timezone
 
-const CONNECTIONS_TABLE = process.env.CONNECTIONS_TABLE;
-const CHAMADOS_TABLE = process.env.CHAMADOS_TABLE;
+dynamodb = boto3.resource("dynamodb")
+connections_table = dynamodb.Table(os.environ["CONNECTIONS_TABLE"])
+chamados_table = dynamodb.Table(os.environ["CHAMADOS_TABLE"])
 
-// Função auxiliar para enviar mensagens pelo WS
-async function sendToConnection(connectionId, payload) {
-  try {
-    await api
-      .postToConnection({
-        ConnectionId: connectionId,
-        Data: JSON.stringify(payload)
-      })
-      .promise();
-  } catch (err) {
-    if (err.statusCode === 410) {
-      // Conexão morta, remover
-      await dynamo
-        .delete({
-          TableName: CONNECTIONS_TABLE,
-          Key: { connectionId }
-        })
-        .promise();
-    } else {
-      console.error("Erro ao enviar WS:", err);
-    }
-  }
-}
+apigw = boto3.client(
+    "apigatewaymanagementapi",
+    endpoint_url=f"https://{os.environ['WEBSOCKET_API_ENDPOINT']}"
+)
 
-// Broadcast para todas as conexões
-async function broadcast(payload) {
-  const connections = await dynamo.scan({ TableName: CONNECTIONS_TABLE }).promise();
-  await Promise.all(
-    connections.Items.map((c) => sendToConnection(c.connectionId, payload))
-  );
-}
 
-// Recuperar um chamado
-async function getChamado(chamado) {
-  const res = await dynamo
-    .get({
-      TableName: CHAMADOS_TABLE,
-      Key: { chamado: Number(chamado) }
-    })
-    .promise();
-  return res.Item;
-}
+# 🔹 Função para enviar dados a uma conexão
+def send_to_connection(connection_id, payload):
+    try:
+        apigw.post_to_connection(
+            ConnectionId=connection_id,
+            Data=json.dumps(payload).encode("utf-8")
+        )
+    except apigw.exceptions.GoneException:
+        # Remove conexões mortas
+        connections_table.delete_item(Key={"connectionId": connection_id})
 
-// Atualizar DynamoDB
-async function updateChamado(chamado, updates) {
-  const keys = Object.keys(updates);
-  const expr = keys.map((k) => `${k} = :${k}`).join(", ");
-  const values = {};
-  keys.forEach((k) => (values[`:${k}`] = updates[k]));
 
-  await dynamo
-    .update({
-      TableName: CHAMADOS_TABLE,
-      Key: { chamado: Number(chamado) },
-      UpdateExpression: `SET ${expr}`,
-      ExpressionAttributeValues: values
-    })
-    .promise();
-}
+# 🔹 Broadcast para todas as conexões
+def broadcast(payload):
+    resp = connections_table.scan()
+    for conn in resp.get("Items", []):
+        send_to_connection(conn["connectionId"], payload)
 
-// Calcular tempo restante
-function calcRemaining(item) {
-  const total = (item.durationMinutes || 15) * 60;
-  if (!item.timerActive) return item.timeRemaining ?? total;
-  const elapsed = Math.floor((Date.now() - new Date(item.startedAt).getTime()) / 1000);
-  return Math.max(0, total - elapsed);
-}
 
-exports.handler = async (event) => {
-  console.log("Evento recebido:", JSON.stringify(event, null, 2));
+# 🔹 Buscar um chamado
+def get_chamado(chamado_id):
+    res = chamados_table.get_item(Key={"chamado": int(chamado_id)})
+    return res.get("Item")
 
-  // Conexão WebSocket
-  const connectionId = event.requestContext?.connectionId;
-  const routeKey = event.requestContext?.routeKey;
 
-  // Conectar
-  if (routeKey === "$connect") {
-    await dynamo
-      .put({
-        TableName: CONNECTIONS_TABLE,
-        Item: { connectionId }
-      })
-      .promise();
-    return { statusCode: 200, body: "Connected." };
-  }
+# 🔹 Atualizar chamado
+def update_chamado(chamado_id, updates: dict):
+    update_expr = "SET " + ", ".join(f"{k} = :{k}" for k in updates)
+    expr_vals = {f":{k}": v for k, v in updates.items()}
+    chamados_table.update_item(
+        Key={"chamado": int(chamado_id)},
+        UpdateExpression=update_expr,
+        ExpressionAttributeValues=expr_vals
+    )
 
-  // Desconectar
-  if (routeKey === "$disconnect") {
-    await dynamo
-      .delete({
-        TableName: CONNECTIONS_TABLE,
-        Key: { connectionId }
-      })
-      .promise();
-    return { statusCode: 200, body: "Disconnected." };
-  }
 
-  // Mensagens WebSocket
-  if (routeKey === "$default") {
-    const body = JSON.parse(event.body || "{}");
-    const action = body.action;
+# 🔹 Calcular tempo restante
+def calc_remaining(item):
+    total = (item.get("durationMinutes", 15)) * 60
+    if not item.get("timerActive"):
+        return item.get("timeRemaining", total)
 
-    if (!action) return { statusCode: 400, body: "No action provided" };
+    started_at = datetime.fromisoformat(item["startedAt"].replace("Z", "+00:00"))
+    elapsed = int((datetime.now(timezone.utc) - started_at).total_seconds())
+    return max(0, total - elapsed)
 
-    if (action === "startTimer") {
-      const chamado = body.chamado;
-      await updateChamado(chamado, {
-        startedAt: new Date().toISOString(),
-        timerActive: true,
-        timeRemaining: null
-      });
-      const item = await getChamado(chamado);
-      await broadcast({
-        type: "TIMER_UPDATED",
-        chamado,
-        startedAt: item.startedAt,
-        durationMinutes: item.durationMinutes,
-        timerActive: true
-      });
-      return { statusCode: 200, body: "Timer started" };
-    }
 
-    if (action === "pauseTimer") {
-      const chamado = body.chamado;
-      const item = await getChamado(chamado);
-      const remaining = calcRemaining(item);
-      await updateChamado(chamado, {
-        timerActive: false,
-        timeRemaining: remaining
-      });
-      const updated = await getChamado(chamado);
-      await broadcast({
-        type: "TIMER_UPDATED",
-        chamado,
-        startedAt: updated.startedAt,
-        durationMinutes: updated.durationMinutes,
-        timerActive: false,
-        timeRemaining: updated.timeRemaining
-      });
-      return { statusCode: 200, body: "Timer paused" };
-    }
+def lambda_handler(event, context):
+    print("Evento recebido:", json.dumps(event))
 
-    if (action === "getAll") {
-      const chamados = await dynamo.scan({ TableName: CHAMADOS_TABLE }).promise();
-      const list = chamados.Items.map((c) => ({
-        ...c,
-        timeRemaining: calcRemaining(c)
-      }));
-      await sendToConnection(connectionId, { type: "ALL_CHAMADOS", data: list });
-      return { statusCode: 200, body: "Sent all chamados" };
-    }
+    connection_id = event.get("requestContext", {}).get("connectionId")
+    route_key = event.get("requestContext", {}).get("routeKey")
 
-    return { statusCode: 400, body: "Unknown action" };
-  }
+    # 🔹 Conectar
+    if route_key == "$connect":
+        connections_table.put_item(Item={"connectionId": connection_id})
+        return {"statusCode": 200, "body": "Connected"}
 
-  // Requisição REST para obter dados (para novas sessões)
-  if (event.httpMethod === "GET") {
-    const chamados = await dynamo.scan({ TableName: CHAMADOS_TABLE }).promise();
-    const list = chamados.Items.map((c) => ({
-      ...c,
-      timeRemaining: calcRemaining(c)
-    }));
-    return {
-      statusCode: 200,
-      body: JSON.stringify(list)
-    };
-  }
+    # 🔹 Desconectar
+    if route_key == "$disconnect":
+        connections_table.delete_item(Key={"connectionId": connection_id})
+        return {"statusCode": 200, "body": "Disconnected"}
 
-  return { statusCode: 400, body: "Invalid request" };
-};
+    # 🔹 Mensagens via WebSocket
+    if route_key == "$default":
+        body = json.loads(event.get("body", "{}"))
+        action = body.get("action")
+
+        if action == "startTimer":
+            chamado = body["chamado"]
+            now = datetime.now(timezone.utc).isoformat()
+            update_chamado(chamado, {
+                "startedAt": now,
+                "timerActive": True,
+                "timeRemaining": None
+            })
+            item = get_chamado(chamado)
+            broadcast({
+                "type": "TIMER_UPDATED",
+                "chamado": chamado,
+                "startedAt": item["startedAt"],
+                "durationMinutes": item.get("durationMinutes", 15),
+                "timerActive": True
+            })
+            return {"statusCode": 200, "body": "Timer started"}
+
+        elif action == "pauseTimer":
+            chamado = body["chamado"]
+            item = get_chamado(chamado)
+            remaining = calc_remaining(item)
+            update_chamado(chamado, {
+                "timerActive": False,
+                "timeRemaining": remaining
+            })
+            updated = get_chamado(chamado)
+            broadcast({
+                "type": "TIMER_UPDATED",
+                "chamado": chamado,
+                "startedAt": updated.get("startedAt"),
+                "durationMinutes": updated.get("durationMinutes", 15),
+                "timerActive": False,
+                "timeRemaining": updated.get("timeRemaining")
+            })
+            return {"statusCode": 200, "body": "Timer paused"}
+
+        elif action == "getAll":
+            resp = chamados_table.scan()
+            items = resp.get("Items", [])
+            for c in items:
+                c["timeRemaining"] = calc_remaining(c)
+            send_to_connection(connection_id, {"type": "ALL_CHAMADOS", "data": items})
+            return {"statusCode": 200, "body": "All chamados sent"}
+
+        return {"statusCode": 400, "body": "Unknown action"}
+
+    # 🔹 Endpoint REST para novas sessões
+    if event.get("httpMethod") == "GET":
+        resp = chamados_table.scan()
+        items = resp.get("Items", [])
+        for c in items:
+            c["timeRemaining"] = calc_remaining(c)
+        return {"statusCode": 200, "body": json.dumps(items)}
+
+    return {"statusCode": 400, "body": "Invalid request"}
