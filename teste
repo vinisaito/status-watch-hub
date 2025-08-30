@@ -1,20 +1,120 @@
-const fetchAlert = async () => {
-  try {
-    const res = await fetch(`${apiBaseUrl}/dados`); // sem o /:chamado
-    if (!res.ok) throw new Error("Falha ao buscar alertas");
+// Timer.tsx
+import React, { useEffect, useState } from "react";
 
-    const data = await res.json();
-    // filtra pelo chamado específico
-    const alertData = data.find((item: any) => item.chamado === chamado);
-    if (!alertData) throw new Error("Chamado não encontrado");
+interface Alert {
+  chamado: number;
+  timerActive: boolean;
+  startedAt: string | null;
+  durationMinutes: number;
+}
 
-    setAlert({
-      chamado: alertData.chamado,
-      timerActive: alertData.timerActive,
-      startedAt: alertData.startedAt,
-      durationMinutes: alertData.durationMinutes
-    });
-  } catch (err) {
-    console.error("Erro ao buscar alerta:", err);
-  }
+interface TimerProps {
+  chamado: number; // ID do alerta
+  ws: WebSocket;   // WebSocket já conectado
+  apiBaseUrl: string;
+}
+
+const Timer: React.FC<TimerProps> = ({ chamado, ws, apiBaseUrl }) => {
+  const [alert, setAlert] = useState<Alert | null>(null);
+  const [timeRemaining, setTimeRemaining] = useState<number>(0);
+
+  // Função para buscar o alerta da API
+  const fetchAlert = async () => {
+    try {
+      const res = await fetch(`${apiBaseUrl}/dados`); // pega todos os alertas
+      if (!res.ok) throw new Error("Falha ao buscar alertas");
+
+      const data = await res.json();
+      const alertData = data.find((item: any) => item.chamado === chamado);
+      if (!alertData) throw new Error("Chamado não encontrado");
+
+      setAlert({
+        chamado: alertData.chamado,
+        timerActive: alertData.timerActive,
+        startedAt: alertData.startedAt,
+        durationMinutes: alertData.durationMinutes,
+      });
+    } catch (err) {
+      console.error("Erro ao buscar alerta:", err);
+    }
+  };
+
+  // Iniciar cronômetro
+  const startTimer = () => {
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    ws.send(JSON.stringify({ action: "startTimer", chamado: chamado }));
+  };
+
+  // Pausar cronômetro
+  const pauseTimer = () => {
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    ws.send(JSON.stringify({ action: "pauseTimer", chamado: chamado }));
+  };
+
+  // Atualiza o tempo restante a cada segundo
+  useEffect(() => {
+    let interval: number;
+    if (alert && alert.startedAt) {
+      interval = window.setInterval(() => {
+        const startedAtDate = new Date(alert.startedAt!);
+        const elapsed = (Date.now() - startedAtDate.getTime()) / 1000; // segundos
+        const remaining = Math.max(0, alert.durationMinutes * 60 - elapsed);
+        setTimeRemaining(remaining);
+      }, 1000);
+    } else if (alert) {
+      setTimeRemaining(alert.durationMinutes * 60);
+    }
+
+    return () => clearInterval(interval);
+  }, [alert]);
+
+  // Recebe atualizações via WebSocket
+  useEffect(() => {
+    if (!ws) return;
+
+    const handleMessage = (event: MessageEvent) => {
+      try {
+        const msg = JSON.parse(event.data);
+        if (msg.type === "updateTimer" && msg.chamado === chamado) {
+          setAlert((prev) => ({
+            ...prev!,
+            timerActive: msg.timerActive,
+            startedAt: msg.startedAt || prev?.startedAt || null,
+          }));
+        }
+      } catch (err) {
+        console.error("Erro ao processar mensagem WS:", err);
+      }
+    };
+
+    ws.addEventListener("message", handleMessage);
+    return () => ws.removeEventListener("message", handleMessage);
+  }, [ws, chamado]);
+
+  useEffect(() => {
+    fetchAlert();
+  }, []);
+
+  // Formata tempo em MM:SS
+  const formatTime = (seconds: number) => {
+    const m = Math.floor(seconds / 60);
+    const s = Math.floor(seconds % 60);
+    return `${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`;
+  };
+
+  return (
+    <div style={{ border: "1px solid #ccc", padding: "12px", margin: "8px" }}>
+      <h3>Alerta: {chamado}</h3>
+      <p>Tempo restante: {formatTime(timeRemaining)}</p>
+      <p>Status: {alert?.timerActive ? "Rodando" : "Pausado"}</p>
+      <button onClick={startTimer} disabled={alert?.timerActive}>
+        Iniciar
+      </button>
+      <button onClick={pauseTimer} disabled={!alert?.timerActive}>
+        Pausar
+      </button>
+    </div>
+  );
 };
+
+export default Timer;
