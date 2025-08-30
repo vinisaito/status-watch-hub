@@ -9,30 +9,26 @@ interface TimerData {
 }
 
 const Timer: React.FC = () => {
-  // Defina aqui o chamado e o WebSocket
   const CHAMADO = 10418007;
-  const WS_URL = "wss://SEU_ENDPOINT_AQUI"; // substitua pelo seu endpoint wss
+  const WS_URL = "wss://SEU_ENDPOINT_AQUI";
 
   const [timeRemaining, setTimeRemaining] = useState<number>(0);
   const [timerActive, setTimerActive] = useState<boolean>(false);
   const wsRef = useRef<WebSocket | null>(null);
-  const intervalRef = useRef<NodeJS.Timer | null>(null);
+  const intervalRef = useRef<number | null>(null); // ✅ Ajuste aqui
 
-  // Conectar WebSocket
   useEffect(() => {
     const ws = new WebSocket(WS_URL);
     wsRef.current = ws;
 
     ws.onopen = () => {
       console.log("WebSocket conectado");
-      // Solicita estado atual do chamado
       ws.send(JSON.stringify({ action: "getState", chamado: CHAMADO }));
     };
 
     ws.onmessage = (event) => {
       try {
         const data: TimerData = JSON.parse(event.data);
-
         if (data.chamado === CHAMADO) {
           setTimeRemaining(Number(data.timeRemaining) || 0);
           setTimerActive(data.timerActive);
@@ -51,18 +47,22 @@ const Timer: React.FC = () => {
     };
   }, []);
 
-  // Timer decrementando
   useEffect(() => {
-    if (intervalRef.current) clearInterval(intervalRef.current);
+    if (intervalRef.current) {
+      clearInterval(intervalRef.current);
+      intervalRef.current = null;
+    }
 
     if (timerActive) {
-      intervalRef.current = setInterval(() => {
+      intervalRef.current = window.setInterval(() => {
         setTimeRemaining((prev) => (prev > 0 ? prev - 1 : 0));
       }, 1000);
     }
 
     return () => {
-      if (intervalRef.current) clearInterval(intervalRef.current);
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current);
+      }
     };
   }, [timerActive]);
 
