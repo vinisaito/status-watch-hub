@@ -1,143 +1,125 @@
-import boto3
-import json
-from datetime import datetime, timezone
-from decimal import Decimal
+import React, { useEffect, useRef, useState } from "react";
 
-# DynamoDB
-DDB = boto3.resource("dynamodb", region_name="us-east-1")
-ACOMP_TABLE = DDB.Table("painelmonitoracao_acompanhamento")
-CONN_TABLE = DDB.Table("painelmonitoracao_connections")
+interface Alerta {
+  chamado: number;
+  timerActive: boolean;
+  startedAt?: string;
+  durationMinutes: number;
+  elapsedSeconds: number;
+  timeRemaining: number;
+}
 
-# API Gateway Management API (WebSocket)
-APIGW_ENDPOINT = "https://SEU_ENDPOINT.execute-api.us-east-1.amazonaws.com/prod"
-apigw = boto3.client("apigatewaymanagementapi", endpoint_url=APIGW_ENDPOINT)
+const WEBSOCKET_URL = "wss://SEU_ENDPOINT.execute-api.us-east-1.amazonaws.com/prod";
+const GET_STATE_URL = "https://SEU_ENDPOINT.execute-api.us-east-1.amazonaws.com/prod/dados";
 
-# Serialização Decimal
-def json_serial(obj):
-    if isinstance(obj, Decimal):
-        return int(obj) if obj % 1 == 0 else float(obj)
-    raise TypeError
+export const Timer: React.FC<{ chamado: number }> = ({ chamado }) => {
+  const [alerta, setAlerta] = useState<Alerta | null>(null);
+  const wsRef = useRef<WebSocket | null>(null);
+  const intervalRef = useRef<NodeJS.Timer | null>(null);
 
-def to_decimal(value):
-    return Decimal(str(value))
+  // Conectar WebSocket
+  useEffect(() => {
+    console.log("🔌 Conectando ao WebSocket...");
+    const ws = new WebSocket(WEBSOCKET_URL);
 
-# Cálculo do tempo restante
-def calculate_remaining(alerta):
-    try:
-        duration = Decimal(str(alerta.get("durationMinutes", 15)))
-        timer_active = alerta.get("timerActive", False)
-        elapsed = Decimal(str(alerta.get("elapsedSeconds", 0)))
-        started_at = alerta.get("startedAt")
+    ws.onopen = () => {
+      console.log("✅ WebSocket conectado");
+      // Opcional: buscar estado inicial via getState
+      fetchState();
+    };
 
-        if timer_active and started_at:
-            started_dt = datetime.fromisoformat(str(started_at).replace("Z", "+00:00"))
-            now = datetime.utcnow().replace(tzinfo=timezone.utc)
-            elapsed += Decimal(str((now - started_dt).total_seconds()))
+    ws.onmessage = (msg) => {
+      console.log("📨 Mensagem recebida:", msg.data);
+      try {
+        const data = JSON.parse(msg.data);
+        if (data.type === "TIMER_UPDATED" && data.chamado === chamado) {
+          setAlerta({
+            chamado: data.chamado,
+            timerActive: data.timerActive,
+            startedAt: data.startedAt,
+            durationMinutes: data.durationMinutes,
+            elapsedSeconds: data.elapsedSeconds || 0,
+            timeRemaining: data.timeRemaining,
+          });
+        }
+      } catch (e) {
+        console.error("❌ Erro ao processar mensagem WS:", e);
+      }
+    };
 
-        remaining = max(0, float(duration * 60 - elapsed))
-        return int(remaining), timer_active, elapsed
-    except Exception as e:
-        print(f"❌ Erro em calculate_remaining: {e}")
-        return 0, False, Decimal(0)
+    ws.onerror = (err) => console.error("❌ WebSocket erro:", err);
+    ws.onclose = () => console.log("🔌 WebSocket desconectado");
 
-def broadcast_timer(alerta):
-    remaining, timer_active, _ = calculate_remaining(alerta)
-    connections = CONN_TABLE.scan().get("Items", [])
-    for conn in connections:
-        try:
-            apigw.post_to_connection(
-                ConnectionId=conn["connectionId"],
-                Data=json.dumps({
-                    "type": "TIMER_UPDATED",
-                    "chamado": alerta["chamado"],
-                    "timerActive": timer_active,
-                    "startedAt": alerta.get("startedAt"),
-                    "durationMinutes": alerta.get("durationMinutes", 15),
-                    "elapsedSeconds": alerta.get("elapsedSeconds", 0),
-                    "timeRemaining": remaining
-                }, default=json_serial)
-            )
-        except apigw.exceptions.GoneException:
-            CONN_TABLE.delete_item(Key={"connectionId": conn["connectionId"]})
+    wsRef.current = ws;
+    return () => ws.close();
+  }, [chamado]);
 
-def lambda_handler(event, context):
-    route = event.get("requestContext", {}).get("routeKey")
-    connection_id = event.get("requestContext", {}).get("connectionId")
+  // Atualizar cronômetro a cada segundo
+  useEffect(() => {
+    if (!alerta) return;
+    if (intervalRef.current) clearInterval(intervalRef.current);
 
-    # Connect
-    if route == "$connect":
-        CONN_TABLE.put_item(Item={"connectionId": connection_id})
-        return {"statusCode": 200}
+    if (alerta.timerActive) {
+      intervalRef.current = setInterval(() => {
+        setAlerta((prev) => {
+          if (!prev) return prev;
+          return {
+            ...prev,
+            timeRemaining: Math.max(prev.timeRemaining - 1, 0),
+          };
+        });
+      }, 1000);
+    }
 
-    # Disconnect
-    elif route == "$disconnect":
-        CONN_TABLE.delete_item(Key={"connectionId": connection_id})
-        return {"statusCode": 200}
+    return () => {
+      if (intervalRef.current) clearInterval(intervalRef.current);
+    };
+  }, [alerta?.timerActive]);
 
-    # Receber mensagem
-    elif route == "sendMessage":
-        body = json.loads(event.get("body", "{}"))
-        action = body.get("action")
-        chamado = body.get("chamado")
-        if not chamado or not action:
-            return {"statusCode": 400, "body": "Chamado ou ação ausente"}
+  // Função para buscar estado via GET
+  const fetchState = async () => {
+    try {
+      console.log("🌐 Buscando estado inicial...");
+      const res = await fetch(`${GET_STATE_URL}?chamado=${chamado}`);
+      const data = await res.json();
+      console.log("📊 Estado inicial:", data);
+      setAlerta({
+        chamado: data.chamado,
+        timerActive: data.timerActive,
+        startedAt: data.startedAt,
+        durationMinutes: data.durationMinutes,
+        elapsedSeconds: data.elapsedSeconds || 0,
+        timeRemaining: data.timeRemaining,
+      });
+    } catch (e) {
+      console.error("❌ Erro ao buscar estado:", e);
+    }
+  };
 
-        alerta_resp = ACOMP_TABLE.get_item(Key={"chamado": int(chamado)})
-        alerta = alerta_resp.get("Item")
-        if not alerta:
-            return {"statusCode": 404, "body": "Chamado não encontrado"}
+  // Enviar ação via WebSocket
+  const sendAction = (action: "startTimer" | "pauseTimer") => {
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      console.log(`📤 Enviando ${action}...`);
+      wsRef.current.send(JSON.stringify({ action, chamado }));
+    } else {
+      console.warn("⚠️ WebSocket não está aberto");
+    }
+  };
 
-        now_iso = datetime.utcnow().replace(tzinfo=timezone.utc).isoformat()
-        remaining, timer_active, elapsed = calculate_remaining(alerta)
+  // Formatar tempo restante
+  const formatTime = (seconds: number) => {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${String(mins).padStart(2, "0")}:${String(secs).padStart(2, "0")}`;
+  };
 
-        if action == "startTimer":
-            # Start timer
-            ACOMP_TABLE.update_item(
-                Key={"chamado": int(chamado)},
-                UpdateExpression="SET timerActive=:t, startedAt=:s, elapsedSeconds=:e",
-                ExpressionAttributeValues={
-                    ":t": True,
-                    ":s": now_iso,
-                    ":e": to_decimal(elapsed)
-                }
-            )
-        elif action == "pauseTimer":
-            # Pause timer
-            ACOMP_TABLE.update_item(
-                Key={"chamado": int(chamado)},
-                UpdateExpression="SET timerActive=:t, elapsedSeconds=:e",
-                ExpressionAttributeValues={
-                    ":t": False,
-                    ":e": to_decimal(elapsed)
-                }
-            )
-        else:
-            return {"statusCode": 400, "body": "Ação inválida"}
-
-        # Atualiza alerta e envia broadcast
-        alerta_resp = ACOMP_TABLE.get_item(Key={"chamado": int(chamado)})
-        alerta = alerta_resp.get("Item")
-        broadcast_timer(alerta)
-
-        return {"statusCode": 200, "body": json.dumps({"message": "ok"})}
-
-    # Get state
-    elif route == "getState":
-        chamado = event.get("queryStringParameters", {}).get("chamado")
-        if not chamado:
-            return {"statusCode": 400, "body": "Chamado ausente"}
-
-        alerta_resp = ACOMP_TABLE.get_item(Key={"chamado": int(chamado)})
-        alerta = alerta_resp.get("Item")
-        if not alerta:
-            return {"statusCode": 404, "body": "Chamado não encontrado"}
-
-        remaining, timer_active, _ = calculate_remaining(alerta)
-        alerta["timeRemaining"] = remaining
-        alerta["timerActive"] = timer_active
-
-        return {"statusCode": 200, "body": json.dumps(alerta, default=json_serial)}
-
-    # Default
-    else:
-        return {"statusCode": 400, "body": "Rota não suportada"}
+  return (
+    <div style={{ padding: "20px", border: "1px solid #ccc", width: "250px" }}>
+      <h3>Chamado: {chamado}</h3>
+      <p>Status: {alerta?.timerActive ? "Ativo" : "Pausado"}</p>
+      <p>Tempo restante: {alerta ? formatTime(alerta.timeRemaining) : "--:--"}</p>
+      <button onClick={() => sendAction("startTimer")}>Iniciar</button>
+      <button onClick={() => sendAction("pauseTimer")}>Pausar</button>
+    </div>
+  );
+};
