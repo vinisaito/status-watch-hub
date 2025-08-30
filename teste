@@ -1,140 +1,120 @@
-import json
-import boto3
-from datetime import datetime, timezone
+import React, { useEffect, useState, useRef } from "react";
+import axios from "axios";
 
-# 🔹 DEFINA SEUS VALORES AQUI:
-CONNECTIONS_TABLE = "ConnectionsTableName"  # Nome da tabela de conexões
-CHAMADOS_TABLE = "ChamadosTableName"       # Nome da tabela de chamados
-WEBSOCKET_API_ENDPOINT = "https://xxxxxx.execute-api.REGION.amazonaws.com/dev"  # Endpoint da API WebSocket
+const WEBSOCKET_URL = "wss://xxxxxx.execute-api.REGION.amazonaws.com/dev"; // 🔹 Altere para seu WebSocket
+const API_URL = "https://xxxxxx.execute-api.REGION.amazonaws.com/dev"; // 🔹 Altere para seu endpoint HTTP
 
-# 🔹 Inicialização de recursos AWS
-dynamodb = boto3.resource("dynamodb")
-connections_table = dynamodb.Table(CONNECTIONS_TABLE)
-chamados_table = dynamodb.Table(CHAMADOS_TABLE)
-apigw = boto3.client("apigatewaymanagementapi", endpoint_url=WEBSOCKET_API_ENDPOINT)
+interface Chamado {
+  chamado: number;
+  startedAt?: string;
+  durationMinutes?: number;
+  timerActive?: boolean;
+  timeRemaining?: number;
+}
 
+const App: React.FC = () => {
+  const [chamados, setChamados] = useState<Chamado[]>([]);
+  const wsRef = useRef<WebSocket | null>(null);
 
-# 🔹 Função para enviar mensagens a uma conexão WebSocket
-def send_to_connection(connection_id, payload):
-    try:
-        apigw.post_to_connection(
-            ConnectionId=connection_id,
-            Data=json.dumps(payload).encode("utf-8")
-        )
-    except apigw.exceptions.GoneException:
-        connections_table.delete_item(Key={"connectionId": connection_id})
+  // 🔹 Atualiza o estado quando receber dados via WebSocket
+  const setupWebSocket = () => {
+    wsRef.current = new WebSocket(WEBSOCKET_URL);
 
+    wsRef.current.onopen = () => {
+      console.log("🔗 Conectado ao WebSocket");
+      wsRef.current?.send(JSON.stringify({ action: "getAll" }));
+    };
 
-# 🔹 Broadcast: envia mensagem para todas as conexões
-def broadcast(payload):
-    resp = connections_table.scan()
-    for conn in resp.get("Items", []):
-        send_to_connection(conn["connectionId"], payload)
+    wsRef.current.onmessage = (event) => {
+      const message = JSON.parse(event.data);
+      console.log("📩 Mensagem recebida:", message);
 
+      if (message.type === "ALL_CHAMADOS") {
+        setChamados(message.data);
+      } else if (message.type === "TIMER_UPDATED") {
+        setChamados((prev) =>
+          prev.map((c) =>
+            c.chamado === message.chamado
+              ? { ...c, ...message, timeRemaining: message.timeRemaining }
+              : c
+          )
+        );
+      }
+    };
 
-# 🔹 Buscar um chamado
-def get_chamado(chamado_id):
-    res = chamados_table.get_item(Key={"chamado": int(chamado_id)})
-    return res.get("Item")
+    wsRef.current.onclose = () => {
+      console.log("⚠️ WebSocket desconectado, tentando reconectar...");
+      setTimeout(setupWebSocket, 2000);
+    };
+  };
 
+  // 🔹 Função para atualizar timers no front
+  const tickTimers = () => {
+    setChamados((prev) =>
+      prev.map((c) => {
+        if (!c.timerActive || c.timeRemaining === undefined) return c;
+        const newTime = c.timeRemaining - 1;
+        return { ...c, timeRemaining: Math.max(0, newTime) };
+      })
+    );
+  };
 
-# 🔹 Atualizar um chamado
-def update_chamado(chamado_id, updates: dict):
-    update_expr = "SET " + ", ".join(f"{k} = :{k}" for k in updates)
-    expr_vals = {f":{k}": v for k, v in updates.items()}
-    chamados_table.update_item(
-        Key={"chamado": int(chamado_id)},
-        UpdateExpression=update_expr,
-        ExpressionAttributeValues=expr_vals
-    )
+  // 🔹 Iniciar/Pausar Timer
+  const toggleTimer = (chamado: number, isActive: boolean) => {
+    wsRef.current?.send(
+      JSON.stringify({
+        action: isActive ? "pauseTimer" : "startTimer",
+        chamado,
+      })
+    );
+  };
 
+  useEffect(() => {
+    setupWebSocket();
+    axios.get(API_URL).then((res) => setChamados(res.data));
+    const interval = setInterval(tickTimers, 1000);
+    return () => clearInterval(interval);
+  }, []);
 
-# 🔹 Calcular tempo restante do chamado
-def calc_remaining(item):
-    total = (item.get("durationMinutes", 15)) * 60
-    if not item.get("timerActive"):
-        return item.get("timeRemaining", total)
+  return (
+    <div style={{ padding: 20, fontFamily: "Arial" }}>
+      <h1>Painel de Alertas</h1>
+      {chamados.map((c) => {
+        const minutes = Math.floor((c.timeRemaining || 0) / 60);
+        const seconds = (c.timeRemaining || 0) % 60;
 
-    started_at = datetime.fromisoformat(item["startedAt"].replace("Z", "+00:00"))
-    elapsed = int((datetime.now(timezone.utc) - started_at).total_seconds())
-    return max(0, total - elapsed)
+        return (
+          <div
+            key={c.chamado}
+            style={{
+              border: "1px solid #ccc",
+              padding: 10,
+              marginBottom: 10,
+              borderRadius: 8,
+            }}
+          >
+            <h3>Chamado #{c.chamado}</h3>
+            <p>
+              ⏳ Tempo Restante: {minutes}:{seconds.toString().padStart(2, "0")}
+            </p>
+            <button
+              onClick={() => toggleTimer(c.chamado, c.timerActive || false)}
+              style={{
+                background: c.timerActive ? "red" : "green",
+                color: "white",
+                padding: "5px 10px",
+                borderRadius: 5,
+                border: "none",
+                cursor: "pointer",
+              }}
+            >
+              {c.timerActive ? "Pausar" : "Iniciar"}
+            </button>
+          </div>
+        );
+      })}
+    </div>
+  );
+};
 
-
-# 🔹 Handler principal da Lambda
-def lambda_handler(event, context):
-    print("Evento recebido:", json.dumps(event))
-
-    connection_id = event.get("requestContext", {}).get("connectionId")
-    route_key = event.get("requestContext", {}).get("routeKey")
-
-    # 🔹 Conexão inicial
-    if route_key == "$connect":
-        connections_table.put_item(Item={"connectionId": connection_id})
-        return {"statusCode": 200, "body": "Connected"}
-
-    # 🔹 Desconexão
-    if route_key == "$disconnect":
-        connections_table.delete_item(Key={"connectionId": connection_id})
-        return {"statusCode": 200, "body": "Disconnected"}
-
-    # 🔹 Mensagens WebSocket
-    if route_key == "$default":
-        body = json.loads(event.get("body", "{}"))
-        action = body.get("action")
-
-        if action == "startTimer":
-            chamado = body["chamado"]
-            now = datetime.now(timezone.utc).isoformat()
-            update_chamado(chamado, {
-                "startedAt": now,
-                "timerActive": True,
-                "timeRemaining": None
-            })
-            item = get_chamado(chamado)
-            broadcast({
-                "type": "TIMER_UPDATED",
-                "chamado": chamado,
-                "startedAt": item["startedAt"],
-                "durationMinutes": item.get("durationMinutes", 15),
-                "timerActive": True
-            })
-            return {"statusCode": 200, "body": "Timer started"}
-
-        elif action == "pauseTimer":
-            chamado = body["chamado"]
-            item = get_chamado(chamado)
-            remaining = calc_remaining(item)
-            update_chamado(chamado, {
-                "timerActive": False,
-                "timeRemaining": remaining
-            })
-            updated = get_chamado(chamado)
-            broadcast({
-                "type": "TIMER_UPDATED",
-                "chamado": chamado,
-                "startedAt": updated.get("startedAt"),
-                "durationMinutes": updated.get("durationMinutes", 15),
-                "timerActive": False,
-                "timeRemaining": updated.get("timeRemaining")
-            })
-            return {"statusCode": 200, "body": "Timer paused"}
-
-        elif action == "getAll":
-            resp = chamados_table.scan()
-            items = resp.get("Items", [])
-            for c in items:
-                c["timeRemaining"] = calc_remaining(c)
-            send_to_connection(connection_id, {"type": "ALL_CHAMADOS", "data": items})
-            return {"statusCode": 200, "body": "All chamados sent"}
-
-        return {"statusCode": 400, "body": "Unknown action"}
-
-    # 🔹 Endpoint REST (para sessões novas ou refresh)
-    if event.get("httpMethod") == "GET":
-        resp = chamados_table.scan()
-        items = resp.get("Items", [])
-        for c in items:
-            c["timeRemaining"] = calc_remaining(c)
-        return {"statusCode": 200, "body": json.dumps(items)}
-
-    return {"statusCode": 400, "body": "Invalid request"}
+export default App;
