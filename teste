@@ -5,62 +5,30 @@ from datetime import datetime
 
 dynamodb = boto3.resource("dynamodb")
 connections_table = dynamodb.Table(os.environ["CONNECTIONS_TABLE"])
-chamados_table = dynamodb.Table(os.environ["CHAMADOS_TABLE"])
 
 def lambda_handler(event, context):
-    print("Event:", event)
+    print("CONNECT EVENT:", event)
+
+    connection_id = event["requestContext"]["connectionId"]
 
     try:
-        body = json.loads(event.get("body", "{}"))
-        action = body.get("action")
-        chamado = body.get("chamado")  # agora é number
-
-        if action != "startTimer" or chamado is None:
-            return {"statusCode": 400, "body": "Payload inválido. Esperado {action:'startTimer', chamado:<number>}"}
-
-        # Horário atual UTC em timestamp
-        timer_start = int(datetime.utcnow().timestamp())
-
-        # Atualiza o DynamoDB do chamado
-        chamados_table.update_item(
-            Key={"chamado": chamado},
-            UpdateExpression="SET timerStart = :t",
-            ExpressionAttributeValues={":t": timer_start}
+        # Salva conexão no DynamoDB
+        connections_table.put_item(
+            Item={
+                "connectionId": connection_id,
+                "connectedAt": int(datetime.utcnow().timestamp())
+            }
         )
+        print(f"Conexão registrada: {connection_id}")
 
-        # Monta mensagem de broadcast
-        message = {
-            "action": "timerStarted",
-            "chamado": chamado,
-            "timerStart": timer_start
+        return {
+            "statusCode": 200,
+            "body": "Connected."
         }
 
-        # Envia mensagem a todos os clients conectados
-        send_to_all_connections(message)
-
-        return {"statusCode": 200, "body": json.dumps(message)}
-
     except Exception as e:
-        print("Erro:", str(e))
-        return {"statusCode": 500, "body": f"Erro interno: {str(e)}"}
-
-
-def send_to_all_connections(message: dict):
-    """Envia mensagem para todos os clientes conectados"""
-    apigw = boto3.client(
-        "apigatewaymanagementapi",
-        endpoint_url=os.environ["WS_ENDPOINT"]  # ex: https://xxxxxx.execute-api.us-east-1.amazonaws.com/dev
-    )
-
-    response = connections_table.scan()
-    for item in response.get("Items", []):
-        connection_id = item["connectionId"]
-        try:
-            apigw.post_to_connection(
-                Data=json.dumps(message),
-                ConnectionId=connection_id
-            )
-        except apigw.exceptions.GoneException:
-            # Se cliente já desconectou, remove da tabela
-            print(f"Conexão expirada removida: {connection_id}")
-            connections_table.delete_item(Key={"connectionId": connection_id})
+        print("Erro ao salvar conexão:", str(e))
+        return {
+            "statusCode": 500,
+            "body": "Erro ao conectar."
+        }
