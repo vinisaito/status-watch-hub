@@ -1,12 +1,6 @@
-const App = () => {
-  return (
-    <div>
-      <h1>Painel de Alertas</h1>
-      <Timer
-        chamado={10418007}
-        apiBaseUrl="https://f6ffk8e9fe.execute-api.us-east-1.amazonaws.com/prod"
-        wsUrl="wss://tgwtw1v4rg.execute-api.us-east-1.amazonaws.com/dev"
-      />
-    </div>
-  );
-};
+No overload matches this call.
+  Overload 1 of 2, '(intervalId: string | number | Timeout): void', gave the following error.
+    Argument of type 'Timer' is not assignable to parameter of type 'string | number | Timeout'.
+      Property '[Symbol.dispose]' is missing in type 'Timer' but required in type 'Timeout'.
+  Overload 2 of 2, '(id: number): void', gave the following error.
+    Argument of type 'Timer' is not assignable to parameter of type 'number'.ts(2769)
