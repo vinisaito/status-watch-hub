@@ -1,75 +1,118 @@
-import boto3
-import json
-from datetime import datetime, timezone
-from decimal import Decimal
+// Timer.tsx
+import React, { useEffect, useState, useRef } from "react";
 
-# Conexão DynamoDB
-DDB = boto3.resource("dynamodb", region_name="us-east-1")
-ACOMP_TABLE = DDB.Table("painelmonitoracao_acompanhamento")
+interface Chamado {
+  chamado: number;
+  timerActive: boolean;
+  startedAt?: string;
+  durationMinutes: number;
+  elapsedSeconds: number;
+  timeRemaining: number;
+}
 
-# Serialização Decimal
-def json_serial(obj):
-    if isinstance(obj, Decimal):
-        return int(obj) if obj % 1 == 0 else float(obj)
-    raise TypeError
+interface TimerProps {
+  chamadoId: number;
+}
 
-def to_decimal(value):
-    return Decimal(str(value))
+export const Timer: React.FC<TimerProps> = ({ chamadoId }) => {
+  const [chamado, setChamado] = useState<Chamado | null>(null);
+  const [minutes, setMinutes] = useState<number>(0);
+  const [seconds, setSeconds] = useState<number>(0);
+  const intervalRef = useRef<NodeJS.Timeout | null>(null);
 
-# Calcula tempo restante
-def calculate_remaining(alerta):
-    duration = Decimal(str(alerta.get("durationMinutes", 15)))
-    timer_active = alerta.get("timerActive", False)
-    elapsed = Decimal(str(alerta.get("elapsedSeconds", 0)))
-    started_at = alerta.get("startedAt")
+  const API_URL = `https://<api-id>.execute-api.us-east-1.amazonaws.com/prod/chamado/${chamadoId}`;
 
-    if timer_active and started_at:
-        try:
-            started_dt = datetime.fromisoformat(str(started_at).replace("Z", "+00:00"))
-            now = datetime.utcnow().replace(tzinfo=timezone.utc)
-            elapsed += Decimal(str((now - started_dt).total_seconds()))
-        except Exception as e:
-            print(f"❌ Erro no cálculo de elapsed: {e}")
+  // Função para buscar o estado atual do chamado
+  const fetchChamado = async () => {
+    try {
+      console.log("🌐 Buscando estado do chamado...");
+      const res = await fetch(API_URL);
+      const data: Chamado = await res.json();
+      console.log("✅ Estado recebido:", data);
 
-    remaining = max(0, float(duration * 60 - elapsed))
-    return int(remaining), int(elapsed), timer_active
+      // Atualiza o estado local
+      setChamado(data);
+      setMinutes(Math.floor(data.timeRemaining / 60));
+      setSeconds(data.timeRemaining % 60);
+    } catch (err) {
+      console.error("❌ Erro ao buscar chamado:", err);
+    }
+  };
 
-# Lambda handler
-def lambda_handler(event, context):
-    print("📥 Evento recebido:", json.dumps(event))
+  // Atualiza o cronômetro a cada segundo
+  useEffect(() => {
+    if (!chamado) return;
 
-    # Pegando o ID do chamado da URL
-    path_params = event.get("pathParameters") or {}
-    chamado = path_params.get("id")
+    if (intervalRef.current) clearInterval(intervalRef.current);
 
-    if not chamado:
-        return {"statusCode": 400, "body": "Chamado ausente"}
-
-    # Busca no DynamoDB
-    alerta_resp = ACOMP_TABLE.get_item(Key={"chamado": int(chamado)})
-    alerta = alerta_resp.get("Item")
-    if not alerta:
-        return {"statusCode": 404, "body": "Chamado não encontrado"}
-
-    remaining, elapsed, timer_active = calculate_remaining(alerta)
-
-    # Monta o retorno
-    result = {
-        "chamado": alerta["chamado"],
-        "timerActive": timer_active,
-        "startedAt": alerta.get("startedAt"),
-        "durationMinutes": alerta.get("durationMinutes", 15),
-        "elapsedSeconds": elapsed,
-        "timeRemaining": remaining
+    if (chamado.timerActive) {
+      intervalRef.current = setInterval(() => {
+        setSeconds((prevSec) => {
+          let total = minutes * 60 + prevSec - 1;
+          if (total < 0) total = 0;
+          setMinutes(Math.floor(total / 60));
+          return total % 60;
+        });
+      }, 1000);
     }
 
-    print(f"📡 Retornando estado do chamado: {result}")
+    return () => {
+      if (intervalRef.current) clearInterval(intervalRef.current);
+    };
+  }, [chamado]);
 
-    return {
-        "statusCode": 200,
-        "body": json.dumps(result, default=json_serial),
-        "headers": {
-            "Content-Type": "application/json",
-            "Access-Control-Allow-Origin": "*"
-        }
+  // Funções para iniciar e pausar (REST API para atualizar Lambda)
+  const handleStart = async () => {
+    if (!chamado) return;
+    try {
+      console.log("▶️ Enviando startTimer...");
+      await fetch(`https://<api-id>.execute-api.us-east-1.amazonaws.com/prod/sendMessage`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "startTimer", chamado: chamado.chamado }),
+      });
+      console.log("✅ StartTimer enviado");
+      await fetchChamado();
+    } catch (err) {
+      console.error("❌ Erro ao iniciar timer:", err);
     }
+  };
+
+  const handlePause = async () => {
+    if (!chamado) return;
+    try {
+      console.log("⏸️ Enviando pauseTimer...");
+      await fetch(`https://<api-id>.execute-api.us-east-1.amazonaws.com/prod/sendMessage`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "pauseTimer", chamado: chamado.chamado }),
+      });
+      console.log("✅ PauseTimer enviado");
+      await fetchChamado();
+    } catch (err) {
+      console.error("❌ Erro ao pausar timer:", err);
+    }
+  };
+
+  // Carrega estado inicial
+  useEffect(() => {
+    fetchChamado();
+  }, []);
+
+  return (
+    <div style={{ fontFamily: "sans-serif", textAlign: "center" }}>
+      <h2>Chamado #{chamadoId}</h2>
+      <div style={{ fontSize: "2rem", margin: "20px 0" }}>
+        {minutes.toString().padStart(2, "0")}:
+        {seconds.toString().padStart(2, "0")}
+      </div>
+      <div>Status: {chamado?.timerActive ? "Ativo" : "Pausado"}</div>
+      <div style={{ marginTop: "20px" }}>
+        <button onClick={handleStart} style={{ marginRight: "10px" }}>
+          Iniciar
+        </button>
+        <button onClick={handlePause}>Pausar</button>
+      </div>
+    </div>
+  );
+};
