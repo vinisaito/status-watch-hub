@@ -1,4 +1,134 @@
-{
-  "requestContext": { "routeKey": "sendMessage", "connectionId": "test123" },
-  "body": "{\"action\":\"startTimer\",\"chamado\":10418007}"
-}
+import boto3
+import json
+from datetime import datetime, timezone
+from decimal import Decimal
+
+# Conexão DynamoDB
+DDB = boto3.resource("dynamodb", region_name="us-east-1")
+ACOMP_TABLE = DDB.Table("painelmonitoracao_acompanhamento")
+CONN_TABLE = DDB.Table("painelmonitoracao_connections")
+
+# API Gateway Management API (WebSocket)
+APIGW_ENDPOINT = "https://m89s04n9ve.execute-api.us-east-1.amazonaws.com/prod"
+apigw = boto3.client("apigatewaymanagementapi", endpoint_url=APIGW_ENDPOINT)
+
+# Serialização Decimal
+def json_serial(obj):
+    if isinstance(obj, Decimal):
+        return int(obj) if obj % 1 == 0 else float(obj)
+    raise TypeError
+
+# Converte float para Decimal para DynamoDB
+def to_decimal(value):
+    return Decimal(str(value))
+
+# Calcula tempo restante considerando elapsedSeconds
+def calculate_remaining(alerta):
+    duration = Decimal(str(alerta.get("durationMinutes", 15)))
+    timer_active = alerta.get("timerActive", False)
+    elapsed = Decimal(str(alerta.get("elapsedSeconds", 0)))
+    started_at = alerta.get("startedAt")
+
+    if timer_active and started_at:
+        try:
+            started_dt = datetime.fromisoformat(str(started_at).replace("Z", "+00:00"))
+            now = datetime.utcnow().replace(tzinfo=timezone.utc)
+            elapsed += Decimal(str((now - started_dt).total_seconds()))
+        except Exception as e:
+            print(f"❌ Erro no cálculo de elapsed: {e}")
+
+    remaining = max(0, float(duration * 60 - elapsed))
+    return int(remaining), timer_active, elapsed
+
+def lambda_handler(event, context):
+    route = event.get("requestContext", {}).get("routeKey")
+    connection_id = event.get("requestContext", {}).get("connectionId")
+
+    if route == "$connect":
+        CONN_TABLE.put_item(Item={"connectionId": connection_id})
+        return {"statusCode": 200}
+
+    elif route == "$disconnect":
+        CONN_TABLE.delete_item(Key={"connectionId": connection_id})
+        return {"statusCode": 200}
+
+    elif route == "sendMessage":
+        body = json.loads(event.get("body", "{}"))
+        action = body.get("action")
+        chamado = body.get("chamado")
+
+        if not chamado or not action:
+            return {"statusCode": 400, "body": "Chamado ou ação ausente"}
+
+        alerta_resp = ACOMP_TABLE.get_item(Key={"chamado": int(chamado)})
+        alerta = alerta_resp.get("Item")
+        if not alerta:
+            return {"statusCode": 404, "body": "Chamado não encontrado"}
+
+        now_iso = datetime.utcnow().replace(tzinfo=timezone.utc).isoformat()
+        remaining, timer_active, elapsed = calculate_remaining(alerta)
+
+        if action == "startTimer":
+            ACOMP_TABLE.update_item(
+                Key={"chamado": int(chamado)},
+                UpdateExpression="SET timerActive=:t, startedAt=:s, elapsedSeconds=:e",
+                ExpressionAttributeValues={
+                    ":t": True,
+                    ":s": now_iso,
+                    ":e": to_decimal(elapsed)
+                }
+            )
+        elif action == "pauseTimer":
+            ACOMP_TABLE.update_item(
+                Key={"chamado": int(chamado)},
+                UpdateExpression="SET timerActive=:t, elapsedSeconds=:e",
+                ExpressionAttributeValues={
+                    ":t": False,
+                    ":e": to_decimal(elapsed)
+                }
+            )
+        else:
+            return {"statusCode": 400, "body": "Ação inválida"}
+
+        # Broadcast
+        alerta_resp = ACOMP_TABLE.get_item(Key={"chamado": int(chamado)})
+        alerta = alerta_resp.get("Item")
+        remaining, timer_active, _ = calculate_remaining(alerta)
+
+        connections = CONN_TABLE.scan().get("Items", [])
+        for conn in connections:
+            try:
+                apigw.post_to_connection(
+                    ConnectionId=conn["connectionId"],
+                    Data=json.dumps({
+                        "type": "TIMER_UPDATED",
+                        "chamado": alerta["chamado"],
+                        "timerActive": timer_active,
+                        "startedAt": alerta.get("startedAt"),
+                        "durationMinutes": alerta.get("durationMinutes", 15),
+                        "timeRemaining": remaining
+                    }, default=json_serial)
+                )
+            except apigw.exceptions.GoneException:
+                CONN_TABLE.delete_item(Key={"connectionId": conn["connectionId"]})
+
+        return {"statusCode": 200, "body": json.dumps({"message": "ok"})}
+
+    elif route == "getState":
+        chamado = event.get("queryStringParameters", {}).get("chamado")
+        if not chamado:
+            return {"statusCode": 400, "body": "Chamado ausente"}
+
+        alerta_resp = ACOMP_TABLE.get_item(Key={"chamado": int(chamado)})
+        alerta = alerta_resp.get("Item")
+        if not alerta:
+            return {"statusCode": 404, "body": "Chamado não encontrado"}
+
+        remaining, timer_active, _ = calculate_remaining(alerta)
+        alerta["timeRemaining"] = remaining
+        alerta["timerActive"] = timer_active
+
+        return {"statusCode": 200, "body": json.dumps(alerta, default=json_serial)}
+
+    else:
+        return {"statusCode": 400, "body": "Rota não suportada"}
