@@ -46,7 +46,6 @@ def on_connect(event):
     connection_id = event["requestContext"]["connectionId"]
     print(f"[DEBUG] Novo cliente conectado: {connection_id}")
 
-    # Salva conexão
     connections_table.put_item(
         Item={
             "connectionId": connection_id,
@@ -54,14 +53,14 @@ def on_connect(event):
         }
     )
 
-    # Envia estado atual dos chamados
+    # Envia estado atual dos chamados para o novo cliente
     apigw = boto3.client(
         "apigatewaymanagementapi",
         endpoint_url=os.environ["WS_ENDPOINT"]
     )
 
     response = chamados_table.scan()
-    print(f"[DEBUG] Estado atual scan(): {json.dumps(response, cls=DecimalEncoder)}")
+    print(f"[DEBUG] Estado atual: {json.dumps(response, cls=DecimalEncoder)}")
 
     for item in response.get("Items", []):
         message = {
@@ -70,15 +69,13 @@ def on_connect(event):
             "status": str(item.get("status", "pendente")),
             "timerStart": int(item["timerStart"]) if "timerStart" in item else None
         }
-
         try:
-            print(f"[DEBUG] Enviando estado inicial para {connection_id}: {message}")
             apigw.post_to_connection(
                 Data=to_json(message),
                 ConnectionId=connection_id
             )
         except apigw.exceptions.GoneException:
-            print(f"[WARN] Conexão {connection_id} não existe mais (Gone). Removendo...")
+            print(f"[WARN] Conexão {connection_id} expirada. Removendo...")
             connections_table.delete_item(Key={"connectionId": connection_id})
         except Exception as e:
             print(f"[ERROR] Falha ao enviar estado inicial: {e}")
@@ -93,7 +90,6 @@ def on_disconnect(event):
     print(f"[DEBUG] Cliente desconectado: {connection_id}")
 
     connections_table.delete_item(Key={"connectionId": connection_id})
-
     return {"statusCode": 200, "body": "Disconnected"}
 
 # ----------------------
@@ -104,7 +100,6 @@ def start_timer(event):
     chamado = int(body["chamado"])
     timer_start = int(datetime.utcnow().timestamp())
 
-    # Salva no DynamoDB
     chamados_table.put_item(
         Item={
             "chamado": chamado,
@@ -114,7 +109,6 @@ def start_timer(event):
     )
     print(f"[DEBUG] Chamado salvo: {chamado} - timerStart={timer_start}")
 
-    # Broadcast
     return broadcast({
         "action": "timerStarted",
         "chamado": chamado,
@@ -144,7 +138,7 @@ def update_status(event):
     })
 
 # ----------------------
-# Envio para todos
+# Broadcast para todos
 # ----------------------
 def broadcast(message):
     apigw = boto3.client(
@@ -153,7 +147,7 @@ def broadcast(message):
     )
 
     connections = connections_table.scan().get("Items", [])
-    print(f"[DEBUG] Broadcast → {len(connections)} conexões: {message}")
+    print(f"[DEBUG] Broadcast → {len(connections)} conexões")
 
     for conn in connections:
         conn_id = conn["connectionId"]
@@ -163,7 +157,7 @@ def broadcast(message):
                 ConnectionId=conn_id
             )
         except apigw.exceptions.GoneException:
-            print(f"[WARN] Conexão {conn_id} não existe mais (Gone). Removendo...")
+            print(f"[WARN] Conexão {conn_id} expirada. Removendo...")
             connections_table.delete_item(Key={"connectionId": conn_id})
         except Exception as e:
             print(f"[ERROR] Falha ao enviar para {conn_id}: {e}")
