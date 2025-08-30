@@ -1,116 +1,37 @@
-// Timer.tsx
-import React, { useEffect, useState, useRef } from "react";
+import React, { useEffect, useState } from "react";
+import Timer from "./Timer";
 
-interface TimerProps {
-  chamado: number;
-  ws: WebSocket;
-  apiBaseUrl: string;
-}
+const App: React.FC = () => {
+  const [ws, setWs] = useState<WebSocket | null>(null);
+  const chamado = 10418007; // exemplo
+  const apiBaseUrl = "https://f6ffk8e9fe.execute-api.us-east-1.amazonaws.com/prod";
 
-interface TimerData {
-  chamado: number;
-  startedAt: string | null;
-  durationMinutes: number;
-  timerActive: boolean;
-}
-
-const Timer: React.FC<TimerProps> = ({ chamado, ws, apiBaseUrl }) => {
-  const [timeRemaining, setTimeRemaining] = useState<number>(0);
-  const [timerActive, setTimerActive] = useState<boolean>(false);
-  const [duration, setDuration] = useState<number>(15);
-  const intervalRef = useRef<NodeJS.Timeout | null>(null);
-
-  // Converte startedAt em segundos restantes
-  const calculateRemaining = (startedAt: string | null, durationMinutes: number) => {
-    if (!startedAt) return durationMinutes * 60;
-    const startedAtDate = new Date(startedAt);
-    const now = new Date();
-    const elapsed = (now.getTime() - startedAtDate.getTime()) / 1000;
-    const remaining = Math.max(durationMinutes * 60 - elapsed, 0);
-    return remaining;
-  };
-
-  // Atualiza o cronômetro a cada segundo
   useEffect(() => {
-    if (timerActive) {
-      intervalRef.current = setInterval(() => {
-        setTimeRemaining(prev => Math.max(prev - 1, 0));
-      }, 1000);
-    } else if (intervalRef.current) {
-      clearInterval(intervalRef.current);
-      intervalRef.current = null;
-    }
+    const socket = new WebSocket("wss://tgwtw1v4rg.execute-api.us-east-1.amazonaws.com/dev");
+    
+    socket.onopen = () => {
+      console.log("✅ WebSocket conectado");
+    };
+
+    socket.onclose = () => {
+      console.log("❌ WebSocket desconectado");
+    };
+
+    setWs(socket);
+
     return () => {
-      if (intervalRef.current) clearInterval(intervalRef.current);
+      socket.close();
     };
-  }, [timerActive]);
-
-  // Busca o estado inicial do cronômetro da API
-  const fetchAlert = async () => {
-    try {
-      const res = await fetch(`${apiBaseUrl}/dados/${chamado}`);
-      if (!res.ok) throw new Error("Falha ao buscar alerta");
-      const data: TimerData = await res.json();
-      setTimerActive(data.timerActive);
-      setDuration(data.durationMinutes);
-      setTimeRemaining(calculateRemaining(data.startedAt, data.durationMinutes));
-    } catch (err) {
-      console.error("Erro ao buscar alerta:", err);
-    }
-  };
-
-  // WebSocket: recebe atualizações do cronômetro
-  useEffect(() => {
-    const handleMessage = (event: MessageEvent) => {
-      const msg = JSON.parse(event.data);
-      if (msg.chamado !== chamado) return;
-
-      if (msg.type === "TIMER_UPDATED" || msg.type === "updateTimer") {
-        setTimerActive(msg.timerActive);
-        setDuration(msg.durationMinutes || duration);
-        setTimeRemaining(calculateRemaining(msg.startedAt, msg.durationMinutes || duration));
-      }
-    };
-    ws.addEventListener("message", handleMessage);
-    return () => ws.removeEventListener("message", handleMessage);
-  }, [ws, chamado, duration]);
-
-  // Inicializa ao montar
-  useEffect(() => {
-    fetchAlert();
   }, []);
 
-  const startTimer = () => {
-    ws.send(JSON.stringify({ action: "startTimer", chamado }));
-  };
-
-  const pauseTimer = () => {
-    ws.send(JSON.stringify({ action: "pauseTimer", chamado }));
-  };
-
-  const formatTime = (seconds: number) => {
-    const m = Math.floor(seconds / 60)
-      .toString()
-      .padStart(2, "0");
-    const s = Math.floor(seconds % 60)
-      .toString()
-      .padStart(2, "0");
-    return `${m}:${s}`;
-  };
+  if (!ws) return <div>Conectando WebSocket...</div>;
 
   return (
-    <div style={{ border: "1px solid #ccc", padding: "10px", margin: "10px" }}>
-      <h3>Chamado: {chamado}</h3>
-      <p>Status: {timerActive ? "Em andamento" : "Pausado"}</p>
-      <p>Tempo restante: {formatTime(timeRemaining)}</p>
-      <button onClick={startTimer} disabled={timerActive}>
-        Iniciar
-      </button>
-      <button onClick={pauseTimer} disabled={!timerActive}>
-        Pausar
-      </button>
+    <div>
+      <h1>Painel de Alertas</h1>
+      <Timer chamado={chamado} ws={ws} apiBaseUrl={apiBaseUrl} />
     </div>
   );
 };
 
-export default Timer;
+export default App;
