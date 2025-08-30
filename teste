@@ -1,6 +1,118 @@
-No overload matches this call.
-  Overload 1 of 2, '(intervalId: string | number | Timeout): void', gave the following error.
-    Argument of type 'Timer' is not assignable to parameter of type 'string | number | Timeout'.
-      Property '[Symbol.dispose]' is missing in type 'Timer' but required in type 'Timeout'.
-  Overload 2 of 2, '(id: number): void', gave the following error.
-    Argument of type 'Timer' is not assignable to parameter of type 'number'.ts(2769)
+import React, { useEffect, useState, useRef } from "react";
+
+interface AlertData {
+  chamado: number;
+  startedAt: string | null;
+  durationMinutes: number;
+  timerActive: boolean;
+}
+
+const WEBSOCKET_URL = "wss://<SEU_ENDPOINT_WEBSOCKET>"; // substitua pelo seu endpoint
+
+const Timer: React.FC = () => {
+  const [alertData, setAlertData] = useState<AlertData | null>(null);
+  const [timeRemaining, setTimeRemaining] = useState<number>(0);
+  const wsRef = useRef<WebSocket | null>(null);
+  const intervalRef = useRef<number | null>(null);
+
+  // Conectar ao WebSocket
+  useEffect(() => {
+    const ws = new WebSocket(WEBSOCKET_URL);
+    wsRef.current = ws;
+
+    ws.onopen = () => {
+      console.log("✅ WebSocket conectado");
+    };
+
+    ws.onmessage = (event) => {
+      const data = JSON.parse(event.data);
+      console.log("📩 Mensagem recebida:", data);
+
+      if (data.type === "TIMER_UPDATED" || data.type === "updateTimer") {
+        setAlertData({
+          chamado: data.chamado,
+          startedAt: data.startedAt ?? null,
+          durationMinutes: data.durationMinutes ?? 15,
+          timerActive: data.timerActive ?? false,
+        });
+      }
+    };
+
+    ws.onclose = () => {
+      console.log("❌ WebSocket desconectado");
+    };
+
+    return () => {
+      ws.close();
+    };
+  }, []);
+
+  // Intervalo para atualizar tempo restante
+  useEffect(() => {
+    if (intervalRef.current) {
+      clearInterval(intervalRef.current);
+    }
+
+    intervalRef.current = window.setInterval(() => {
+      if (alertData && alertData.timerActive && alertData.startedAt) {
+        const startedAtDate = new Date(alertData.startedAt).getTime();
+        const now = new Date().getTime();
+        const remaining = Math.max(
+          0,
+          alertData.durationMinutes * 60 - Math.floor((now - startedAtDate) / 1000)
+        );
+        setTimeRemaining(remaining);
+      }
+    }, 1000);
+
+    return () => {
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current);
+      }
+    };
+  }, [alertData]);
+
+  const startTimer = () => {
+    if (wsRef.current && alertData) {
+      wsRef.current.send(
+        JSON.stringify({ action: "startTimer", chamado: alertData.chamado })
+      );
+    }
+  };
+
+  const pauseTimer = () => {
+    if (wsRef.current && alertData) {
+      wsRef.current.send(
+        JSON.stringify({ action: "pauseTimer", chamado: alertData.chamado })
+      );
+    }
+  };
+
+  // Formatar tempo restante em MM:SS
+  const formatTime = (seconds: number) => {
+    const m = Math.floor(seconds / 60)
+      .toString()
+      .padStart(2, "0");
+    const s = (seconds % 60).toString().padStart(2, "0");
+    return `${m}:${s}`;
+  };
+
+  return (
+    <div>
+      <h2>Painel de Alertas</h2>
+      {alertData ? (
+        <div>
+          <p>Chamado: {alertData.chamado}</p>
+          <p>Status: {alertData.timerActive ? "Ativo" : "Pausado"}</p>
+          <p>Tempo restante: {formatTime(timeRemaining)}</p>
+          <button onClick={startTimer}>Iniciar</button>
+          <button onClick={pauseTimer}>Pausar</button>
+        </div>
+      ) : (
+        <p>Carregando dados do chamado...</p>
+      )}
+    </div>
+  );
+};
+
+export default Timer;
