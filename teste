@@ -1,144 +1,110 @@
-import React, { useEffect, useState, useRef } from "react";
+import boto3
+import json
+from datetime import datetime, timezone
+from decimal import Decimal
 
-interface AlertData {
-  chamado: number;
-  startedAt: string | null;
-  durationMinutes: number;
-  timerActive: boolean;
-}
+# Conexão DynamoDB
+DDB = boto3.resource("dynamodb", region_name="us-east-1")
+ACOMP_TABLE = DDB.Table("painelmonitoracao_acompanhamento")  # Tabela de alertas
+CONN_TABLE = DDB.Table("painelmonitoracao_connections")       # Tabela de conexões WebSocket
 
-const WEBSOCKET_URL = "wss://<SEU_ENDPOINT_WEBSOCKET>"; // substitua pelo seu endpoint
-const API_URL = "https://<SUA_API_REST>/dados"; // substitua pelo endpoint da sua API REST que retorna os alertas
+# API Gateway Management API (WebSocket)
+APIGW_ENDPOINT = "https://tgwtw1v4rg.execute-api.us-east-1.amazonaws.com/dev"  # Substitua pelo seu endpoint
+apigw = boto3.client("apigatewaymanagementapi", endpoint_url=APIGW_ENDPOINT)
 
-const Timer: React.FC = () => {
-  const [alertData, setAlertData] = useState<AlertData | null>(null);
-  const [timeRemaining, setTimeRemaining] = useState<number>(0);
-  const wsRef = useRef<WebSocket | null>(null);
-  const intervalRef = useRef<number | null>(null);
+# Serialização Decimal
+def json_serial(obj):
+    if isinstance(obj, Decimal):
+        return int(obj) if obj % 1 == 0 else float(obj)
+    raise TypeError
 
-  // Buscar dados iniciais do chamado
-  useEffect(() => {
-    const fetchAlert = async () => {
-      try {
-        const res = await fetch(API_URL);
-        if (!res.ok) throw new Error("Falha ao buscar alertas");
-        const data = await res.json();
+# Função Lambda
+def lambda_handler(event, context):
+    route = event.get("requestContext", {}).get("routeKey")
+    connection_id = event.get("requestContext", {}).get("connectionId")
 
-        // Se houver mais de um chamado, pega o primeiro ou ajuste conforme necessário
-        if (Array.isArray(data) && data.length > 0) {
-          const alert = data[0];
-          setAlertData({
-            chamado: alert.chamado,
-            startedAt: alert.startedAt ?? null,
-            durationMinutes: alert.durationMinutes ?? 15,
-            timerActive: alert.timerActive ?? false,
-          });
-        }
-      } catch (err) {
-        console.error("Erro ao buscar alerta:", err);
-      }
-    };
+    # ---------------- Connect
+    if route == "$connect":
+        CONN_TABLE.put_item(Item={"connectionId": connection_id})
+        return {"statusCode": 200}
 
-    fetchAlert();
-  }, []);
+    # ---------------- Disconnect
+    elif route == "$disconnect":
+        CONN_TABLE.delete_item(Key={"connectionId": connection_id})
+        return {"statusCode": 200}
 
-  // Conectar ao WebSocket
-  useEffect(() => {
-    const ws = new WebSocket(WEBSOCKET_URL);
-    wsRef.current = ws;
+    # ---------------- Receber mensagem
+    elif route == "sendMessage":
+        body = json.loads(event.get("body", "{}"))
+        action = body.get("action")          # "startTimer" ou "pauseTimer"
+        chamado = body.get("chamado")        # id do chamado
 
-    ws.onopen = () => {
-      console.log("✅ WebSocket conectado");
-    };
+        if not chamado or not action:
+            return {"statusCode": 400, "body": "Chamado ou ação ausente"}
 
-    ws.onmessage = (event) => {
-      const data = JSON.parse(event.data);
-      console.log("📩 Mensagem recebida:", data);
+        # Pega o alerta atual
+        alerta_resp = ACOMP_TABLE.get_item(Key={"chamado": int(chamado)})
+        alerta = alerta_resp.get("Item")
 
-      if (data.type === "TIMER_UPDATED" || data.type === "updateTimer") {
-        setAlertData({
-          chamado: data.chamado,
-          startedAt: data.startedAt ?? null,
-          durationMinutes: data.durationMinutes ?? 15,
-          timerActive: data.timerActive ?? false,
-        });
-      }
-    };
+        if not alerta:
+            return {"statusCode": 404, "body": "Chamado não encontrado"}
 
-    ws.onclose = () => {
-      console.log("❌ WebSocket desconectado");
-    };
+        now_iso = datetime.utcnow().replace(tzinfo=timezone.utc).isoformat()
 
-    return () => {
-      ws.close();
-    };
-  }, []);
+        update_expr = ""
+        expr_values = {}
 
-  // Intervalo para atualizar tempo restante
-  useEffect(() => {
-    if (intervalRef.current) {
-      clearInterval(intervalRef.current);
-    }
+        if action == "startTimer":
+            update_expr = "SET timerActive = :t, startedAt = :s"
+            expr_values = {":t": True, ":s": now_iso}
+        elif action == "pauseTimer":
+            update_expr = "SET timerActive = :t"
+            expr_values = {":t": False}
+        else:
+            return {"statusCode": 400, "body": "Ação inválida"}
 
-    intervalRef.current = window.setInterval(() => {
-      if (alertData && alertData.timerActive && alertData.startedAt) {
-        const startedAtDate = new Date(alertData.startedAt).getTime();
-        const now = new Date().getTime();
-        const remaining = Math.max(
-          0,
-          alertData.durationMinutes * 60 - Math.floor((now - startedAtDate) / 1000)
-        );
-        setTimeRemaining(remaining);
-      }
-    }, 1000);
+        # Atualiza DynamoDB
+        ACOMP_TABLE.update_item(
+            Key={"chamado": int(chamado)},
+            UpdateExpression=update_expr,
+            ExpressionAttributeValues=expr_values
+        )
 
-    return () => {
-      if (intervalRef.current) {
-        clearInterval(intervalRef.current);
-      }
-    };
-  }, [alertData]);
+        # Busca estado atualizado
+        alerta_resp = ACOMP_TABLE.get_item(Key={"chamado": int(chamado)})
+        alerta = alerta_resp.get("Item")
 
-  const startTimer = () => {
-    if (wsRef.current && alertData) {
-      wsRef.current.send(
-        JSON.stringify({ action: "startTimer", chamado: alertData.chamado })
-      );
-    }
-  };
+        # Broadcast para todos os clientes conectados
+        connections = CONN_TABLE.scan().get("Items", [])
+        for conn in connections:
+            try:
+                apigw.post_to_connection(
+                    ConnectionId=conn["connectionId"],
+                    Data=json.dumps({
+                        "type": "TIMER_UPDATED",
+                        "chamado": alerta["chamado"],
+                        "timerActive": alerta.get("timerActive", False),
+                        "startedAt": alerta.get("startedAt"),
+                        "durationMinutes": alerta.get("durationMinutes", 15)
+                    }, default=json_serial)
+                )
+            except apigw.exceptions.GoneException:
+                CONN_TABLE.delete_item(Key={"connectionId": conn["connectionId"]})
 
-  const pauseTimer = () => {
-    if (wsRef.current && alertData) {
-      wsRef.current.send(
-        JSON.stringify({ action: "pauseTimer", chamado: alertData.chamado })
-      );
-    }
-  };
+        return {"statusCode": 200, "body": json.dumps({"message": "ok"})}
 
-  const formatTime = (seconds: number) => {
-    const m = Math.floor(seconds / 60)
-      .toString()
-      .padStart(2, "0");
-    const s = (seconds % 60).toString().padStart(2, "0");
-    return `${m}:${s}`;
-  };
+    # ---------------- GET estado atual (nova sessão)
+    elif route == "getState":
+        chamado = event.get("queryStringParameters", {}).get("chamado")
+        if not chamado:
+            return {"statusCode": 400, "body": "Chamado ausente"}
 
-  return (
-    <div>
-      <h2>Painel de Alertas</h2>
-      {alertData ? (
-        <div>
-          <p>Chamado: {alertData.chamado}</p>
-          <p>Status: {alertData.timerActive ? "Ativo" : "Pausado"}</p>
-          <p>Tempo restante: {formatTime(timeRemaining)}</p>
-          <button onClick={startTimer}>Iniciar</button>
-          <button onClick={pauseTimer}>Pausar</button>
-        </div>
-      ) : (
-        <p>Carregando dados do chamado...</p>
-      )}
-    </div>
-  );
-};
+        alerta_resp = ACOMP_TABLE.get_item(Key={"chamado": int(chamado)})
+        alerta = alerta_resp.get("Item")
+        if not alerta:
+            return {"statusCode": 404, "body": "Chamado não encontrado"}
 
-export default Timer;
+        return {"statusCode": 200, "body": json.dumps(alerta, default=json_serial)}
+
+    else:
+        return {"statusCode": 400, "body": "Rota não suportada"}
