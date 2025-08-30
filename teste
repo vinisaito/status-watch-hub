@@ -8,12 +8,39 @@ interface AlertData {
 }
 
 const WEBSOCKET_URL = "wss://<SEU_ENDPOINT_WEBSOCKET>"; // substitua pelo seu endpoint
+const API_URL = "https://<SUA_API_REST>/dados"; // substitua pelo endpoint da sua API REST que retorna os alertas
 
 const Timer: React.FC = () => {
   const [alertData, setAlertData] = useState<AlertData | null>(null);
   const [timeRemaining, setTimeRemaining] = useState<number>(0);
   const wsRef = useRef<WebSocket | null>(null);
   const intervalRef = useRef<number | null>(null);
+
+  // Buscar dados iniciais do chamado
+  useEffect(() => {
+    const fetchAlert = async () => {
+      try {
+        const res = await fetch(API_URL);
+        if (!res.ok) throw new Error("Falha ao buscar alertas");
+        const data = await res.json();
+
+        // Se houver mais de um chamado, pega o primeiro ou ajuste conforme necessário
+        if (Array.isArray(data) && data.length > 0) {
+          const alert = data[0];
+          setAlertData({
+            chamado: alert.chamado,
+            startedAt: alert.startedAt ?? null,
+            durationMinutes: alert.durationMinutes ?? 15,
+            timerActive: alert.timerActive ?? false,
+          });
+        }
+      } catch (err) {
+        console.error("Erro ao buscar alerta:", err);
+      }
+    };
+
+    fetchAlert();
+  }, []);
 
   // Conectar ao WebSocket
   useEffect(() => {
@@ -88,7 +115,6 @@ const Timer: React.FC = () => {
     }
   };
 
-  // Formatar tempo restante em MM:SS
   const formatTime = (seconds: number) => {
     const m = Math.floor(seconds / 60)
       .toString()
