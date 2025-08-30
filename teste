@@ -2,12 +2,39 @@
 import React, { useEffect, useState, useRef } from "react";
 
 const WS_URL = "wss://cn8i8z6f81.execute-api.us-east-1.amazonaws.com/prod";
+const API_URL = "https://cn8i8z6f81.execute-api.us-east-1.amazonaws.com/prod";
 
 function App() {
   const [timers, setTimers] = useState({});
   const ws = useRef(null);
 
+  // Lista de chamados que queremos monitorar
+  const chamados = [101, 102, 103]; // substitua pelos seus chamados reais
+
+  // Função para buscar estado atual via REST
+  const fetchInitialTimers = async () => {
+    const newTimers = {};
+    for (const chamado of chamados) {
+      try {
+        const res = await fetch(`${API_URL}?chamado=${chamado}`, {
+          method: "GET",
+        });
+        if (res.ok) {
+          const data = await res.json();
+          newTimers[chamado] = data;
+        } else {
+          console.warn(`Chamado ${chamado} não encontrado`);
+        }
+      } catch (err) {
+        console.error("Erro ao buscar chamado:", chamado, err);
+      }
+    }
+    setTimers(newTimers);
+  };
+
   useEffect(() => {
+    fetchInitialTimers();
+
     ws.current = new WebSocket(WS_URL);
 
     ws.current.onopen = () => {
@@ -48,7 +75,7 @@ function App() {
   return (
     <div style={{ padding: "2rem", fontFamily: "Arial" }}>
       <h1>Cronômetros em Tempo Real</h1>
-      {Object.keys(timers).length === 0 && <p>Nenhum chamado carregado.</p>}
+      {Object.keys(timers).length === 0 && <p>Carregando chamados...</p>}
       {Object.values(timers).map((timer) => (
         <div
           key={timer.chamado}
