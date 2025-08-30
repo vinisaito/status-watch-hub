@@ -1,364 +1,110 @@
-// src/components/Timer.tsx
-import React, { useEffect, useRef, useState } from "react";
+import boto3
+import json
+from datetime import datetime, timezone
+from decimal import Decimal
 
-interface ChamadoRaw {
-  chamado?: number | string;
-  startedAt?: string | null;
-  durationMinutes?: number | string;
-  timerActive?: boolean | string;
-  timeRemaining?: number | string | null;
-  // outros campos ignorados
-}
+# Conexão DynamoDB
+DDB = boto3.resource("dynamodb", region_name="us-east-1")
+ACOMP_TABLE = DDB.Table("painelmonitoracao_acompanhamento")  # Tabela de alertas
+CONN_TABLE = DDB.Table("painelmonitoracao_connections")       # Tabela de conexões WebSocket
 
-interface Chamado {
-  chamado: number;
-  startedAt: string | null;
-  durationMinutes: number;
-  timerActive: boolean;
-  timeRemaining: number; // em segundos
-}
+# API Gateway Management API (WebSocket)
+APIGW_ENDPOINT = "https://<SEU_API_ID>.execute-api.us-east-1.amazonaws.com/dev"  # Substitua pelo seu endpoint
+apigw = boto3.client("apigatewaymanagementapi", endpoint_url=APIGW_ENDPOINT)
 
-const WS_URL = "wss://SEU_ENDPOINT_DO_WEBSOCKET.execute-api.REGION.amazonaws.com/dev"; // <-- substituir
-const API_URL = "https://SEU_ENDPOINT_REST.execute-api.REGION.amazonaws.com/prod/dados"; // <-- substituir
+# Serialização Decimal
+def json_serial(obj):
+    if isinstance(obj, Decimal):
+        return int(obj) if obj % 1 == 0 else float(obj)
+    raise TypeError
 
-const normalizeRaw = (r: ChamadoRaw): Chamado | null => {
-  const chamado = Number(r.chamado);
-  if (Number.isNaN(chamado)) return null;
-  const durationMinutes = Number(r.durationMinutes ?? 15) || 15;
-  const timerActive = r.timerActive === true || r.timerActive === "true";
-  const startedAt = r.startedAt ?? null;
+# Função Lambda
+def lambda_handler(event, context):
+    route = event.get("requestContext", {}).get("routeKey")
+    connection_id = event.get("requestContext", {}).get("connectionId")
 
-  // compute initial timeRemaining - safe function uses startedAt or persisted timeRemaining
-  const initialRemaining = computeRemainingSafe({
-    chamado,
-    startedAt,
-    durationMinutes,
-    timerActive,
-    timeRemaining:
-      r.timeRemaining !== undefined && r.timeRemaining !== null
-        ? Number(r.timeRemaining)
-        : undefined,
-  });
+    # ---------------- Connect
+    if route == "$connect":
+        CONN_TABLE.put_item(Item={"connectionId": connection_id})
+        return {"statusCode": 200}
 
-  return {
-    chamado,
-    startedAt,
-    durationMinutes,
-    timerActive,
-    timeRemaining: initialRemaining,
-  };
-};
+    # ---------------- Disconnect
+    elif route == "$disconnect":
+        CONN_TABLE.delete_item(Key={"connectionId": connection_id})
+        return {"statusCode": 200}
 
-// calcula tempo restante de forma robusta
-const computeRemainingSafe = (c: {
-  chamado: number;
-  startedAt: string | null;
-  durationMinutes: number;
-  timerActive: boolean;
-  timeRemaining?: number;
-}): number => {
-  const total = (Number(c.durationMinutes) || 15) * 60;
+    # ---------------- Receber mensagem
+    elif route == "sendMessage":
+        body = json.loads(event.get("body", "{}"))
+        action = body.get("action")          # "startTimer" ou "pauseTimer"
+        chamado = body.get("chamado")        # id do chamado
 
-  // se o timer estiver pausado e backend forneceu timeRemaining, respeita esse valor
-  if (!c.timerActive && typeof c.timeRemaining === "number") {
-    return Math.max(0, Math.floor(c.timeRemaining));
-  }
+        if not chamado or not action:
+            return {"statusCode": 400, "body": "Chamado ou ação ausente"}
 
-  // se não tem startedAt, volta ao total
-  if (!c.startedAt) return total;
+        # Pega o alerta atual
+        alerta_resp = ACOMP_TABLE.get_item(Key={"chamado": int(chamado)})
+        alerta = alerta_resp.get("Item")
 
-  const ts = Date.parse(c.startedAt);
-  if (Number.isNaN(ts)) return total;
+        if not alerta:
+            return {"statusCode": 404, "body": "Chamado não encontrado"}
 
-  const elapsed = Math.floor((Date.now() - ts) / 1000);
-  return Math.max(0, total - elapsed);
-};
+        now_iso = datetime.utcnow().replace(tzinfo=timezone.utc).isoformat()
 
-const formatMMSS = (seconds: number) => {
-  const m = Math.floor(seconds / 60)
-    .toString()
-    .padStart(2, "0");
-  const s = Math.floor(seconds % 60)
-    .toString()
-    .padStart(2, "0");
-  return `${m}:${s}`;
-};
+        update_expr = ""
+        expr_values = {}
 
-const Timer: React.FC = () => {
-  const [chamados, setChamados] = useState<Chamado[]>([]);
-  const [wsConnected, setWsConnected] = useState(false);
-  const wsRef = useRef<WebSocket | null>(null);
+        if action == "startTimer":
+            update_expr = "SET timerActive = :t, startedAt = :s"
+            expr_values = {":t": True, ":s": now_iso}
+        elif action == "pauseTimer":
+            update_expr = "SET timerActive = :t"
+            expr_values = {":t": False}
+        else:
+            return {"statusCode": 400, "body": "Ação inválida"}
 
-  // fetch inicial via REST para popular a lista (evita tela vazia ao abrir)
-  useEffect(() => {
-    let mounted = true;
-    (async () => {
-      try {
-        console.log("[Timer] fetch inicial ->", API_URL);
-        const res = await fetch(API_URL, { cache: "no-store" });
-        if (!res.ok) {
-          console.error("[Timer] Erro no fetch inicial:", res.status, await res.text());
-          return;
-        }
-        const json = await res.json();
-        console.log("[Timer] resposta REST bruta:", json);
-
-        // extrai array de forma tolerante: array direto, Items, data, etc.
-        const arr = Array.isArray(json)
-          ? json
-          : Array.isArray((json as any).Items)
-          ? (json as any).Items
-          : (json as any).data ?? [];
-
-        const norm = (arr || [])
-          .map((r: ChamadoRaw) => normalizeRaw(r))
-          .filter((x: Chamado | null): x is Chamado => x !== null);
-
-        if (mounted) {
-          setChamados((prev) => {
-            // merge sem duplicar: preferir valores do REST, mas manter ordem
-            const map = new Map<number, Chamado>();
-            norm.forEach((n) => map.set(n.chamado, n));
-            prev.forEach((p) => {
-              if (!map.has(p.chamado)) map.set(p.chamado, p);
-            });
-            return Array.from(map.values()).sort((a, b) => a.chamado - b.chamado);
-          });
-        }
-      } catch (err) {
-        console.error("[Timer] Falha ao buscar dados iniciais:", err);
-      }
-    })();
-    return () => {
-      mounted = false;
-    };
-  }, []);
-
-  // conecta WebSocket e trata mensagens
-  useEffect(() => {
-    let closedByUs = false;
-    const connect = () => {
-      console.log("[Timer] conectando WS ->", WS_URL);
-      const ws = new WebSocket(WS_URL);
-      wsRef.current = ws;
-
-      ws.onopen = () => {
-        console.log("[Timer] WS conectado");
-        setWsConnected(true);
-        // pede todos via WS (se API suportar)
-        try {
-          ws.send(JSON.stringify({ action: "getAll" }));
-        } catch (e) {
-          console.warn("[Timer] erro ao enviar getAll:", e);
-        }
-      };
-
-      ws.onmessage = (ev) => {
-        try {
-          const data = JSON.parse(ev.data);
-          console.log("[Timer] MSG WS:", data);
-
-          if (data.type === "ALL_CHAMADOS" && Array.isArray(data.data)) {
-            const norm = data.data
-              .map((r: ChamadoRaw) => normalizeRaw(r))
-              .filter((x: Chamado | null): x is Chamado => x !== null);
-            setChamados(() => norm.sort((a, b) => a.chamado - b.chamado));
-            return;
-          }
-
-          if (data.type === "TIMER_UPDATED") {
-            // data contains chamado + fields
-            const raw: ChamadoRaw = {
-              chamado: data.chamado,
-              startedAt: data.startedAt ?? null,
-              durationMinutes: data.durationMinutes ?? undefined,
-              timerActive: data.timerActive ?? undefined,
-              timeRemaining: data.timeRemaining ?? undefined,
-            };
-            const normalized = normalizeRaw(raw);
-            if (!normalized) return;
-
-            setChamados((prev) => {
-              const idx = prev.findIndex((p) => p.chamado === normalized.chamado);
-              if (idx >= 0) {
-                const copy = [...prev];
-                // merge preserving fields possibly not provided by WS
-                const merged: Chamado = {
-                  ...copy[idx],
-                  ...normalized,
-                  // recompute timeRemaining safely (if WS sent timeRemaining and timerActive false, we should use it)
-                  timeRemaining: computeRemainingSafe({
-                    chamado: normalized.chamado,
-                    startedAt: normalized.startedAt,
-                    durationMinutes: normalized.durationMinutes,
-                    timerActive: normalized.timerActive,
-                    timeRemaining: normalized.timeRemaining,
-                  }),
-                };
-                copy[idx] = merged;
-                return copy;
-              } else {
-                return [...prev, normalized].sort((a, b) => a.chamado - b.chamado);
-              }
-            });
-          }
-        } catch (err) {
-          console.error("[Timer] erro ao parsear msg WS:", err, ev.data);
-        }
-      };
-
-      ws.onerror = (err) => {
-        console.error("[Timer] WS erro:", err);
-      };
-
-      ws.onclose = (ev) => {
-        setWsConnected(false);
-        if (!closedByUs) {
-          console.warn("[Timer] WS fechado, reconectando em 2s", ev.code, ev.reason);
-          setTimeout(connect, 2000);
-        }
-      };
-    };
-
-    connect();
-    return () => {
-      closedByUs = true;
-      wsRef.current?.close();
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  // tick: recalcula timeRemaining a cada segundo (força re-render)
-  useEffect(() => {
-    const id = setInterval(() => {
-      setChamados((prev) =>
-        prev.map((c) => ({
-          ...c,
-          timeRemaining: computeRemainingSafe({
-            chamado: c.chamado,
-            startedAt: c.startedAt,
-            durationMinutes: c.durationMinutes,
-            timerActive: c.timerActive,
-            timeRemaining: c.timeRemaining,
-          }),
-        }))
-      );
-    }, 1000);
-    return () => clearInterval(id);
-  }, []);
-
-  // enviar comando start/pause (WS)
-  const sendAction = (chamado: number, action: "startTimer" | "pauseTimer") => {
-    if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
-      alert("WebSocket não conectado. Aguarde e tente novamente.");
-      return;
-    }
-
-    const payload = { action, chamado };
-    try {
-      wsRef.current.send(JSON.stringify(payload));
-      console.log("[Timer] enviado:", payload);
-    } catch (err) {
-      console.error("[Timer] erro ao enviar:", err);
-    }
-
-    // atualização otimista local: evita delay até o broadcast do servidor
-    if (action === "startTimer") {
-      const now = new Date().toISOString();
-      setChamados((prev) =>
-        prev.map((c) =>
-          c.chamado === chamado
-            ? {
-                ...c,
-                startedAt: now,
-                timerActive: true,
-                timeRemaining: computeRemainingSafe({
-                  chamado,
-                  startedAt: now,
-                  durationMinutes: c.durationMinutes,
-                  timerActive: true,
-                }),
-              }
-            : c
+        # Atualiza DynamoDB
+        ACOMP_TABLE.update_item(
+            Key={"chamado": int(chamado)},
+            UpdateExpression=update_expr,
+            ExpressionAttributeValues=expr_values
         )
-      );
-    } else if (action === "pauseTimer") {
-      // calcula remaining localmente e marca pausado
-      setChamados((prev) =>
-        prev.map((c) =>
-          c.chamado === chamado
-            ? {
-                ...c,
-                timerActive: false,
-                timeRemaining: computeRemainingSafe({
-                  chamado,
-                  startedAt: c.startedAt,
-                  durationMinutes: c.durationMinutes,
-                  timerActive: false,
-                  timeRemaining: c.timeRemaining,
-                }),
-              }
-            : c
-        )
-      );
-    }
-  };
 
-  return (
-    <div style={{ padding: 16, fontFamily: "Arial, sans-serif" }}>
-      <h2>Painel de Alertas</h2>
-      <div style={{ marginBottom: 8 }}>
-        WebSocket:{" "}
-        <strong style={{ color: wsConnected ? "green" : "red" }}>
-          {wsConnected ? "conectado" : "desconectado"}
-        </strong>
-      </div>
+        # Busca estado atualizado
+        alerta_resp = ACOMP_TABLE.get_item(Key={"chamado": int(chamado)})
+        alerta = alerta_resp.get("Item")
 
-      {chamados.length === 0 ? (
-        <div>Carregando alertas...</div>
-      ) : (
-        chamados.map((c) => (
-          <div
-            key={c.chamado}
-            style={{
-              border: "1px solid #ddd",
-              padding: 10,
-              borderRadius: 6,
-              marginBottom: 8,
-            }}
-          >
-            <div>
-              <strong>Chamado:</strong> {c.chamado}
-            </div>
-            <div>
-              <strong>Status:</strong> {c.timerActive ? "Rodando" : "Pausado"}
-            </div>
-            <div>
-              <strong>Tempo restante:</strong> {formatMMSS(c.timeRemaining)}
-            </div>
-            <div style={{ marginTop: 8 }}>
-              <button
-                onClick={() => sendAction(c.chamado, c.timerActive ? "pauseTimer" : "startTimer")}
-                style={{
-                  background: c.timerActive ? "#d9534f" : "#5cb85c",
-                  color: "white",
-                  border: "none",
-                  padding: "6px 10px",
-                  borderRadius: 4,
-                  cursor: "pointer",
-                }}
-              >
-                {c.timerActive ? "Pausar" : "Iniciar"}
-              </button>
-            </div>
-            <small style={{ color: "#666", display: "block", marginTop: 8 }}>
-              startedAt: {String(c.startedAt)} • duration: {c.durationMinutes}min • timeRemaining (persistido/estimado): {c.timeRemaining}
-            </small>
-          </div>
-        ))
-      )}
-    </div>
-  );
-};
+        # Broadcast para todos os clientes conectados
+        connections = CONN_TABLE.scan().get("Items", [])
+        for conn in connections:
+            try:
+                apigw.post_to_connection(
+                    ConnectionId=conn["connectionId"],
+                    Data=json.dumps({
+                        "type": "TIMER_UPDATED",
+                        "chamado": alerta["chamado"],
+                        "timerActive": alerta.get("timerActive", False),
+                        "startedAt": alerta.get("startedAt"),
+                        "durationMinutes": alerta.get("durationMinutes", 15)
+                    }, default=json_serial)
+                )
+            except apigw.exceptions.GoneException:
+                CONN_TABLE.delete_item(Key={"connectionId": conn["connectionId"]})
 
-export default Timer;
+        return {"statusCode": 200, "body": json.dumps({"message": "ok"})}
+
+    # ---------------- GET estado atual (nova sessão)
+    elif route == "getState":
+        chamado = event.get("queryStringParameters", {}).get("chamado")
+        if not chamado:
+            return {"statusCode": 400, "body": "Chamado ausente"}
+
+        alerta_resp = ACOMP_TABLE.get_item(Key={"chamado": int(chamado)})
+        alerta = alerta_resp.get("Item")
+        if not alerta:
+            return {"statusCode": 404, "body": "Chamado não encontrado"}
+
+        return {"statusCode": 200, "body": json.dumps(alerta, default=json_serial)}
+
+    else:
+        return {"statusCode": 400, "body": "Rota não suportada"}
