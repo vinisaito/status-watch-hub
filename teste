@@ -4,7 +4,6 @@ interface TimerProps {
   chamadoId: number;
 }
 
-// URLs definidas diretamente aqui
 const WS_URL = "wss://seu-endpoint-wss.execute-api.us-east-1.amazonaws.com/prod";
 const API_BASE_URL = "https://seu-endpoint-rest.execute-api.us-east-1.amazonaws.com/prod";
 
@@ -14,25 +13,23 @@ const Timer: React.FC<TimerProps> = ({ chamadoId }) => {
   const [startedAt, setStartedAt] = useState<string | null>(null);
 
   const wsRef = useRef<WebSocket | null>(null);
-  const intervalRef = useRef<NodeJS.Timer | null>(null);
+  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  // Função para buscar estado atual da API
   const fetchState = async () => {
     try {
       const resp = await fetch(`${API_BASE_URL}/dados/${chamadoId}`);
       const data = await resp.json();
       console.log("📡 Estado inicial:", data);
 
-      setTimerActive(data.timerActive);
+      setTimerActive(Boolean(data.timerActive));
       setStartedAt(data.startedAt || null);
-      setTimeRemaining(data.timeRemaining || 0);
+      setTimeRemaining(Number(data.timeRemaining) || 0);
     } catch (err) {
       console.error("❌ Erro ao buscar estado:", err);
     }
   };
 
-  // Função para enviar ação via WS
-  const sendAction = (action: string) => {
+  const sendAction = (action: "startTimer" | "pauseTimer") => {
     const ws = wsRef.current;
     if (ws && ws.readyState === WebSocket.OPEN) {
       console.log(`📤 Enviando ação: ${action}`);
@@ -42,7 +39,6 @@ const Timer: React.FC<TimerProps> = ({ chamadoId }) => {
     }
   };
 
-  // Conectar WebSocket
   useEffect(() => {
     console.log("🔌 Conectando WebSocket...");
     const ws = new WebSocket(WS_URL);
@@ -57,16 +53,16 @@ const Timer: React.FC<TimerProps> = ({ chamadoId }) => {
       console.log("📩 Mensagem recebida:", msg);
 
       if (msg.type === "TIMER_UPDATED" && msg.chamado === chamadoId) {
-        setTimerActive(msg.timerActive);
+        setTimerActive(Boolean(msg.timerActive));
         setStartedAt(msg.startedAt || null);
-        setTimeRemaining(msg.timeRemaining || 0);
+        setTimeRemaining(Number(msg.timeRemaining) || 0);
       }
     };
 
     ws.onerror = (err) => console.error("❌ WebSocket error:", err);
     ws.onclose = () => console.log("❌ WebSocket fechado");
 
-    fetchState(); // pega estado inicial
+    fetchState();
 
     return () => {
       ws.close();
@@ -74,7 +70,6 @@ const Timer: React.FC<TimerProps> = ({ chamadoId }) => {
     };
   }, [chamadoId]);
 
-  // Cronômetro interno
   useEffect(() => {
     if (intervalRef.current) clearInterval(intervalRef.current);
 
@@ -89,7 +84,6 @@ const Timer: React.FC<TimerProps> = ({ chamadoId }) => {
     };
   }, [timerActive, timeRemaining]);
 
-  // Formatar tempo em mm:ss
   const formatTime = (seconds: number) => {
     const m = Math.floor(seconds / 60)
       .toString()
