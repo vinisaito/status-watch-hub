@@ -1,89 +1,109 @@
 import React, { useEffect, useState, useRef } from "react";
 
+// ================= CONFIGURAÇÕES =================
+// URLs que você pode definir diretamente aqui
+const WS_URL = "wss://SEU_ENDPOINT_WS.execute-api.us-east-1.amazonaws.com/prod";
+const REST_URL = "https://SEU_ENDPOINT_REST.execute-api.us-east-1.amazonaws.com/prod/getState";
+
 interface TimerProps {
-  chamadoId: number;
+  chamado: number; // ID do chamado
 }
 
-// Defina aqui a URL do seu WebSocket
-const WS_URL = "wss://seu-endpoint-wss.execute-api.us-east-1.amazonaws.com/prod";
-
-const Timer: React.FC<TimerProps> = ({ chamadoId }) => {
-  const [timeRemaining, setTimeRemaining] = useState<number>(0);
-  const [timerActive, setTimerActive] = useState<boolean>(false);
+const Timer: React.FC<TimerProps> = ({ chamado }) => {
+  const [timerActive, setTimerActive] = useState(false);
+  const [timeRemaining, setTimeRemaining] = useState(0); // segundos
+  const [durationMinutes, setDurationMinutes] = useState(15);
   const [startedAt, setStartedAt] = useState<string | null>(null);
 
   const wsRef = useRef<WebSocket | null>(null);
-  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const intervalRef = useRef<NodeJS.Timer | null>(null);
 
-  const sendAction = (action: "startTimer" | "pauseTimer" | "getState") => {
-    const ws = wsRef.current;
-    if (ws && ws.readyState === WebSocket.OPEN) {
-      console.log(`📤 Enviando ação: ${action}`);
-      ws.send(JSON.stringify({ action, chamado: chamadoId }));
-    } else {
-      console.log("⏳ WebSocket ainda conectando...");
-    }
-  };
-
+  // --------- Conecta WebSocket
   useEffect(() => {
-    console.log("🔌 Conectando WebSocket...");
+    console.log("🔌 Conectando no WebSocket...");
     const ws = new WebSocket(WS_URL);
     wsRef.current = ws;
 
     ws.onopen = () => {
-      console.log("✅ WebSocket conectado!");
-      // Solicita estado inicial do chamado
-      sendAction("getState");
+      console.log("✅ WebSocket conectado");
+
+      // Buscar estado inicial via REST
+      fetch(`${REST_URL}?chamado=${chamado}`)
+        .then(res => res.json())
+        .then(data => {
+          console.log("📡 Estado inicial recebido:", data);
+          setTimerActive(data.timerActive);
+          setTimeRemaining(data.timeRemaining || data.durationMinutes * 60);
+          setDurationMinutes(data.durationMinutes || 15);
+          setStartedAt(data.startedAt || null);
+        })
+        .catch(err => console.error("❌ Erro ao buscar estado inicial:", err));
     };
 
     ws.onmessage = (event) => {
-      const msg = JSON.parse(event.data);
-      console.log("📩 Mensagem recebida:", msg);
-
-      if (msg.type === "TIMER_UPDATED" && msg.chamado === chamadoId) {
-        setTimerActive(Boolean(msg.timerActive));
-        setStartedAt(msg.startedAt || null);
-        setTimeRemaining(Number(msg.timeRemaining) || 0);
+      try {
+        const msg = JSON.parse(event.data);
+        if (msg.type === "TIMER_UPDATED" && msg.chamado === chamado) {
+          console.log("📩 Mensagem recebida do WS:", msg);
+          setTimerActive(msg.timerActive);
+          setTimeRemaining(msg.timeRemaining || msg.durationMinutes * 60);
+          setDurationMinutes(msg.durationMinutes || 15);
+          setStartedAt(msg.startedAt || null);
+        }
+      } catch (err) {
+        console.error("❌ Erro ao processar mensagem WS:", err);
       }
     };
 
-    ws.onerror = (err) => console.error("❌ WebSocket error:", err);
-    ws.onclose = () => console.log("❌ WebSocket fechado");
+    ws.onclose = () => console.log("❌ WebSocket desconectado");
+    ws.onerror = (err) => console.error("❌ WebSocket erro:", err);
 
     return () => {
       ws.close();
-      if (intervalRef.current) clearInterval(intervalRef.current);
     };
-  }, [chamadoId]);
+  }, [chamado]);
 
+  // --------- Intervalo para decrementar tempo localmente
   useEffect(() => {
     if (intervalRef.current) clearInterval(intervalRef.current);
 
-    if (timerActive && timeRemaining > 0) {
+    if (timerActive) {
       intervalRef.current = setInterval(() => {
-        setTimeRemaining((prev) => Math.max(prev - 1, 0));
+        setTimeRemaining(prev => Math.max(prev - 1, 0));
       }, 1000);
     }
 
     return () => {
       if (intervalRef.current) clearInterval(intervalRef.current);
     };
-  }, [timerActive, timeRemaining]);
+  }, [timerActive]);
 
+  // --------- Função para enviar ação ao WS
+  const sendAction = (action: "startTimer" | "pauseTimer") => {
+    if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
+      console.log("⏳ WebSocket ainda não conectado");
+      return;
+    }
+
+    console.log(`✉️ Enviando ${action}...`);
+    wsRef.current.send(JSON.stringify({ action, chamado }));
+  };
+
+  // --------- Formata tempo em MM:SS
   const formatTime = (seconds: number) => {
-    const m = Math.floor(seconds / 60)
-      .toString()
-      .padStart(2, "0");
-    const s = (seconds % 60).toString().padStart(2, "0");
+    const m = Math.floor(seconds / 60).toString().padStart(2, "0");
+    const s = Math.floor(seconds % 60).toString().padStart(2, "0");
     return `${m}:${s}`;
   };
 
   return (
-    <div>
-      <h2>Chamado {chamadoId}</h2>
-      <p>Status: {timerActive ? "Ativo" : "Pausado"}</p>
+    <div style={{ border: "1px solid #ccc", padding: "1rem", width: "220px" }}>
+      <h3>Chamado {chamado}</h3>
       <p>Tempo restante: {formatTime(timeRemaining)}</p>
-      <button onClick={() => sendAction("startTimer")}>Iniciar</button>
+      <p>Status: {timerActive ? "🟢 Rodando" : "⏸ Pausado"}</p>
+      <button onClick={() => sendAction("startTimer")} style={{ marginRight: "0.5rem" }}>
+        Iniciar
+      </button>
       <button onClick={() => sendAction("pauseTimer")}>Pausar</button>
     </div>
   );
