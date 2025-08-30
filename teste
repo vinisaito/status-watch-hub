@@ -3,3 +3,6 @@ except apigw.exceptions.GoneException:
     connections_table.delete_item(Key={"connectionId": connection_id})
 except Exception as e:
     print(f"Erro ao enviar estado inicial: {e}")
+
+
+print(f"[DEBUG] Enviando estado inicial para {connection_id}")
