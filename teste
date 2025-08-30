@@ -2,19 +2,18 @@
 import React, { useEffect, useState, useRef } from "react";
 
 const WS_URL = "wss://cn8i8z6f81.execute-api.us-east-1.amazonaws.com/prod";
+const API_URL = "https://cn8i8z6f81.execute-api.us-east-1.amazonaws.com/prod";
 
-function Timer({ chamado = 101, durationMinutes = 15 }) {
+function Timer({ chamado = 101 }) {
   const [timer, setTimer] = useState(null);
   const ws = useRef(null);
 
-  // Conecta WebSocket e inicia o timer automaticamente
+  // Conecta WebSocket e recebe updates
   useEffect(() => {
     ws.current = new WebSocket(WS_URL);
 
     ws.current.onopen = () => {
       console.log("Conectado ao WebSocket!");
-      // inicia o timer assim que conectar
-      sendAction("startTimer");
     };
 
     ws.current.onmessage = (event) => {
@@ -29,7 +28,7 @@ function Timer({ chamado = 101, durationMinutes = 15 }) {
     return () => ws.current.close();
   }, [chamado]);
 
-  // decrementa timer localmente
+  // Decremento local do timer
   useEffect(() => {
     const interval = setInterval(() => {
       if (timer && timer.timerActive && timer.timeRemaining > 0) {
@@ -42,13 +41,20 @@ function Timer({ chamado = 101, durationMinutes = 15 }) {
     return () => clearInterval(interval);
   }, [timer]);
 
-  const sendAction = (action) => {
-    if (ws.current && ws.current.readyState === WebSocket.OPEN) {
-      ws.current.send(JSON.stringify({ action, chamado }));
+  // Envia ação para a Lambda via fetch HTTP
+  const sendAction = async (action) => {
+    try {
+      await fetch(API_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action, chamado })
+      });
+    } catch (err) {
+      console.error("Erro ao enviar ação:", err);
     }
   };
 
-  if (!timer) return <div>Conectando e iniciando timer...</div>;
+  if (!timer) return <div>Conectando e aguardando updates...</div>;
 
   const formatTime = (seconds) => {
     const m = Math.floor(seconds / 60);
@@ -57,7 +63,7 @@ function Timer({ chamado = 101, durationMinutes = 15 }) {
   };
 
   return (
-    <div>
+    <div style={{ padding: "1rem", fontFamily: "Arial" }}>
       <h3>Chamado #{timer.chamado}</h3>
       <p>Tempo restante: {formatTime(timer.timeRemaining)}</p>
       <p>Status: {timer.timerActive ? "Ativo" : "Pausado"}</p>
@@ -65,7 +71,7 @@ function Timer({ chamado = 101, durationMinutes = 15 }) {
         {timer.timerActive ? "Pausar" : "Iniciar"}
       </button>
       <button onClick={() => sendAction("startTimer")} style={{ marginLeft: "1rem" }}>
-        Reiniciar / Start
+        Reiniciar
       </button>
     </div>
   );
