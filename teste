@@ -1,8 +1,6 @@
 import React, { useEffect, useState, useRef } from "react";
-import axios from "axios";
 
-const WEBSOCKET_URL = "wss://xxxxxx.execute-api.REGION.amazonaws.com/dev"; // 🔹 Altere para seu WebSocket
-const API_URL = "https://xxxxxx.execute-api.REGION.amazonaws.com/dev"; // 🔹 Altere para seu endpoint HTTP
+const WEBSOCKET_URL = "wss://xxxxxx.execute-api.REGION.amazonaws.com/dev"; // 🔹 Coloque seu WebSocket da API Gateway
 
 interface Chamado {
   chamado: number;
@@ -12,11 +10,11 @@ interface Chamado {
   timeRemaining?: number;
 }
 
-const App: React.FC = () => {
+const Timer: React.FC = () => {
   const [chamados, setChamados] = useState<Chamado[]>([]);
   const wsRef = useRef<WebSocket | null>(null);
 
-  // 🔹 Atualiza o estado quando receber dados via WebSocket
+  // 🔹 Conecta ao WebSocket
   const setupWebSocket = () => {
     wsRef.current = new WebSocket(WEBSOCKET_URL);
 
@@ -48,7 +46,7 @@ const App: React.FC = () => {
     };
   };
 
-  // 🔹 Função para atualizar timers no front
+  // 🔹 Atualiza contagem regressiva no front
   const tickTimers = () => {
     setChamados((prev) =>
       prev.map((c) => {
@@ -59,7 +57,7 @@ const App: React.FC = () => {
     );
   };
 
-  // 🔹 Iniciar/Pausar Timer
+  // 🔹 Inicia ou pausa timer
   const toggleTimer = (chamado: number, isActive: boolean) => {
     wsRef.current?.send(
       JSON.stringify({
@@ -71,7 +69,6 @@ const App: React.FC = () => {
 
   useEffect(() => {
     setupWebSocket();
-    axios.get(API_URL).then((res) => setChamados(res.data));
     const interval = setInterval(tickTimers, 1000);
     return () => clearInterval(interval);
   }, []);
@@ -117,4 +114,4 @@ const App: React.FC = () => {
   );
 };
 
-export default App;
+export default Timer;
