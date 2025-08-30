@@ -1,2 +1,3 @@
-print(f"[DEBUG] Evento CONNECT recebido: {json.dumps(event)}")
-print(f"[DEBUG] Estado atual scan: {json.dumps(response, cls=DecimalEncoder)}")
+
+2025-08-30T23:23:11.677Z
+Erro ao enviar estado inicial: An error occurred (GoneException) when calling the PostToConnection operation: 
