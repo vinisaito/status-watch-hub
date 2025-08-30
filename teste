@@ -3,14 +3,13 @@ import boto3
 import os
 import decimal
 from datetime import datetime
+from collections import defaultdict
 
 dynamodb = boto3.resource("dynamodb")
 connections_table = dynamodb.Table(os.environ["CONNECTIONS_TABLE"])
 chamados_table = dynamodb.Table(os.environ["CHAMADOS_TABLE"])
 
-# ----------------------
-# Encoder para Decimal → int/float
-# ----------------------
+# ----- Decimal → JSON -----
 class DecimalEncoder(json.JSONEncoder):
     def default(self, o):
         if isinstance(o, decimal.Decimal):
@@ -20,12 +19,8 @@ class DecimalEncoder(json.JSONEncoder):
 def to_json(data):
     return json.dumps(data, cls=DecimalEncoder)
 
-# ----------------------
-# Lambda handler
-# ----------------------
+# ----- Handler -----
 def lambda_handler(event, context):
-    print(f"[DEBUG] Evento recebido: {json.dumps(event)}")
-
     route = event["requestContext"]["routeKey"]
 
     if route == "$connect":
@@ -39,81 +34,87 @@ def lambda_handler(event, context):
     else:
         return {"statusCode": 400, "body": "Rota inválida"}
 
-# ----------------------
-# Conectar
-# ----------------------
+# ----- $connect -----
 def on_connect(event):
-    connection_id = event["requestContext"]["connectionId"]
+    rc = event["requestContext"]
+    connection_id = rc["connectionId"]
+    domain_name = rc["domainName"]          # p.ex. abc123.execute-api.sa-east-1.amazonaws.com
+    stage = rc["stage"]                      # p.ex. "prod"
+
+    # Salva conexão com domínio e stage (fundamental p/ broadcast correto)
     connections_table.put_item(
         Item={
             "connectionId": connection_id,
-            "connectedAt": int(datetime.utcnow().timestamp())
+            "connectedAt": int(datetime.utcnow().timestamp()),
+            "domainName": domain_name,
+            "stage": stage,
         }
     )
-    print(f"[DEBUG] Conexão registrada: {connection_id}")
+    print(f"[DEBUG] Conexão registrada: {connection_id} @ {domain_name}/{stage}")
 
-    # Envia estado atual dos chamados para o novo cliente
-    apigw = boto3.client(
+    # Envia estado atual dos chamados para o NOVO cliente
+    mgmt = boto3.client(
         "apigatewaymanagementapi",
-        endpoint_url=os.environ["WS_ENDPOINT"]
+        endpoint_url=f"https://{domain_name}/{stage}",
     )
+
     response = chamados_table.scan()
-    print(f"[DEBUG] Estado atual: {response.get('Items', [])}")
+    items = response.get("Items", [])
+    print(f"[DEBUG] Itens atuais (chamados): {to_json(items)}")
 
-    for item in response.get("Items", []):
+    for item in items:
+        msg = {
+            "action": "currentState",
+            "chamado": int(item["chamado"]),
+            "status": str(item.get("status", "pendente")),
+            "timerStart": int(item["timerStart"]) if "timerStart" in item else None,  # seg
+            # Se preferir já em ms: use int(item["timerStart"]) * 1000
+        }
         try:
-            apigw.post_to_connection(
-                Data=to_json({
-                    "action": "currentState",
-                    "chamado": int(item["chamado"]),
-                    "status": str(item.get("status", "pendente")),
-                    "timerStart": int(item["timerStart"]) if "timerStart" in item else None
-                }),
-                ConnectionId=connection_id
-            )
-        except apigw.exceptions.GoneException:
-            print(f"[WARN] Conexão {connection_id} já expirada. Removendo...")
+            mgmt.post_to_connection(Data=to_json(msg), ConnectionId=connection_id)
+        except mgmt.exceptions.GoneException:
+            print(f"[WARN] Conexão {connection_id} Gone no $connect. Removendo.")
             connections_table.delete_item(Key={"connectionId": connection_id})
+            break
         except Exception as e:
-            print(f"[ERROR] Erro ao enviar estado inicial: {e}")
+            print(f"[ERROR] Falha ao enviar estado inicial p/ {connection_id}: {e}")
 
-    return {"statusCode": 200, "body": "Connected"}
+    return {"statusCode": 200}
 
-# ----------------------
-# Desconectar
-# ----------------------
+# ----- $disconnect -----
 def on_disconnect(event):
     connection_id = event["requestContext"]["connectionId"]
     connections_table.delete_item(Key={"connectionId": connection_id})
     print(f"[DEBUG] Conexão removida: {connection_id}")
-    return {"statusCode": 200, "body": "Disconnected"}
+    return {"statusCode": 200}
 
-# ----------------------
-# Iniciar Timer
-# ----------------------
+# ----- startTimer -----
 def start_timer(event):
     body = json.loads(event["body"])
     chamado = int(body["chamado"])
+
+    # Em segundos (compatível com sua versão funcional).
+    # Se quiser em ms: trocar para int(datetime.utcnow().timestamp() * 1000)
     timer_start = int(datetime.utcnow().timestamp())
 
     chamados_table.put_item(
         Item={
             "chamado": chamado,
             "timerStart": timer_start,
-            "status": "pendente"
+            "status": "pendente",
         }
     )
-    print(f"[DEBUG] Chamado salvo: {chamado} - timerStart={timer_start}")
+    print(f"[DEBUG] Chamado salvo: {chamado} - timerStart={timer_start}s")
 
-    return broadcast({
+    _broadcast({
         "action": "timerStarted",
         "chamado": chamado,
-        "timerStart": timer_start
+        "timerStart": timer_start,
     })
 
-# ----------------------
-# Atualizar Status
-# ----------------------
+    return {"statusCode": 200}
+
+# ----- updateStatus -----
 def update_status(event):
     body = json.loads(event["body"])
     chamado = int(body["chamado"])
@@ -123,39 +124,48 @@ def update_status(event):
         Key={"chamado": chamado},
         UpdateExpression="SET #s = :s",
         ExpressionAttributeNames={"#s": "status"},
-        ExpressionAttributeValues={":s": status}
+        ExpressionAttributeValues={":s": status},
     )
     print(f"[DEBUG] Status atualizado: {chamado} -> {status}")
 
-    return broadcast({
+    _broadcast({
         "action": "statusUpdated",
         "chamado": chamado,
-        "status": status
+        "status": status,
     })
 
-# ----------------------
-# Envio para todos
-# ----------------------
-def broadcast(message):
-    apigw = boto3.client(
-        "apigatewaymanagementapi",
-        endpoint_url=os.environ["WS_ENDPOINT"]
-    )
+    return {"statusCode": 200}
 
+# ----- broadcast dinâmico por (domain, stage) -----
+def _broadcast(message):
     connections = connections_table.scan().get("Items", [])
-    print(f"[DEBUG] Enviando para {len(connections)} conexões")
+    if not connections:
+        print("[DEBUG] Broadcast: 0 conexões. Nada a enviar.")
+        return
 
-    for conn in connections:
-        conn_id = conn["connectionId"]
-        try:
-            apigw.post_to_connection(
-                Data=to_json(message),
-                ConnectionId=conn_id
-            )
-        except apigw.exceptions.GoneException:
-            print(f"[WARN] Conexão {conn_id} já expirada. Removendo...")
-            connections_table.delete_item(Key={"connectionId": conn_id})
-        except Exception as e:
-            print(f"[ERROR] Erro ao enviar para {conn_id}: {e}")
+    # Agrupa conexões por (domainName, stage) e cria 1 client por grupo
+    groups = defaultdict(list)
+    for c in connections:
+        dn = c.get("domainName")
+        st = c.get("stage")
+        if not dn or not st:
+            # Conexões antigas sem domínio/stage ⇒ ignore ou trate com um endpoint padrão se necessário
+            print(f"[WARN] Conexão {c.get('connectionId')} sem domain/stage. Ignorando.")
+            continue
+        groups[(dn, st)].append(c["connectionId"])
 
-    return {"statusCode": 200, "body": "Mensagem enviada"}
+    print(f"[DEBUG] Broadcast groups: { {k: len(v) for k,v in groups.items()} }  message={message}")
+
+    for (domain_name, stage), conn_ids in groups.items():
+        mgmt = boto3.client(
+            "apigatewaymanagementapi",
+            endpoint_url=f"https://{domain_name}/{stage}",
+        )
+        for cid in conn_ids:
+            try:
+                mgmt.post_to_connection(Data=to_json(message), ConnectionId=cid)
+            except mgmt.exceptions.GoneException:
+                print(f"[WARN] Conexão {cid} Gone. Removendo.")
+                connections_table.delete_item(Key={"connectionId": cid})
+            except Exception as e:
+                print(f"[ERROR] Falha ao enviar para {cid}: {e}")
