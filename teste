@@ -1,26 +1,39 @@
-import React, { useEffect, useState, useRef } from "react";
+import React, { useState, useEffect, useRef } from "react";
 
-interface TimerProps {
+interface TimerData {
   chamado: number;
-  durationMinutes?: number;
+  durationMinutes: number;
+  startedAt?: string;
+  timerActive: boolean;
+  timeRemaining: number;
 }
 
-const Timer: React.FC<TimerProps> = ({ chamado, durationMinutes = 15 }) => {
-  const [timeRemaining, setTimeRemaining] = useState<number>(durationMinutes * 60);
-  const [timerActive, setTimerActive] = useState<boolean>(false);
-  const [startedAt, setStartedAt] = useState<string | null>(null);
+interface TimerProps {
+  chamado: number; // ID do chamado
+}
+
+const Timer: React.FC<TimerProps> = ({ chamado }) => {
   const wsRef = useRef<WebSocket | null>(null);
   const intervalRef = useRef<number | null>(null);
 
-  // ---------------- Setup WebSocket
+  const [timerData, setTimerData] = useState<TimerData>({
+    chamado,
+    durationMinutes: 15,
+    timerActive: false,
+    timeRemaining: 15 * 60,
+  });
+
+  const [wsReady, setWsReady] = useState(false);
+
+  // Conecta WebSocket
   useEffect(() => {
-    console.log("🔌 Conectando WebSocket...");
     const ws = new WebSocket("wss://SEU_ENDPOINT_DO_WEBSOCKET");
     wsRef.current = ws;
 
     ws.onopen = () => {
       console.log("✅ WebSocket conectado");
-      // Solicita estado atual
+      setWsReady(true);
+      // Pede estado atual
       ws.send(JSON.stringify({ action: "getState", chamado }));
     };
 
@@ -29,13 +42,17 @@ const Timer: React.FC<TimerProps> = ({ chamado, durationMinutes = 15 }) => {
         const data = JSON.parse(event.data);
         console.log("📩 Mensagem recebida:", data);
 
-        if (data.type === "TIMER_UPDATED") {
-          setTimerActive(data.timerActive);
-          setStartedAt(data.startedAt || null);
-          setTimeRemaining(data.timeRemaining ?? durationMinutes * 60);
+        if (data.type === "TIMER_UPDATED" || data.type === "getState") {
+          setTimerData({
+            chamado: data.chamado,
+            durationMinutes: data.durationMinutes,
+            startedAt: data.startedAt,
+            timerActive: data.timerActive,
+            timeRemaining: data.timeRemaining,
+          });
         }
-      } catch (e) {
-        console.error("❌ Erro ao processar mensagem WS:", e);
+      } catch (err) {
+        console.error("❌ Erro ao processar mensagem:", err);
       }
     };
 
@@ -43,66 +60,64 @@ const Timer: React.FC<TimerProps> = ({ chamado, durationMinutes = 15 }) => {
     ws.onerror = (err) => console.error("❌ WebSocket erro:", err);
 
     return () => {
-      if (wsRef.current) wsRef.current.close();
+      if (intervalRef.current) window.clearInterval(intervalRef.current);
+      ws.close();
     };
-  }, [chamado, durationMinutes]);
+  }, [chamado]);
 
-  // ---------------- Contador do timer
+  // Atualiza cronômetro a cada segundo
   useEffect(() => {
-    if (intervalRef.current) {
-      clearInterval(intervalRef.current);
-      intervalRef.current = null;
-    }
+    if (intervalRef.current) window.clearInterval(intervalRef.current);
 
-    if (timerActive && startedAt) {
+    if (timerData.timerActive) {
       intervalRef.current = window.setInterval(() => {
-        const now = new Date();
-        const startDate = new Date(startedAt);
-        const elapsed = Math.floor((now.getTime() - startDate.getTime()) / 1000);
-        const remaining = Math.max(durationMinutes * 60 - elapsed, 0);
-        setTimeRemaining(remaining);
-        console.log(`⏱ Tempo restante atualizado: ${remaining}s`);
+        setTimerData((prev) => {
+          const newRemaining = Math.max(prev.timeRemaining - 1, 0);
+          return { ...prev, timeRemaining: newRemaining };
+        });
       }, 1000);
     }
 
     return () => {
-      if (intervalRef.current) clearInterval(intervalRef.current);
+      if (intervalRef.current) window.clearInterval(intervalRef.current);
     };
-  }, [timerActive, startedAt, durationMinutes]);
+  }, [timerData.timerActive]);
 
   const handleStart = () => {
-    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-      console.log("▶ Enviando startTimer...");
+    if (wsReady && wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      console.log("▶ Enviando startTimer");
       wsRef.current.send(JSON.stringify({ action: "startTimer", chamado }));
     } else {
-      console.warn("⚠ WebSocket não conectado ainda");
+      console.warn("⚠ WebSocket ainda não conectado");
     }
   };
 
   const handlePause = () => {
-    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-      console.log("⏸ Enviando pauseTimer...");
+    if (wsReady && wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      console.log("⏸ Enviando pauseTimer");
       wsRef.current.send(JSON.stringify({ action: "pauseTimer", chamado }));
     } else {
-      console.warn("⚠ WebSocket não conectado ainda");
+      console.warn("⚠ WebSocket ainda não conectado");
     }
   };
 
   const formatTime = (seconds: number) => {
-    const m = Math.floor(seconds / 60)
-      .toString()
-      .padStart(2, "0");
-    const s = (seconds % 60).toString().padStart(2, "0");
-    return `${m}:${s}`;
+    const m = Math.floor(seconds / 60);
+    const s = seconds % 60;
+    return `${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`;
   };
 
   return (
-    <div style={{ border: "1px solid #ccc", padding: "10px", marginBottom: "10px" }}>
-      <h3>Chamado {chamado}</h3>
-      <p>Status: {timerActive ? "Ativo" : "Pausado"}</p>
-      <p>Tempo restante: {formatTime(timeRemaining)}</p>
-      <button onClick={handleStart}>Iniciar</button>
-      <button onClick={handlePause}>Pausar</button>
+    <div>
+      <h2>Chamado: {chamado}</h2>
+      <p>Tempo restante: {formatTime(timerData.timeRemaining)}</p>
+      <p>Status: {timerData.timerActive ? "⏱ Em andamento" : "⏸ Pausado"}</p>
+      <button onClick={handleStart} disabled={!wsReady}>
+        Iniciar
+      </button>
+      <button onClick={handlePause} disabled={!wsReady}>
+        Pausar
+      </button>
     </div>
   );
 };
