@@ -24,6 +24,8 @@ def to_json(data):
 # Lambda handler
 # ----------------------
 def lambda_handler(event, context):
+    print(f"[DEBUG] Evento recebido: {json.dumps(event)}")
+
     route = event["requestContext"]["routeKey"]
 
     if route == "$connect":
@@ -69,8 +71,11 @@ def on_connect(event):
                 }),
                 ConnectionId=connection_id
             )
+        except apigw.exceptions.GoneException:
+            print(f"[WARN] Conexão {connection_id} já expirada. Removendo...")
+            connections_table.delete_item(Key={"connectionId": connection_id})
         except Exception as e:
-            print(f"Erro ao enviar estado inicial: {e}")
+            print(f"[ERROR] Erro ao enviar estado inicial: {e}")
 
     return {"statusCode": 200, "body": "Connected"}
 
@@ -91,7 +96,6 @@ def start_timer(event):
     chamado = int(body["chamado"])
     timer_start = int(datetime.utcnow().timestamp())
 
-    # Salva no DynamoDB (sempre cria/atualiza)
     chamados_table.put_item(
         Item={
             "chamado": chamado,
@@ -101,7 +105,6 @@ def start_timer(event):
     )
     print(f"[DEBUG] Chamado salvo: {chamado} - timerStart={timer_start}")
 
-    # Broadcast para todos os clientes
     return broadcast({
         "action": "timerStarted",
         "chamado": chamado,
@@ -143,14 +146,16 @@ def broadcast(message):
     print(f"[DEBUG] Enviando para {len(connections)} conexões")
 
     for conn in connections:
+        conn_id = conn["connectionId"]
         try:
             apigw.post_to_connection(
                 Data=to_json(message),
-                ConnectionId=conn["connectionId"]
+                ConnectionId=conn_id
             )
+        except apigw.exceptions.GoneException:
+            print(f"[WARN] Conexão {conn_id} já expirada. Removendo...")
+            connections_table.delete_item(Key={"connectionId": conn_id})
         except Exception as e:
-            print(f"Erro ao enviar para {conn['connectionId']}: {e}")
-            # Remove conexões quebradas
-            connections_table.delete_item(Key={"connectionId": conn["connectionId"]})
+            print(f"[ERROR] Erro ao enviar para {conn_id}: {e}")
 
     return {"statusCode": 200, "body": "Mensagem enviada"}
