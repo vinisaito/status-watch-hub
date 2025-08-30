@@ -1,118 +1,99 @@
-// Timer.tsx
-import React, { useEffect, useState, useRef } from "react";
+import React, { useEffect, useRef, useState } from "react";
 
-interface Chamado {
-  chamado: number;
-  timerActive: boolean;
-  startedAt?: string;
-  durationMinutes: number;
-  elapsedSeconds: number;
-  timeRemaining: number;
-}
+// Substitua pelo seu endpoint WebSocket
+const WS_URL = "wss://SEU_ENDPOINT.execute-api.us-east-1.amazonaws.com/prod";
 
 interface TimerProps {
-  chamadoId: number;
+  chamado: number;
 }
 
-export const Timer: React.FC<TimerProps> = ({ chamadoId }) => {
-  const [chamado, setChamado] = useState<Chamado | null>(null);
-  const [minutes, setMinutes] = useState<number>(0);
-  const [seconds, setSeconds] = useState<number>(0);
+const Timer: React.FC<TimerProps> = ({ chamado }) => {
+  const [timeRemaining, setTimeRemaining] = useState(0);
+  const [timerActive, setTimerActive] = useState(false);
+  const [connected, setConnected] = useState(false);
+  const wsRef = useRef<WebSocket | null>(null);
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
 
-  const API_URL = `https://<api-id>.execute-api.us-east-1.amazonaws.com/prod/chamado/${chamadoId}`;
-
-  // Função para buscar o estado atual do chamado
-  const fetchChamado = async () => {
-    try {
-      console.log("🌐 Buscando estado do chamado...");
-      const res = await fetch(API_URL);
-      const data: Chamado = await res.json();
-      console.log("✅ Estado recebido:", data);
-
-      // Atualiza o estado local
-      setChamado(data);
-      setMinutes(Math.floor(data.timeRemaining / 60));
-      setSeconds(data.timeRemaining % 60);
-    } catch (err) {
-      console.error("❌ Erro ao buscar chamado:", err);
-    }
-  };
-
-  // Atualiza o cronômetro a cada segundo
+  // Conecta ao WebSocket
   useEffect(() => {
-    if (!chamado) return;
+    console.log("🌐 Conectando ao WebSocket...");
+    const ws = new WebSocket(WS_URL);
+    wsRef.current = ws;
 
-    if (intervalRef.current) clearInterval(intervalRef.current);
+    ws.onopen = () => {
+      console.log("✅ WebSocket conectado");
+      setConnected(true);
+      // Solicita estado inicial
+      ws.send(JSON.stringify({ action: "getState", chamado }));
+    };
 
-    if (chamado.timerActive) {
+    ws.onmessage = (event) => {
+      console.log("📩 Mensagem recebida:", event.data);
+      const data = JSON.parse(event.data);
+
+      if (data.type === "TIMER_UPDATED" || data.timeRemaining !== undefined) {
+        setTimeRemaining(data.timeRemaining);
+        setTimerActive(data.timerActive);
+      }
+    };
+
+    ws.onerror = (err) => {
+      console.error("❌ Erro no WebSocket:", err);
+    };
+
+    ws.onclose = () => {
+      console.log("🔌 WebSocket desconectado");
+      setConnected(false);
+    };
+
+    return () => {
+      ws.close();
+    };
+  }, [chamado]);
+
+  // Atualiza o timer local a cada segundo se estiver ativo
+  useEffect(() => {
+    if (timerActive) {
       intervalRef.current = setInterval(() => {
-        setSeconds((prevSec) => {
-          let total = minutes * 60 + prevSec - 1;
-          if (total < 0) total = 0;
-          setMinutes(Math.floor(total / 60));
-          return total % 60;
-        });
+        setTimeRemaining((prev) => (prev > 0 ? prev - 1 : 0));
       }, 1000);
+    } else if (intervalRef.current) {
+      clearInterval(intervalRef.current);
     }
 
     return () => {
       if (intervalRef.current) clearInterval(intervalRef.current);
     };
-  }, [chamado]);
+  }, [timerActive]);
 
-  // Funções para iniciar e pausar (REST API para atualizar Lambda)
-  const handleStart = async () => {
-    if (!chamado) return;
-    try {
-      console.log("▶️ Enviando startTimer...");
-      await fetch(`https://<api-id>.execute-api.us-east-1.amazonaws.com/prod/sendMessage`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "startTimer", chamado: chamado.chamado }),
-      });
-      console.log("✅ StartTimer enviado");
-      await fetchChamado();
-    } catch (err) {
-      console.error("❌ Erro ao iniciar timer:", err);
+  const sendAction = (action: "startTimer" | "pauseTimer") => {
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      console.log(`📤 Enviando ação: ${action}`);
+      wsRef.current.send(JSON.stringify({ action, chamado }));
+    } else {
+      console.warn("⚠️ WebSocket não está aberto ainda.");
     }
   };
 
-  const handlePause = async () => {
-    if (!chamado) return;
-    try {
-      console.log("⏸️ Enviando pauseTimer...");
-      await fetch(`https://<api-id>.execute-api.us-east-1.amazonaws.com/prod/sendMessage`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "pauseTimer", chamado: chamado.chamado }),
-      });
-      console.log("✅ PauseTimer enviado");
-      await fetchChamado();
-    } catch (err) {
-      console.error("❌ Erro ao pausar timer:", err);
-    }
+  // Formata minutos e segundos
+  const formatTime = (seconds: number) => {
+    const mins = Math.floor(seconds / 60)
+      .toString()
+      .padStart(2, "0");
+    const secs = (seconds % 60).toString().padStart(2, "0");
+    return `${mins}:${secs}`;
   };
-
-  // Carrega estado inicial
-  useEffect(() => {
-    fetchChamado();
-  }, []);
 
   return (
-    <div style={{ fontFamily: "sans-serif", textAlign: "center" }}>
-      <h2>Chamado #{chamadoId}</h2>
-      <div style={{ fontSize: "2rem", margin: "20px 0" }}>
-        {minutes.toString().padStart(2, "0")}:
-        {seconds.toString().padStart(2, "0")}
-      </div>
-      <div>Status: {chamado?.timerActive ? "Ativo" : "Pausado"}</div>
-      <div style={{ marginTop: "20px" }}>
-        <button onClick={handleStart} style={{ marginRight: "10px" }}>
-          Iniciar
-        </button>
-        <button onClick={handlePause}>Pausar</button>
-      </div>
+    <div style={{ border: "1px solid #ccc", padding: "1rem", width: "200px" }}>
+      <h3>Chamado {chamado}</h3>
+      <p>Tempo restante: {formatTime(timeRemaining)}</p>
+      <p>Status: {timerActive ? "⏱️ Ativo" : "⏸️ Pausado"}</p>
+      <button onClick={() => sendAction("startTimer")}>Iniciar</button>
+      <button onClick={() => sendAction("pauseTimer")}>Pausar</button>
+      <p>WebSocket: {connected ? "Conectado ✅" : "Desconectado ❌"}</p>
     </div>
   );
 };
+
+export default Timer;
