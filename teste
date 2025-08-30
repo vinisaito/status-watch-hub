@@ -1,171 +1,158 @@
-import json
-import boto3
-import os
-import decimal
-from datetime import datetime
-from collections import defaultdict
+import React, { useEffect, useState, useRef } from "react";
 
-dynamodb = boto3.resource("dynamodb")
-connections_table = dynamodb.Table(os.environ["CONNECTIONS_TABLE"])
-chamados_table = dynamodb.Table(os.environ["CHAMADOS_TABLE"])
+const WS_URL = "wss://xxxxxx.execute-api.sa-east-1.amazonaws.com/dev"; 
+// 🔴 Substitua pelo endpoint exato do API Gateway WebSocket
 
-# ----- Decimal → JSON -----
-class DecimalEncoder(json.JSONEncoder):
-    def default(self, o):
-        if isinstance(o, decimal.Decimal):
-            return int(o) if o % 1 == 0 else float(o)
-        return super(DecimalEncoder, self).default(o)
+const Timer: React.FC = () => {
+  const [connected, setConnected] = useState(false);
+  const [status, setStatus] = useState<string>("pendente");
+  const [elapsed, setElapsed] = useState<number>(0);
+  const [chamado, setChamado] = useState<number | null>(null);
+  const wsRef = useRef<WebSocket | null>(null);
+  const timerRef = useRef<NodeJS.Timeout | null>(null);
+  const timerStartRef = useRef<number | null>(null);
 
-def to_json(data):
-    return json.dumps(data, cls=DecimalEncoder)
+  // Conecta ao WebSocket
+  useEffect(() => {
+    connectWS();
 
-# ----- Handler -----
-def lambda_handler(event, context):
-    route = event["requestContext"]["routeKey"]
+    return () => {
+      if (wsRef.current) wsRef.current.close();
+      if (timerRef.current) clearInterval(timerRef.current);
+    };
+  }, []);
 
-    if route == "$connect":
-        return on_connect(event)
-    elif route == "$disconnect":
-        return on_disconnect(event)
-    elif route == "startTimer":
-        return start_timer(event)
-    elif route == "updateStatus":
-        return update_status(event)
-    else:
-        return {"statusCode": 400, "body": "Rota inválida"}
+  const connectWS = () => {
+    console.log("[WS] Conectando em:", WS_URL);
+    const ws = new WebSocket(WS_URL);
+    wsRef.current = ws;
 
-# ----- $connect -----
-def on_connect(event):
-    rc = event["requestContext"]
-    connection_id = rc["connectionId"]
-    domain_name = rc["domainName"]          # p.ex. abc123.execute-api.sa-east-1.amazonaws.com
-    stage = rc["stage"]                      # p.ex. "prod"
+    ws.onopen = () => {
+      console.log("[WS] ✅ Conectado");
+      setConnected(true);
+    };
 
-    # Salva conexão com domínio e stage (fundamental p/ broadcast correto)
-    connections_table.put_item(
-        Item={
-            "connectionId": connection_id,
-            "connectedAt": int(datetime.utcnow().timestamp()),
-            "domainName": domain_name,
-            "stage": stage,
+    ws.onclose = () => {
+      console.log("[WS] ❌ Desconectado, tentando reconectar...");
+      setConnected(false);
+      setTimeout(connectWS, 3000);
+    };
+
+    ws.onerror = (err) => {
+      console.error("[WS] Erro:", err);
+    };
+
+    ws.onmessage = (msg) => {
+      if (!msg.data) return;
+
+      try {
+        const data = JSON.parse(msg.data);
+        console.log("[WS] Mensagem recebida:", data);
+
+        if (data.action === "timerStarted") {
+          setChamado(data.chamado);
+          timerStartRef.current = data.timerStart;
+          startTimer();
         }
-    )
-    print(f"[DEBUG] Conexão registrada: {connection_id} @ {domain_name}/{stage}")
 
-    # Envia estado atual dos chamados para o NOVO cliente
-    mgmt = boto3.client(
-        "apigatewaymanagementapi",
-        endpoint_url=f"https://{domain_name}/{stage}",
-    )
-
-    response = chamados_table.scan()
-    items = response.get("Items", [])
-    print(f"[DEBUG] Itens atuais (chamados): {to_json(items)}")
-
-    for item in items:
-        msg = {
-            "action": "currentState",
-            "chamado": int(item["chamado"]),
-            "status": str(item.get("status", "pendente")),
-            "timerStart": int(item["timerStart"]) if "timerStart" in item else None,  # seg
-            # Se preferir já em ms: use int(item["timerStart"]) * 1000
+        if (data.action === "statusUpdated") {
+          setChamado(data.chamado);
+          setStatus(data.status);
         }
-        try:
-            mgmt.post_to_connection(Data=to_json(msg), ConnectionId=connection_id)
-        except mgmt.exceptions.GoneException:
-            print(f"[WARN] Conexão {connection_id} Gone no $connect. Removendo.")
-            connections_table.delete_item(Key={"connectionId": connection_id})
-            break
-        except Exception as e:
-            print(f"[ERROR] Falha ao enviar estado inicial p/ {connection_id}: {e}")
 
-    return {"statusCode": 200}
-
-# ----- $disconnect -----
-def on_disconnect(event):
-    connection_id = event["requestContext"]["connectionId"]
-    connections_table.delete_item(Key={"connectionId": connection_id})
-    print(f"[DEBUG] Conexão removida: {connection_id}")
-    return {"statusCode": 200}
-
-# ----- startTimer -----
-def start_timer(event):
-    body = json.loads(event["body"])
-    chamado = int(body["chamado"])
-
-    # Em segundos (compatível com sua versão funcional).
-    # Se quiser em ms: trocar para int(datetime.utcnow().timestamp() * 1000)
-    timer_start = int(datetime.utcnow().timestamp())
-
-    chamados_table.put_item(
-        Item={
-            "chamado": chamado,
-            "timerStart": timer_start,
-            "status": "pendente",
+        if (data.action === "currentState") {
+          // Estado inicial ao conectar
+          setChamado(data.chamado);
+          setStatus(data.status);
+          if (data.timerStart) {
+            timerStartRef.current = data.timerStart;
+            startTimer();
+          }
         }
-    )
-    print(f"[DEBUG] Chamado salvo: {chamado} - timerStart={timer_start}s")
+      } catch (e) {
+        console.warn("[WS] Mensagem não era JSON, ignorada:", msg.data);
+      }
+    };
+  };
 
-    _broadcast({
-        "action": "timerStarted",
-        "chamado": chamado,
-        "timerStart": timer_start,
-    })
+  const startTimer = () => {
+    if (timerRef.current) clearInterval(timerRef.current);
 
-    return {"statusCode": 200}
+    timerRef.current = setInterval(() => {
+      if (timerStartRef.current) {
+        const now = Math.floor(Date.now() / 1000);
+        setElapsed(now - timerStartRef.current);
+      }
+    }, 1000);
+  };
 
-# ----- updateStatus -----
-def update_status(event):
-    body = json.loads(event["body"])
-    chamado = int(body["chamado"])
-    status = body["status"]
+  const sendMessage = (action: string, payload: any) => {
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      const msg = JSON.stringify({ action, ...payload });
+      console.log("[WS] Enviando:", msg);
+      wsRef.current.send(msg);
+    } else {
+      console.warn("[WS] Conexão não está aberta");
+    }
+  };
 
-    chamados_table.update_item(
-        Key={"chamado": chamado},
-        UpdateExpression="SET #s = :s",
-        ExpressionAttributeNames={"#s": "status"},
-        ExpressionAttributeValues={":s": status},
-    )
-    print(f"[DEBUG] Status atualizado: {chamado} -> {status}")
+  const handleStart = () => {
+    if (!chamado) {
+      sendMessage("startTimer", { chamado: 1 }); // 🔴 Ajuste o ID do chamado
+    } else {
+      sendMessage("startTimer", { chamado });
+    }
+  };
 
-    _broadcast({
-        "action": "statusUpdated",
-        "chamado": chamado,
-        "status": status,
-    })
+  const handleUpdateStatus = (newStatus: string) => {
+    if (chamado) {
+      sendMessage("updateStatus", { chamado, status: newStatus });
+    }
+  };
 
-    return {"statusCode": 200}
+  return (
+    <div className="p-4 bg-gray-100 rounded-xl shadow-md w-96">
+      <h2 className="text-xl font-bold mb-2">⏱ Timer WebSocket</h2>
 
-# ----- broadcast dinâmico por (domain, stage) -----
-def _broadcast(message):
-    connections = connections_table.scan().get("Items", [])
-    if not connections:
-        print("[DEBUG] Broadcast: 0 conexões. Nada a enviar.")
-        return
+      <p>
+        <strong>Status Conexão:</strong>{" "}
+        {connected ? "🟢 Conectado" : "🔴 Desconectado"}
+      </p>
 
-    # Agrupa conexões por (domainName, stage) e cria 1 client por grupo
-    groups = defaultdict(list)
-    for c in connections:
-        dn = c.get("domainName")
-        st = c.get("stage")
-        if not dn or not st:
-            # Conexões antigas sem domínio/stage ⇒ ignore ou trate com um endpoint padrão se necessário
-            print(f"[WARN] Conexão {c.get('connectionId')} sem domain/stage. Ignorando.")
-            continue
-        groups[(dn, st)].append(c["connectionId"])
+      <p>
+        <strong>Chamado:</strong> {chamado ?? "Nenhum"}
+      </p>
 
-    print(f"[DEBUG] Broadcast groups: { {k: len(v) for k,v in groups.items()} }  message={message}")
+      <p>
+        <strong>Status:</strong> {status}
+      </p>
 
-    for (domain_name, stage), conn_ids in groups.items():
-        mgmt = boto3.client(
-            "apigatewaymanagementapi",
-            endpoint_url=f"https://{domain_name}/{stage}",
-        )
-        for cid in conn_ids:
-            try:
-                mgmt.post_to_connection(Data=to_json(message), ConnectionId=cid)
-            except mgmt.exceptions.GoneException:
-                print(f"[WARN] Conexão {cid} Gone. Removendo.")
-                connections_table.delete_item(Key={"connectionId": cid})
-            except Exception as e:
-                print(f"[ERROR] Falha ao enviar para {cid}: {e}")
+      <p>
+        <strong>Tempo decorrido:</strong> {elapsed}s
+      </p>
+
+      <div className="mt-4 space-x-2">
+        <button
+          className="bg-blue-500 text-white px-4 py-2 rounded"
+          onClick={handleStart}
+        >
+          Iniciar Timer
+        </button>
+        <button
+          className="bg-green-500 text-white px-4 py-2 rounded"
+          onClick={() => handleUpdateStatus("acionado")}
+        >
+          Acionado
+        </button>
+        <button
+          className="bg-yellow-500 text-white px-4 py-2 rounded"
+          onClick={() => handleUpdateStatus("escalado")}
+        >
+          Escalado
+        </button>
+      </div>
+    </div>
+  );
+};
+
+export default Timer;
