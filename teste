@@ -1,115 +1,362 @@
-import React, { useEffect, useState, useRef } from "react";
+// src/components/Timer.tsx
+import React, { useEffect, useRef, useState } from "react";
 
-const WEBSOCKET_URL = "wss://xxxxxx.execute-api.REGION.amazonaws.com/dev"; // 🔹 Coloque seu WebSocket da API Gateway
+interface ChamadoRaw {
+  chamado?: number | string;
+  startedAt?: string | null;
+  durationMinutes?: number | string;
+  timerActive?: boolean | string;
+  timeRemaining?: number | string | null;
+  // outros campos ignorados
+}
 
 interface Chamado {
   chamado: number;
-  startedAt?: string;
-  durationMinutes?: number;
-  timerActive?: boolean;
-  timeRemaining?: number;
+  startedAt: string | null;
+  durationMinutes: number;
+  timerActive: boolean;
+  timeRemaining: number; // em segundos
 }
+
+const WS_URL = "wss://SEU_ENDPOINT_DO_WEBSOCKET.execute-api.REGION.amazonaws.com/dev"; // <-- substituir
+const API_URL = "https://SEU_ENDPOINT_REST.execute-api.REGION.amazonaws.com/prod/dados"; // <-- substituir
+
+const normalizeRaw = (r: ChamadoRaw): Chamado | null => {
+  const chamado = Number(r.chamado);
+  if (Number.isNaN(chamado)) return null;
+  const durationMinutes = Number(r.durationMinutes ?? 15) || 15;
+  const timerActive = r.timerActive === true || r.timerActive === "true";
+  const startedAt = r.startedAt ?? null;
+
+  // compute initial timeRemaining - safe function uses startedAt or persisted timeRemaining
+  const initialRemaining = computeRemainingSafe({
+    chamado,
+    startedAt,
+    durationMinutes,
+    timerActive,
+    timeRemaining:
+      r.timeRemaining !== undefined && r.timeRemaining !== null
+        ? Number(r.timeRemaining)
+        : undefined,
+  });
+
+  return {
+    chamado,
+    startedAt,
+    durationMinutes,
+    timerActive,
+    timeRemaining: initialRemaining,
+  };
+};
+
+// calcula tempo restante de forma robusta
+const computeRemainingSafe = (c: {
+  chamado: number;
+  startedAt: string | null;
+  durationMinutes: number;
+  timerActive: boolean;
+  timeRemaining?: number;
+}): number => {
+  const total = (Number(c.durationMinutes) || 15) * 60;
+
+  // se o timer estiver pausado e backend forneceu timeRemaining, respeita esse valor
+  if (!c.timerActive && typeof c.timeRemaining === "number") {
+    return Math.max(0, Math.floor(c.timeRemaining));
+  }
+
+  // se não tem startedAt, volta ao total
+  if (!c.startedAt) return total;
+
+  const ts = Date.parse(c.startedAt);
+  if (Number.isNaN(ts)) return total;
+
+  const elapsed = Math.floor((Date.now() - ts) / 1000);
+  return Math.max(0, total - elapsed);
+};
+
+const formatMMSS = (seconds: number) => {
+  const m = Math.floor(seconds / 60)
+    .toString()
+    .padStart(2, "0");
+  const s = Math.floor(seconds % 60)
+    .toString()
+    .padStart(2, "0");
+  return `${m}:${s}`;
+};
 
 const Timer: React.FC = () => {
   const [chamados, setChamados] = useState<Chamado[]>([]);
+  const [wsConnected, setWsConnected] = useState(false);
   const wsRef = useRef<WebSocket | null>(null);
 
-  // 🔹 Conecta ao WebSocket
-  const setupWebSocket = () => {
-    wsRef.current = new WebSocket(WEBSOCKET_URL);
-
-    wsRef.current.onopen = () => {
-      console.log("🔗 Conectado ao WebSocket");
-      wsRef.current?.send(JSON.stringify({ action: "getAll" }));
-    };
-
-    wsRef.current.onmessage = (event) => {
-      const message = JSON.parse(event.data);
-      console.log("📩 Mensagem recebida:", message);
-
-      if (message.type === "ALL_CHAMADOS") {
-        setChamados(message.data);
-      } else if (message.type === "TIMER_UPDATED") {
-        setChamados((prev) =>
-          prev.map((c) =>
-            c.chamado === message.chamado
-              ? { ...c, ...message, timeRemaining: message.timeRemaining }
-              : c
-          )
-        );
-      }
-    };
-
-    wsRef.current.onclose = () => {
-      console.log("⚠️ WebSocket desconectado, tentando reconectar...");
-      setTimeout(setupWebSocket, 2000);
-    };
-  };
-
-  // 🔹 Atualiza contagem regressiva no front
-  const tickTimers = () => {
-    setChamados((prev) =>
-      prev.map((c) => {
-        if (!c.timerActive || c.timeRemaining === undefined) return c;
-        const newTime = c.timeRemaining - 1;
-        return { ...c, timeRemaining: Math.max(0, newTime) };
-      })
-    );
-  };
-
-  // 🔹 Inicia ou pausa timer
-  const toggleTimer = (chamado: number, isActive: boolean) => {
-    wsRef.current?.send(
-      JSON.stringify({
-        action: isActive ? "pauseTimer" : "startTimer",
-        chamado,
-      })
-    );
-  };
-
+  // fetch inicial via REST para popular a lista (evita tela vazia ao abrir)
   useEffect(() => {
-    setupWebSocket();
-    const interval = setInterval(tickTimers, 1000);
-    return () => clearInterval(interval);
+    let mounted = true;
+    (async () => {
+      try {
+        console.log("[Timer] fetch inicial ->", API_URL);
+        const res = await fetch(API_URL, { cache: "no-store" });
+        if (!res.ok) {
+          console.error("[Timer] Erro no fetch inicial:", res.status, await res.text());
+          return;
+        }
+        const json = await res.json();
+        console.log("[Timer] resposta REST bruta:", json);
+
+        // extrai array de forma tolerante: array direto, Items, data, etc.
+        const arr = Array.isArray(json)
+          ? json
+          : Array.isArray((json as any).Items)
+          ? (json as any).Items
+          : (json as any).data ?? [];
+
+        const norm = (arr || [])
+          .map((r: ChamadoRaw) => normalizeRaw(r))
+          .filter((x: Chamado | null): x is Chamado => x !== null);
+
+        if (mounted) {
+          setChamados((prev) => {
+            // merge sem duplicar: preferir valores do REST, mas manter ordem
+            const map = new Map<number, Chamado>();
+            norm.forEach((n) => map.set(n.chamado, n));
+            prev.forEach((p) => {
+              if (!map.has(p.chamado)) map.set(p.chamado, p);
+            });
+            return Array.from(map.values()).sort((a, b) => a.chamado - b.chamado);
+          });
+        }
+      } catch (err) {
+        console.error("[Timer] Falha ao buscar dados iniciais:", err);
+      }
+    })();
+    return () => {
+      mounted = false;
+    };
   }, []);
 
-  return (
-    <div style={{ padding: 20, fontFamily: "Arial" }}>
-      <h1>Painel de Alertas</h1>
-      {chamados.map((c) => {
-        const minutes = Math.floor((c.timeRemaining || 0) / 60);
-        const seconds = (c.timeRemaining || 0) % 60;
+  // conecta WebSocket e trata mensagens
+  useEffect(() => {
+    let closedByUs = false;
+    const connect = () => {
+      console.log("[Timer] conectando WS ->", WS_URL);
+      const ws = new WebSocket(WS_URL);
+      wsRef.current = ws;
 
-        return (
+      ws.onopen = () => {
+        console.log("[Timer] WS conectado");
+        setWsConnected(true);
+        // pede todos via WS (se API suportar)
+        try {
+          ws.send(JSON.stringify({ action: "getAll" }));
+        } catch (e) {
+          console.warn("[Timer] erro ao enviar getAll:", e);
+        }
+      };
+
+      ws.onmessage = (ev) => {
+        try {
+          const data = JSON.parse(ev.data);
+          console.log("[Timer] MSG WS:", data);
+
+          if (data.type === "ALL_CHAMADOS" && Array.isArray(data.data)) {
+            const norm = data.data
+              .map((r: ChamadoRaw) => normalizeRaw(r))
+              .filter((x: Chamado | null): x is Chamado => x !== null);
+            setChamados(() => norm.sort((a, b) => a.chamado - b.chamado));
+            return;
+          }
+
+          if (data.type === "TIMER_UPDATED") {
+            // data contains chamado + fields
+            const raw: ChamadoRaw = {
+              chamado: data.chamado,
+              startedAt: data.startedAt ?? null,
+              durationMinutes: data.durationMinutes ?? undefined,
+              timerActive: data.timerActive ?? undefined,
+              timeRemaining: data.timeRemaining ?? undefined,
+            };
+            const normalized = normalizeRaw(raw);
+            if (!normalized) return;
+
+            setChamados((prev) => {
+              const idx = prev.findIndex((p) => p.chamado === normalized.chamado);
+              if (idx >= 0) {
+                const copy = [...prev];
+                // merge preserving fields possibly not provided by WS
+                const merged: Chamado = {
+                  ...copy[idx],
+                  ...normalized,
+                  // recompute timeRemaining safely (if WS sent timeRemaining and timerActive false, we should use it)
+                  timeRemaining: computeRemainingSafe({
+                    chamado: normalized.chamado,
+                    startedAt: normalized.startedAt,
+                    durationMinutes: normalized.durationMinutes,
+                    timerActive: normalized.timerActive,
+                    timeRemaining: normalized.timeRemaining,
+                  }),
+                };
+                copy[idx] = merged;
+                return copy;
+              } else {
+                return [...prev, normalized].sort((a, b) => a.chamado - b.chamado);
+              }
+            });
+          }
+        } catch (err) {
+          console.error("[Timer] erro ao parsear msg WS:", err, ev.data);
+        }
+      };
+
+      ws.onerror = (err) => {
+        console.error("[Timer] WS erro:", err);
+      };
+
+      ws.onclose = (ev) => {
+        setWsConnected(false);
+        if (!closedByUs) {
+          console.warn("[Timer] WS fechado, reconectando em 2s", ev.code, ev.reason);
+          setTimeout(connect, 2000);
+        }
+      };
+    };
+
+    connect();
+    return () => {
+      closedByUs = true;
+      wsRef.current?.close();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // tick: recalcula timeRemaining a cada segundo (força re-render)
+  useEffect(() => {
+    const id = setInterval(() => {
+      setChamados((prev) =>
+        prev.map((c) => ({
+          ...c,
+          timeRemaining: computeRemainingSafe({
+            chamado: c.chamado,
+            startedAt: c.startedAt,
+            durationMinutes: c.durationMinutes,
+            timerActive: c.timerActive,
+            timeRemaining: c.timeRemaining,
+          }),
+        }))
+      );
+    }, 1000);
+    return () => clearInterval(id);
+  }, []);
+
+  // enviar comando start/pause (WS)
+  const sendAction = (chamado: number, action: "startTimer" | "pauseTimer") => {
+    if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
+      alert("WebSocket não conectado. Aguarde e tente novamente.");
+      return;
+    }
+
+    const payload = { action, chamado };
+    try {
+      wsRef.current.send(JSON.stringify(payload));
+      console.log("[Timer] enviado:", payload);
+    } catch (err) {
+      console.error("[Timer] erro ao enviar:", err);
+    }
+
+    // atualização otimista local: evita delay até o broadcast do servidor
+    if (action === "startTimer") {
+      const now = new Date().toISOString();
+      setChamados((prev) =>
+        prev.map((c) =>
+          c.chamado === chamado
+            ? {
+                ...c,
+                startedAt: now,
+                timerActive: true,
+                timeRemaining: computeRemainingSafe({
+                  chamado,
+                  startedAt: now,
+                  durationMinutes: c.durationMinutes,
+                  timerActive: true,
+                }),
+              }
+            : c
+        )
+      );
+    } else if (action === "pauseTimer") {
+      // calcula remaining localmente e marca pausado
+      setChamados((prev) =>
+        prev.map((c) =>
+          c.chamado === chamado
+            ? {
+                ...c,
+                timerActive: false,
+                timeRemaining: computeRemainingSafe({
+                  chamado,
+                  startedAt: c.startedAt,
+                  durationMinutes: c.durationMinutes,
+                  timerActive: false,
+                  timeRemaining: c.timeRemaining,
+                }),
+              }
+            : c
+        )
+      );
+    }
+  };
+
+  return (
+    <div style={{ padding: 16, fontFamily: "Arial, sans-serif" }}>
+      <h2>Painel de Alertas</h2>
+      <div style={{ marginBottom: 8 }}>
+        WebSocket:{" "}
+        <strong style={{ color: wsConnected ? "green" : "red" }}>
+          {wsConnected ? "conectado" : "desconectado"}
+        </strong>
+      </div>
+
+      {chamados.length === 0 ? (
+        <div>Carregando alertas...</div>
+      ) : (
+        chamados.map((c) => (
           <div
             key={c.chamado}
             style={{
-              border: "1px solid #ccc",
+              border: "1px solid #ddd",
               padding: 10,
-              marginBottom: 10,
-              borderRadius: 8,
+              borderRadius: 6,
+              marginBottom: 8,
             }}
           >
-            <h3>Chamado #{c.chamado}</h3>
-            <p>
-              ⏳ Tempo Restante: {minutes}:{seconds.toString().padStart(2, "0")}
-            </p>
-            <button
-              onClick={() => toggleTimer(c.chamado, c.timerActive || false)}
-              style={{
-                background: c.timerActive ? "red" : "green",
-                color: "white",
-                padding: "5px 10px",
-                borderRadius: 5,
-                border: "none",
-                cursor: "pointer",
-              }}
-            >
-              {c.timerActive ? "Pausar" : "Iniciar"}
-            </button>
+            <div>
+              <strong>Chamado:</strong> {c.chamado}
+            </div>
+            <div>
+              <strong>Status:</strong> {c.timerActive ? "Rodando" : "Pausado"}
+            </div>
+            <div>
+              <strong>Tempo restante:</strong> {formatMMSS(c.timeRemaining)}
+            </div>
+            <div style={{ marginTop: 8 }}>
+              <button
+                onClick={() => sendAction(c.chamado, c.timerActive ? "pauseTimer" : "startTimer")}
+                style={{
+                  background: c.timerActive ? "#d9534f" : "#5cb85c",
+                  color: "white",
+                  border: "none",
+                  padding: "6px 10px",
+                  borderRadius: 4,
+                  cursor: "pointer",
+                }}
+              >
+                {c.timerActive ? "Pausar" : "Iniciar"}
+              </button>
+            </div>
+            <small style={{ color: "#666", display: "block", marginTop: 8 }}>
+              startedAt: {String(c.startedAt)} • duration: {c.durationMinutes}min • timeRemaining (persistido/estimado): {c.timeRemaining}
+            </small>
           </div>
-        );
-      })}
+        ))
+      )}
     </div>
   );
 };
