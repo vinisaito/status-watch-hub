@@ -1,6 +1,4 @@
-curl -X POST "https://<seu-api-id>.execute-api.us-east-1.amazonaws.com/dev/sendMessage" \
-  -H "Content-Type: application/json" \
-  -d '{
-        "action": "startTimer",
-        "chamado": "10418007"
-      }'
+{
+  "action": "startTimer",
+  "chamado": "10418007"
+}
