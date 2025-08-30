@@ -1,80 +1,66 @@
-// Timer.jsx
-import React, { useEffect, useState, useRef } from "react";
+import json
+import boto3
+import os
+from datetime import datetime
 
-const WS_URL = "wss://cn8i8z6f81.execute-api.us-east-1.amazonaws.com/prod";
-const API_URL = "https://cn8i8z6f81.execute-api.us-east-1.amazonaws.com/prod";
+dynamodb = boto3.resource("dynamodb")
+connections_table = dynamodb.Table(os.environ["CONNECTIONS_TABLE"])
+chamados_table = dynamodb.Table(os.environ["CHAMADOS_TABLE"])
 
-function Timer({ chamado = 101 }) {
-  const [timer, setTimer] = useState(null);
-  const ws = useRef(null);
+def lambda_handler(event, context):
+    print("Event:", event)
 
-  // Conecta WebSocket e recebe updates
-  useEffect(() => {
-    ws.current = new WebSocket(WS_URL);
+    try:
+        body = json.loads(event.get("body", "{}"))
+        action = body.get("action")
+        chamado = body.get("chamado")  # agora é number
 
-    ws.current.onopen = () => {
-      console.log("Conectado ao WebSocket!");
-    };
+        if action != "startTimer" or chamado is None:
+            return {"statusCode": 400, "body": "Payload inválido. Esperado {action:'startTimer', chamado:<number>}"}
 
-    ws.current.onmessage = (event) => {
-      const data = JSON.parse(event.data);
-      if (data.type === "TIMER_UPDATED" && data.chamado === chamado) {
-        setTimer(data);
-      }
-    };
+        # Horário atual UTC em timestamp
+        timer_start = int(datetime.utcnow().timestamp())
 
-    ws.current.onclose = () => console.log("WebSocket desconectado!");
+        # Atualiza o DynamoDB do chamado
+        chamados_table.update_item(
+            Key={"chamado": chamado},
+            UpdateExpression="SET timerStart = :t",
+            ExpressionAttributeValues={":t": timer_start}
+        )
 
-    return () => ws.current.close();
-  }, [chamado]);
+        # Monta mensagem de broadcast
+        message = {
+            "action": "timerStarted",
+            "chamado": chamado,
+            "timerStart": timer_start
+        }
 
-  // Decremento local do timer
-  useEffect(() => {
-    const interval = setInterval(() => {
-      if (timer && timer.timerActive && timer.timeRemaining > 0) {
-        setTimer(prev => ({
-          ...prev,
-          timeRemaining: prev.timeRemaining - 1
-        }));
-      }
-    }, 1000);
-    return () => clearInterval(interval);
-  }, [timer]);
+        # Envia mensagem a todos os clients conectados
+        send_to_all_connections(message)
 
-  // Envia ação para a Lambda via fetch HTTP
-  const sendAction = async (action) => {
-    try {
-      await fetch(API_URL, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action, chamado })
-      });
-    } catch (err) {
-      console.error("Erro ao enviar ação:", err);
-    }
-  };
+        return {"statusCode": 200, "body": json.dumps(message)}
 
-  if (!timer) return <div>Conectando e aguardando updates...</div>;
+    except Exception as e:
+        print("Erro:", str(e))
+        return {"statusCode": 500, "body": f"Erro interno: {str(e)}"}
 
-  const formatTime = (seconds) => {
-    const m = Math.floor(seconds / 60);
-    const s = seconds % 60;
-    return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
-  };
 
-  return (
-    <div style={{ padding: "1rem", fontFamily: "Arial" }}>
-      <h3>Chamado #{timer.chamado}</h3>
-      <p>Tempo restante: {formatTime(timer.timeRemaining)}</p>
-      <p>Status: {timer.timerActive ? "Ativo" : "Pausado"}</p>
-      <button onClick={() => sendAction(timer.timerActive ? "pauseTimer" : "startTimer")}>
-        {timer.timerActive ? "Pausar" : "Iniciar"}
-      </button>
-      <button onClick={() => sendAction("startTimer")} style={{ marginLeft: "1rem" }}>
-        Reiniciar
-      </button>
-    </div>
-  );
-}
+def send_to_all_connections(message: dict):
+    """Envia mensagem para todos os clientes conectados"""
+    apigw = boto3.client(
+        "apigatewaymanagementapi",
+        endpoint_url=os.environ["WS_ENDPOINT"]  # ex: https://xxxxxx.execute-api.us-east-1.amazonaws.com/dev
+    )
 
-export default Timer;
+    response = connections_table.scan()
+    for item in response.get("Items", []):
+        connection_id = item["connectionId"]
+        try:
+            apigw.post_to_connection(
+                Data=json.dumps(message),
+                ConnectionId=connection_id
+            )
+        except apigw.exceptions.GoneException:
+            # Se cliente já desconectou, remove da tabela
+            print(f"Conexão expirada removida: {connection_id}")
+            connections_table.delete_item(Key={"connectionId": connection_id})
