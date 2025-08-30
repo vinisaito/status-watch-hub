@@ -1,123 +1,92 @@
-// src/components/Timer.tsx
-import React, { useEffect, useState, useRef } from "react";
+import boto3
+import json
+from datetime import datetime, timezone
+from decimal import Decimal
 
-interface TimerData {
-  chamado: number;
-  startedAt: string | null;
-  durationMinutes: number;
-  timerActive: boolean;
-}
+# DynamoDB
+DDB = boto3.resource("dynamodb", region_name="us-east-1")
+ACOMP_TABLE = DDB.Table("painelmonitoracao_acompanhamento")  # tabela de alertas
+CONN_TABLE = DDB.Table("painelmonitoracao_connections")       # tabela de conexões WebSocket
 
-const WS_URL = "wss://SEU_ENDPOINT.execute-api.us-east-1.amazonaws.com/dev"; // substituir
-const API_URL = "https://SEU_ENDPOINT.execute-api.us-east-1.amazonaws.com/prod/dados"; // substituir
+# API Gateway Management API
+APIGW_ENDPOINT = "https://SEU_ENDPOINT.execute-api.us-east-1.amazonaws.com/dev"  # substituir
+apigw = boto3.client("apigatewaymanagementapi", endpoint_url=APIGW_ENDPOINT)
 
-const Timer: React.FC = () => {
-  const [timers, setTimers] = useState<TimerData[]>([]);
-  const [wsConnected, setWsConnected] = useState(false);
-  const ws = useRef<WebSocket | null>(null);
 
-  // Fetch inicial para pegar timers persistentes
-  useEffect(() => {
-    fetch(API_URL)
-      .then((res) => res.json())
-      .then((data) => {
-        setTimers(data);
-        console.log("✅ Dados recebidos da API:", data);
-      })
-      .catch(console.error);
-  }, []);
+def lambda_handler(event, context):
+    route = event.get("requestContext", {}).get("routeKey")
+    connection_id = event.get("requestContext", {}).get("connectionId")
 
-  // Conexão WebSocket
-  useEffect(() => {
-    ws.current = new WebSocket(WS_URL);
+    if route == "$connect":
+        CONN_TABLE.put_item(Item={"connectionId": connection_id})
+        return {"statusCode": 200}
 
-    ws.current.onopen = () => {
-      console.log("✅ WebSocket conectado");
-      setWsConnected(true);
-    };
+    elif route == "$disconnect":
+        CONN_TABLE.delete_item(Key={"connectionId": connection_id})
+        return {"statusCode": 200}
 
-    ws.current.onmessage = (event) => {
-      const data = JSON.parse(event.data);
-      console.log("📩 Mensagem recebida:", data);
-      if (data.type === "TIMER_UPDATED") {
-        setTimers((prev) =>
-          prev.map((t) =>
-            t.chamado === data.chamado
-              ? { ...t, ...data }
-              : t
-          )
-        );
-      }
-    };
+    elif route == "sendMessage":
+        body = json.loads(event.get("body", "{}"))
+        action = body.get("action")
+        chamado = body.get("chamado")
 
-    ws.current.onclose = () => {
-      console.log("❌ WebSocket desconectado");
-      setWsConnected(false);
-    };
+        if not chamado or not action:
+            return {"statusCode": 400, "body": "Chamado ou ação ausente"}
 
-    ws.current.onerror = (err) => {
-      console.error("⚠ WebSocket erro:", err);
-      setWsConnected(false);
-    };
+        try:
+            item = ACOMP_TABLE.get_item(Key={"chamado": int(chamado)}).get("Item")
+            if not item:
+                return {"statusCode": 404, "body": "Chamado não encontrado"}
 
-    return () => ws.current?.close();
-  }, []);
+            # Iniciar ou pausar cronômetro
+            if action == "startTimer":
+                started_at = datetime.utcnow().replace(tzinfo=timezone.utc).isoformat()
+                ACOMP_TABLE.update_item(
+                    Key={"chamado": int(chamado)},
+                    UpdateExpression="SET timerActive = :t, startedAt = :s",
+                    ExpressionAttributeValues={":t": True, ":s": started_at}
+                )
+                item["timerActive"] = True
+                item["startedAt"] = started_at
 
-  // Atualiza timers a cada segundo para efeito de cronômetro
-  useEffect(() => {
-    const interval = setInterval(() => {
-      setTimers((prev) => [...prev]);
-    }, 1000);
+            elif action == "pauseTimer":
+                started_at = item.get("startedAt")
+                duration = item.get("durationMinutes", 15)
+                if started_at:
+                    elapsed = (datetime.utcnow().replace(tzinfo=timezone.utc) - datetime.fromisoformat(started_at)).total_seconds()
+                    remaining = max(0, duration*60 - elapsed)
+                else:
+                    remaining = duration * 60
+                ACOMP_TABLE.update_item(
+                    Key={"chamado": int(chamado)},
+                    UpdateExpression="SET timerActive = :t, timeRemaining = :r",
+                    ExpressionAttributeValues={":t": False, ":r": Decimal(str(remaining))}
+                )
+                item["timerActive"] = False
+                item["timeRemaining"] = remaining
 
-    return () => clearInterval(interval);
-  }, []);
+            # Broadcast para todos clientes
+            connections = CONN_TABLE.scan().get("Items", [])
+            for conn in connections:
+                try:
+                    apigw.post_to_connection(
+                        Data=json.dumps({
+                            "type": "TIMER_UPDATED",
+                            "chamado": item["chamado"],
+                            "timerActive": item.get("timerActive", False),
+                            "startedAt": item.get("startedAt"),
+                            "durationMinutes": item.get("durationMinutes", 15),
+                            "timeRemaining": float(item.get("timeRemaining", 0))
+                        }),
+                        ConnectionId=conn["connectionId"]
+                    )
+                except apigw.exceptions.GoneException:
+                    CONN_TABLE.delete_item(Key={"connectionId": conn["connectionId"]})
 
-  // Calcula tempo restante
-  const getRemaining = (timer: TimerData) => {
-    const duration = timer.durationMinutes ?? 0;
-    if (!timer.startedAt) return duration * 60;
+            return {"statusCode": 200, "body": json.dumps({"message": "ok"})}
 
-    const startedAtDate = new Date(timer.startedAt);
-    if (isNaN(startedAtDate.getTime())) return duration * 60;
+        except Exception as e:
+            return {"statusCode": 500, "body": str(e)}
 
-    const elapsed = (new Date().getTime() - startedAtDate.getTime()) / 1000;
-    return Math.max(0, duration * 60 - elapsed);
-  };
-
-  // Envia ação para a Lambda via WebSocket
-  const sendAction = (chamado: number, action: "startTimer" | "pauseTimer") => {
-    if (ws.current?.readyState === WebSocket.OPEN) {
-      ws.current.send(JSON.stringify({ action, chamado }));
-      console.log("📤 Mensagem enviada:", { action, chamado });
-    } else {
-      console.warn("⚠ WebSocket não está conectado");
-      alert("WebSocket não está conectado. Atualize a página.");
-    }
-  };
-
-  return (
-    <div>
-      <h1>Painel de Alertas</h1>
-      {!wsConnected && <p style={{ color: "red" }}>WebSocket desconectado</p>}
-      {timers.length === 0 && <p>Carregando alertas...</p>}
-      {timers.map((t) => (
-        <div key={t.chamado} style={{ border: "1px solid gray", padding: 10, margin: 5 }}>
-          <p>Chamado: {t.chamado}</p>
-          <p>Status: {t.timerActive ? "Rodando" : "Pausado"}</p>
-          <p>
-            Tempo restante:{" "}
-            {`${Math.floor(getRemaining(t) / 60)
-              .toString()
-              .padStart(2, "0")}:${Math.floor(getRemaining(t) % 60)
-              .toString()
-              .padStart(2, "0")}`}
-          </p>
-          <button onClick={() => sendAction(t.chamado, "startTimer")}>Iniciar</button>
-          <button onClick={() => sendAction(t.chamado, "pauseTimer")}>Pausar</button>
-        </div>
-      ))}
-    </div>
-  );
-};
-
-export default Timer;
+    else:
+        return {"statusCode": 400, "body": "Rota não suportada"}
