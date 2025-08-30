@@ -18,13 +18,13 @@ def json_serial(obj):
         return int(obj) if obj % 1 == 0 else float(obj)
     raise TypeError
 
-# Calcula tempo restante
+# Calcula tempo restante do cronômetro
 def calculate_remaining(alerta):
     started_at = alerta.get("startedAt")
     duration = alerta.get("durationMinutes", 15)
     timer_active = alerta.get("timerActive", False)
 
-    if started_at:
+    if started_at and timer_active:
         try:
             started_dt = datetime.fromisoformat(started_at.replace("Z", "+00:00"))
             now = datetime.utcnow().replace(tzinfo=timezone.utc)
@@ -52,7 +52,7 @@ def lambda_handler(event, context):
         CONN_TABLE.delete_item(Key={"connectionId": connection_id})
         return {"statusCode": 200}
 
-    # ---------------- Receber mensagem
+    # ---------------- Receber mensagem do front-end
     elif route == "sendMessage":
         body = json.loads(event.get("body", "{}"))
         action = body.get("action")          # "startTimer" ou "pauseTimer"
@@ -106,6 +106,7 @@ def lambda_handler(event, context):
                     }, default=json_serial)
                 )
             except apigw.exceptions.GoneException:
+                # Remove conexões inválidas
                 CONN_TABLE.delete_item(Key={"connectionId": conn["connectionId"]})
 
         return {"statusCode": 200, "body": json.dumps({"message": "ok"})}
