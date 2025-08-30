@@ -123,7 +123,11 @@ const Timer = () => {
       
       if (response.ok) {
         const data = await response.json();
-        if (data) {
+        console.log('API Response:', data);
+        
+        // Check if data is valid timer state (has the expected timer properties)
+        if (data && data.chamado && typeof data.timerActive === 'boolean' && typeof data.durationMinutes === 'number') {
+          console.log('Valid timer data found:', data);
           setTimerState(data);
           setIsActive(data.timerActive);
           setDuration(data.durationMinutes);
@@ -133,12 +137,21 @@ const Timer = () => {
             const elapsed = Math.floor((Date.now() - new Date(data.startedAt).getTime()) / 1000);
             const remaining = Math.max(0, (data.durationMinutes * 60) - elapsed);
             setDisplayTime(remaining);
+            console.log('Timer is active, calculated remaining time:', remaining);
           } else {
-            setDisplayTime(data.timeRemaining || data.durationMinutes * 60);
+            const timeRemaining = data.timeRemaining || data.durationMinutes * 60;
+            setDisplayTime(timeRemaining);
+            console.log('Timer is not active, using stored time:', timeRemaining);
           }
           
           return data;
+        } else {
+          console.log('Invalid timer data received, API returned:', data);
+          // If API returns array or invalid data, return null to create new timer
+          return null;
         }
+      } else {
+        console.log('API request failed with status:', response.status);
       }
     } catch (error) {
       console.error('Error loading timer state:', error);
@@ -191,22 +204,35 @@ const Timer = () => {
   useEffect(() => {
     if (initialLoad) {
       const savedChamado = localStorage.getItem('timer_chamado');
+      console.log('Initializing timer with saved chamado:', savedChamado);
+      
       if (savedChamado) {
         setChamado(savedChamado);
         loadTimerState(savedChamado).then((data) => {
           if (!data) {
-            // Create new timer if no saved state
+            // Create new timer if no saved state or invalid data
+            console.log('No valid data found, creating new timer');
             const newChamado = generateChamado();
             setChamado(newChamado);
             localStorage.setItem('timer_chamado', newChamado);
             setDisplayTime(duration * 60);
+            console.log('New timer initialized with time:', duration * 60);
           }
+        }).catch(() => {
+          // If error loading, fallback to new timer
+          console.log('Error loading state, creating new timer');
+          const newChamado = generateChamado();
+          setChamado(newChamado);
+          localStorage.setItem('timer_chamado', newChamado);
+          setDisplayTime(duration * 60);
         });
       } else {
+        console.log('No saved chamado, creating new timer');
         const newChamado = generateChamado();
         setChamado(newChamado);
         localStorage.setItem('timer_chamado', newChamado);
         setDisplayTime(duration * 60);
+        console.log('Fresh timer initialized with time:', duration * 60);
       }
       setInitialLoad(false);
     }
@@ -296,6 +322,28 @@ const Timer = () => {
         setDisplayTime(newDuration * 60);
       }
     }
+  };
+
+  const clearSession = () => {
+    // Clear localStorage
+    localStorage.removeItem('timer_chamado');
+    
+    // Generate new chamado and reset state
+    const newChamado = generateChamado();
+    setChamado(newChamado);
+    localStorage.setItem('timer_chamado', newChamado);
+    
+    // Reset timer to default values
+    setDisplayTime(duration * 60);
+    setIsActive(false);
+    setTimerState(null);
+    
+    toast({
+      title: "Sessão Limpa",
+      description: "Nova sessão criada com sucesso.",
+    });
+    
+    console.log('Session cleared, new chamado:', newChamado);
   };
 
   // Calculate progress percentage
@@ -447,7 +495,7 @@ const Timer = () => {
                 </div>
               </div>
 
-              <div className="flex gap-2">
+              <div className="flex gap-2 flex-wrap">
                 <Button
                   onClick={() => updateDuration(15)}
                   variant="outline"
@@ -480,6 +528,20 @@ const Timer = () => {
                 >
                   1 hora
                 </Button>
+              </div>
+
+              <div className="pt-4 border-t border-border">
+                <Button
+                  onClick={clearSession}
+                  variant="destructive"
+                  size="sm"
+                  className="w-full"
+                >
+                  Limpar Sessão
+                </Button>
+                <p className="text-xs text-muted-foreground mt-2">
+                  Use apenas se o tempo estiver mostrando "NaN:NaN" ou problemas similares
+                </p>
               </div>
             </div>
           </Card>
