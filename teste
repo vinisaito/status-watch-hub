@@ -11,6 +11,9 @@ dynamodb = boto3.resource("dynamodb", region_name="us-east-1")
 connections_table = dynamodb.Table(os.environ["CONNECTIONS_TABLE"])  # PK: connectionId
 chamados_table = dynamodb.Table(os.environ["CHAMADOS_TABLE"])        # PK: chamado (Number)
 
+# Modo de teste: quando = "1", não chama API Gateway Management (post_to_connection/broadcast)
+DISABLE_APIGW_POST = os.environ.get("DISABLE_APIGW_POST", "0") == "1"
+
 # ---------- Utils ----------
 class DecimalEncoder(json.JSONEncoder):
     def default(self, o):
@@ -23,7 +26,7 @@ def to_json(data):
 
 TRACE_ID = None
 def log(msg, **kwargs):
-    """Log estruturado e forçando flush para CloudWatch"""
+    """Log estruturado e com flush para CloudWatch"""
     global TRACE_ID
     if not TRACE_ID:
         TRACE_ID = str(uuid.uuid4())[:8]
@@ -42,6 +45,10 @@ def get_apigw_client(event):
     return boto3.client("apigatewaymanagementapi", endpoint_url=endpoint_url)
 
 def send_to_connection(apigw, connection_id, message: dict):
+    if DISABLE_APIGW_POST:
+        log("post_to_connection SKIPPED (DISABLE_APIGW_POST=1)",
+            connectionId=connection_id, action=message.get("action"))
+        return True
     try:
         apigw.post_to_connection(Data=to_json(message), ConnectionId=connection_id)
         log("post_to_connection OK", connectionId=connection_id, action=message.get("action"))
@@ -58,6 +65,11 @@ def send_to_connection(apigw, connection_id, message: dict):
         return False
 
 def broadcast(event, message):
+    if DISABLE_APIGW_POST:
+        log("broadcast SKIPPED (DISABLE_APIGW_POST=1)",
+            action=message.get("action"), chamado=message.get("chamado"), message=message)
+        return {"statusCode": 200, "body": "broadcast skipped (DISABLE_APIGW_POST=1)"}
+
     apigw = get_apigw_client(event)
     try:
         scan = connections_table.scan()
@@ -67,7 +79,8 @@ def broadcast(event, message):
         log("broadcast scan ERROR", error=str(e))
         return {"statusCode": 500, "body": "erro ao listar conexões"}
 
-    log("broadcast begin", total=len(connections), action=message.get("action"), chamado=message.get("chamado"))
+    log("broadcast begin", total=len(connections),
+        action=message.get("action"), chamado=message.get("chamado"))
     sent = 0
     for conn in connections:
         if send_to_connection(apigw, conn["connectionId"], message):
@@ -83,6 +96,33 @@ def lambda_handler(event, context):
     print("=== Lambda Iniciada ===", flush=True)
     print(json.dumps(event, default=str), flush=True)
 
+    # Guarda para testes via Console da Lambda
+    rc = event.get("requestContext")
+    if not isinstance(rc, dict):
+        log("invalid_test_event_missing_requestContext",
+            eventKeys=list(event.keys()),
+            hint="Este Lambda foi feito para ser invocado pelo API Gateway WebSocket. "
+                 "Use um Test Event com o shape correto (veja exemplos) ou ative DISABLE_APIGW_POST=1.")
+        # Opcional: permitir exercitar rotas passando 'route' e 'body' diretamente
+        route = event.get("route")
+        if route:
+            log("direct_invoke_route_detected", route=route)
+            # Faz um shim mínimo para reusar as rotas (sem post_to_connection):
+            fake_event = {
+                "requestContext": {
+                    "routeKey": route,
+                    "connectionId": event.get("connectionId", "direct-invoke"),
+                    "domainName": event.get("domainName", "example.execute-api.us-east-1.amazonaws.com"),
+                    "stage": event.get("stage", "dev"),
+                },
+                "body": event.get("body")
+            }
+            return _dispatch(fake_event)
+        return {"statusCode": 400, "body": "Evento inválido: faltou requestContext.routeKey"}
+
+    return _dispatch(event)
+
+def _dispatch(event):
     route = event["requestContext"]["routeKey"]
     rc = event["requestContext"]
     log("invoke", routeKey=route, connectionId=rc.get("connectionId"), body=event.get("body"))
@@ -104,11 +144,28 @@ def lambda_handler(event, context):
             return update_status_final(event)
         elif route == "updateStatus":
             return update_status(event)
+        elif route == "$default":
+            # Caso a seleção de rota esteja por body.action
+            try:
+                body = json.loads(event.get("body") or "{}")
+            except Exception as e:
+                log("$default parse error", error=str(e), bodyRaw=event.get("body"))
+                body = {}
+            action = body.get("action")
+            log("$default received", action=action)
+            if action in ("getState", "startTimer", "updateOperador",
+                          "updateObservacao", "updateStatusFinal", "updateStatus"):
+                # Roteia internamente
+                event2 = dict(event)
+                event2["requestContext"] = dict(event["requestContext"])
+                event2["requestContext"]["routeKey"] = action
+                return _dispatch(event2)
+            return {"statusCode": 200, "body": "no-op $default"}
         else:
             log("rota inválida", route=route)
             return {"statusCode": 400, "body": "rota inválida"}
     except Exception as e:
-        log("lambda_handler ERROR", error=str(e))
+        log("dispatch ERROR", error=str(e))
         return {"statusCode": 500, "body": str(e)}
 
 # ---------- Rotas ----------
@@ -130,7 +187,7 @@ def on_disconnect(event):
 def start_timer(event):
     body = json.loads(event.get("body") or "{}")
     chamado = int(body["chamado"])
-    timer = body["timer"]
+    timer = body["timer"]  # "primeiroAcionado" ou "escalacao1..4"
 
     duration = 20*60 if timer == "primeiroAcionado" else 10*60
     timer_start = now_ts()
@@ -240,13 +297,19 @@ def get_state(event):
     body = json.loads(event.get("body") or "{}")
     chamado = int(body["chamado"])
     connection_id = event["requestContext"]["connectionId"]
-    apigw = get_apigw_client(event)
 
     resp = chamados_table.get_item(Key={"chamado": chamado})
     item = resp.get("Item", {})
     log("get_state DB get OK", item=item)
 
     message = {"action": "currentState", "chamado": chamado, "serverTime": now_ts(), **item}
-    log("get_state -> enviando", chamado=chamado, message=message)
+
+    if DISABLE_APIGW_POST:
+        log("get_state SKIPPED send_to_connection (DISABLE_APIGW_POST=1)",
+            connectionId=connection_id, message=message)
+        return {"statusCode": 200, "body": "get_state ok (sem enviar via WS)"}
+
+    apigw = get_apigw_client(event)
+    log("get_state -> enviando", chamado=chamado, connectionId=connection_id)
     send_to_connection(apigw, connection_id, message)
     return {"statusCode": 200}
