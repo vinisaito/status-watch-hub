@@ -1,231 +1,315 @@
-// src/store/useChamadoStore.ts
-import { create } from "zustand";
+import json
+import boto3
+import os
+import decimal
+import uuid
+import sys
+from datetime import datetime
 
-export interface ChamadoState {
-  status: "pending" | "confirmed" | "escalating" | "completed";
-  currentLevel: number;
-  timeRemaining: number;
-  timerActive: boolean;
-  observations: string;
-  isAttended: boolean;
-  // 👇 opcional: para guardar qualquer dado extra vindo do WS
-  rawWSData?: Record<string, any>;
-}
+# ---------- Config ----------
+dynamodb = boto3.resource("dynamodb", region_name="us-east-1")
+connections_table = dynamodb.Table(os.environ["CONNECTIONS_TABLE"])  # PK: connectionId
+chamados_table = dynamodb.Table(os.environ["CHAMADOS_TABLE"])        # PK: chamado (Number)
 
-interface ChamadoStore {
-  chamados: Record<string, ChamadoState>;
-  initChamado: (id: string) => void;
-  startChamado: (id: string, duration?: number) => void;
-  updateChamado: (id: string, data: Partial<ChamadoState>) => void;
-  confirmChamado: (id: string, observations: string) => void;
-  escalateChamado: (id: string, level: number) => void;
-  completeChamado: (id: string, observations: string) => void;
-  tick: () => void;
-  setFromWS: (id: string, data: any) => void;
-  reset: () => void;
-}
+# Modo de teste: quando = "1", não chama API Gateway Management (post_to_connection/broadcast)
+DISABLE_APIGW_POST = os.environ.get("DISABLE_APIGW_POST", "0") == "1"
 
-export const useChamadoStore = create<ChamadoStore>((set) => ({
-  chamados: {},
+# ---------- Utils ----------
+class DecimalEncoder(json.JSONEncoder):
+    def default(self, o):
+        if isinstance(o, decimal.Decimal):
+            return int(o) if o % 1 == 0 else float(o)
+        return super().default(o)
 
-  initChamado: (id: string) =>
-    set((state) => {
-      if (state.chamados[id]) return state;
-      return {
-        chamados: {
-          ...state.chamados,
-          [id]: {
-            status: "pending",
-            currentLevel: 0,
-            timeRemaining: 300,
-            timerActive: true,
-            observations: "",
-            isAttended: false,
-          },
-        },
-      };
-    }),
+def to_json(data):
+    return json.dumps(data, cls=DecimalEncoder)
 
-  startChamado: (id: string, duration: number = 300) =>
-    set((state) => ({
-      chamados: {
-        ...state.chamados,
-        [id]: {
-          status: "pending",
-          currentLevel: 0,
-          timeRemaining: duration,
-          timerActive: true,
-          observations: "",
-          isAttended: false,
-        },
-      },
-    })),
+TRACE_ID = None
+def log(msg, **kwargs):
+    """Log estruturado e com flush para CloudWatch"""
+    global TRACE_ID
+    if not TRACE_ID:
+        TRACE_ID = str(uuid.uuid4())[:8]
+    payload = {"trace": TRACE_ID, "msg": msg}
+    payload.update(kwargs)
+    print(json.dumps(payload, default=str))
+    sys.stdout.flush()
 
-  updateChamado: (id: string, data: Partial<ChamadoState>) =>
-    set((state) => ({
-      chamados: {
-        ...state.chamados,
-        [id]: {
-          ...state.chamados[id],
-          ...data,
-        },
-      },
-    })),
+def now_ts():
+    return int(datetime.utcnow().timestamp())
 
-  confirmChamado: (id: string, observations: string) =>
-    set((state) => ({
-      chamados: {
-        ...state.chamados,
-        [id]: {
-          ...state.chamados[id],
-          status: "confirmed",
-          timerActive: false,
-          observations,
-        },
-      },
-    })),
+def get_apigw_client(event):
+    rc = event["requestContext"]
+    endpoint_url = f"https://{rc['domainName']}/{rc['stage']}"
+    log("get_apigw_client", endpoint_url=endpoint_url)
+    return boto3.client("apigatewaymanagementapi", endpoint_url=endpoint_url)
 
-  escalateChamado: (id: string, level: number) =>
-    set((state) => ({
-      chamados: {
-        ...state.chamados,
-        [id]: {
-          ...state.chamados[id],
-          status: "escalating",
-          currentLevel: level,
-          timerActive: true,
-          timeRemaining: 300,
-        },
-      },
-    })),
+def send_to_connection(apigw, connection_id, message: dict):
+    if DISABLE_APIGW_POST:
+        log("post_to_connection SKIPPED (DISABLE_APIGW_POST=1)",
+            connectionId=connection_id, action=message.get("action"))
+        return True
+    try:
+        apigw.post_to_connection(Data=to_json(message), ConnectionId=connection_id)
+        log("post_to_connection OK", connectionId=connection_id, action=message.get("action"))
+        return True
+    except apigw.exceptions.GoneException:
+        log("GoneException - removendo conexão", connectionId=connection_id)
+        try:
+            connections_table.delete_item(Key={"connectionId": connection_id})
+        except Exception as e:
+            log("erro ao remover conexão Gone", error=str(e))
+        return False
+    except Exception as e:
+        log("post_to_connection ERROR", connectionId=connection_id, error=str(e))
+        return False
 
-  completeChamado: (id: string, observations: string) =>
-    set((state) => ({
-      chamados: {
-        ...state.chamados,
-        [id]: {
-          ...state.chamados[id],
-          status: "completed",
-          timerActive: false,
-          observations,
-        },
-      },
-    })),
+def broadcast(event, message):
+    if DISABLE_APIGW_POST:
+        log("broadcast SKIPPED (DISABLE_APIGW_POST=1)",
+            action=message.get("action"), chamado=message.get("chamado"), message=message)
+        return {"statusCode": 200, "body": "broadcast skipped (DISABLE_APIGW_POST=1)"}
 
-  tick: () =>
-    set((state) => {
-      const novos: Record<string, ChamadoState> = {};
-      for (const [id, chamado] of Object.entries(state.chamados)) {
-        if (chamado.timerActive && chamado.timeRemaining > 0) {
-          novos[id] = {
-            ...chamado,
-            timeRemaining: chamado.timeRemaining - 1,
-          };
-        } else if (chamado.timerActive && chamado.timeRemaining <= 0) {
-          novos[id] = {
-            ...chamado,
-            timerActive: false,
-            timeRemaining: 0,
-          };
-        } else {
-          novos[id] = chamado;
+    apigw = get_apigw_client(event)
+    try:
+        scan = connections_table.scan()
+        connections = scan.get("Items", [])
+        log("broadcast scan OK", total=len(connections))
+    except Exception as e:
+        log("broadcast scan ERROR", error=str(e))
+        return {"statusCode": 500, "body": "erro ao listar conexões"}
+
+    log("broadcast begin", total=len(connections),
+        action=message.get("action"), chamado=message.get("chamado"))
+    sent = 0
+    for conn in connections:
+        if send_to_connection(apigw, conn["connectionId"], message):
+            sent += 1
+    log("broadcast end", sent=sent, total=len(connections))
+    return {"statusCode": 200, "body": f"Mensagem enviada para {sent}/{len(connections)} conexões"}
+
+# ---------- Handler ----------
+def lambda_handler(event, context):
+    global TRACE_ID
+    TRACE_ID = str(uuid.uuid4())[:8]
+
+    print("=== Lambda Iniciada ===", flush=True)
+    print(json.dumps(event, default=str), flush=True)
+
+    # Guarda para testes via Console da Lambda
+    rc = event.get("requestContext")
+    if not isinstance(rc, dict):
+        log("invalid_test_event_missing_requestContext",
+            eventKeys=list(event.keys()),
+            hint="Este Lambda foi feito para ser invocado pelo API Gateway WebSocket. "
+                 "Use um Test Event com o shape correto (veja exemplos) ou ative DISABLE_APIGW_POST=1.")
+        # Opcional: permitir exercitar rotas passando 'route' e 'body' diretamente
+        route = event.get("route")
+        if route:
+            log("direct_invoke_route_detected", route=route)
+            # Faz um shim mínimo para reusar as rotas (sem post_to_connection):
+            fake_event = {
+                "requestContext": {
+                    "routeKey": route,
+                    "connectionId": event.get("connectionId", "direct-invoke"),
+                    "domainName": event.get("domainName", "example.execute-api.us-east-1.amazonaws.com"),
+                    "stage": event.get("stage", "dev"),
+                },
+                "body": event.get("body")
+            }
+            return _dispatch(fake_event)
+        return {"statusCode": 400, "body": "Evento inválido: faltou requestContext.routeKey"}
+
+    return _dispatch(event)
+
+def _dispatch(event):
+    route = event["requestContext"]["routeKey"]
+    rc = event["requestContext"]
+    log("invoke", routeKey=route, connectionId=rc.get("connectionId"), body=event.get("body"))
+
+    try:
+        if route == "$connect":
+            return on_connect(event)
+        elif route == "$disconnect":
+            return on_disconnect(event)
+        elif route == "getState":
+            return get_state(event)
+        elif route == "startTimer":
+            return start_timer(event)
+        elif route == "updateOperador":
+            return update_operador(event)
+        elif route == "updateObservacao":
+            return update_observacao(event)
+        elif route == "updateStatusFinal":
+            return update_status_final(event)
+        elif route == "updateStatus":
+            return update_status(event)
+        elif route == "$default":
+            # Caso a seleção de rota esteja por body.action
+            try:
+                body = json.loads(event.get("body") or "{}")
+            except Exception as e:
+                log("$default parse error", error=str(e), bodyRaw=event.get("body"))
+                body = {}
+            action = body.get("action")
+            log("$default received", action=action)
+            if action in ("getState", "startTimer", "updateOperador",
+                          "updateObservacao", "updateStatusFinal", "updateStatus"):
+                # Roteia internamente
+                event2 = dict(event)
+                event2["requestContext"] = dict(event["requestContext"])
+                event2["requestContext"]["routeKey"] = action
+                return _dispatch(event2)
+            return {"statusCode": 200, "body": "no-op $default"}
+        else:
+            log("rota inválida", route=route)
+            return {"statusCode": 400, "body": "rota inválida"}
+    except Exception as e:
+        log("dispatch ERROR", error=str(e))
+        return {"statusCode": 500, "body": str(e)}
+
+# ---------- Rotas ----------
+def on_connect(event):
+    connection_id = event["requestContext"]["connectionId"]
+    resp = connections_table.put_item(Item={"connectionId": connection_id, "connectedAt": now_ts()})
+    log("on_connect OK", connectionId=connection_id, resp=resp)
+    return {"statusCode": 200}
+
+def on_disconnect(event):
+    connection_id = event["requestContext"]["connectionId"]
+    try:
+        resp = connections_table.delete_item(Key={"connectionId": connection_id})
+        log("on_disconnect OK", connectionId=connection_id, resp=resp)
+    except Exception as e:
+        log("on_disconnect ERROR", connectionId=connection_id, error=str(e))
+    return {"statusCode": 200}
+
+def start_timer(event):
+    body = json.loads(event.get("body") or "{}")
+    chamado = int(body["chamado"])
+    timer = body["timer"]  # "primeiroAcionado" ou "escalacao1..4"
+
+    duration = 20*60 if timer == "primeiroAcionado" else 10*60
+    timer_start = now_ts()
+    timer_end = timer_start + duration
+
+    log("start_timer invoked", chamado=chamado, timer=timer, duration=duration)
+
+    update_expr = f"SET {timer} = :val"
+    resp = chamados_table.update_item(
+        Key={"chamado": chamado},
+        UpdateExpression=update_expr,
+        ExpressionAttributeValues={
+            ":val": {
+                "timerStart": timer_start,
+                "timerEnd": timer_end,
+                "observacao": body.get("observacao", "")
+            }
         }
-      }
-      return { chamados: novos };
-    }),
+    )
+    log("start_timer DB update OK", resp=resp)
 
-  setFromWS: (id: string, data: any) =>
-    set((state) => {
-      const prev = state.chamados[id] || {
-        status: "pending",
-        currentLevel: 0,
-        timeRemaining: 0,
-        timerActive: false,
-        observations: "",
-        isAttended: false,
-      };
+    resp = chamados_table.get_item(Key={"chamado": chamado})
+    item = resp.get("Item", {})
+    log("start_timer DB get OK", item=item)
 
-      return {
-        chamados: {
-          ...state.chamados,
-          [id]: {
-            ...prev,
-            // mapeia campos conhecidos
-            status: data.status ?? prev.status,
-            observations: data.observacao ?? prev.observations,
-            timeRemaining:
-              data.timerEnd && data.serverTime
-                ? Math.max(0, data.timerEnd - data.serverTime)
-                : prev.timeRemaining,
-            timerActive:
-              data.action === "timerStarted"
-                ? true
-                : prev.timerActive,
-            // guarda tudo também em rawWSData para debug/uso futuro
-            rawWSData: { ...prev.rawWSData, ...data },
-          },
-        },
-      };
-    }),
-
-  reset: () => set({ chamados: {} }),
-}));
-
-// -------------------
-// WebSocket integração
-// -------------------
-
-const WS_URL = "wss://rsgjd6wsza.execute-api.us-east-1.amazonaws.com/dev";
-let socket: WebSocket | null = null;
-
-export const initWebSocket = () => {
-  if (socket) return;
-
-  socket = new WebSocket(WS_URL);
-
-  socket.onopen = () => {
-    console.log("[WS] ✅ Conectado ao servidor");
-  };
-
-  socket.onmessage = (event) => {
-    try {
-      const data = JSON.parse(event.data);
-
-      if (!data.chamado) {
-        console.warn("[WS] ⚠️ Mensagem recebida sem 'chamado':", data);
-        return;
-      }
-
-      const chamadoId = String(data.chamado);
-      useChamadoStore.getState().setFromWS(chamadoId, data);
-    } catch (err) {
-      console.error("[WS] ❌ Erro ao processar mensagem:", err);
+    message = {
+        "action": "timerStarted",
+        "chamado": chamado,
+        "serverTime": now_ts(),
+        "duration": duration,
+        **item
     }
-  };
+    return broadcast(event, message)
 
-  socket.onclose = () => {
-    console.log("[WS] 🔌 Conexão fechada. Tentando reconectar em 3s...");
-    socket = null;
-    setTimeout(initWebSocket, 3000);
-  };
+def update_operador(event):
+    body = json.loads(event.get("body") or "{}")
+    chamado = int(body["chamado"])
+    operador = body["operador"]
 
-  socket.onerror = (err) => {
-    console.error("[WS] 🚨 Erro no WebSocket:", err);
-    socket?.close();
-  };
-};
+    log("update_operador", chamado=chamado, operador=operador)
 
-export const sendWS = (msg: any) => {
-  if (socket && socket.readyState === WebSocket.OPEN) {
-    socket.send(JSON.stringify(msg));
-  } else {
-    console.warn("[WS] ⚠️ Tentativa de enviar com socket fechado:", msg);
-  }
-};
+    resp = chamados_table.update_item(
+        Key={"chamado": chamado},
+        UpdateExpression="SET operador = :o",
+        ExpressionAttributeValues={":o": operador},
+    )
+    log("update_operador DB update OK", resp=resp)
 
-// -------------------
-// Tick global
-// -------------------
-setInterval(() => {
-  useChamadoStore.getState().tick();
-}, 1000);
+    message = {"action": "operadorUpdated", "chamado": chamado, "operador": operador}
+    return broadcast(event, message)
+
+def update_observacao(event):
+    body = json.loads(event.get("body") or "{}")
+    chamado = int(body["chamado"])
+    timer = body["timer"]
+    observacao = body["observacao"]
+
+    log("update_observacao", chamado=chamado, timer=timer, observacao=observacao)
+
+    update_expr = f"SET {timer}.observacao = :obs"
+    resp = chamados_table.update_item(
+        Key={"chamado": chamado},
+        UpdateExpression=update_expr,
+        ExpressionAttributeValues={":obs": observacao},
+    )
+    log("update_observacao DB update OK", resp=resp)
+
+    message = {"action": "observacaoUpdated", "chamado": chamado, "timer": timer, "observacao": observacao}
+    return broadcast(event, message)
+
+def update_status_final(event):
+    body = json.loads(event.get("body") or "{}")
+    chamado = int(body["chamado"])
+    status_final = body["statusFinal"]
+
+    log("update_status_final", chamado=chamado, statusFinal=status_final)
+
+    resp = chamados_table.update_item(
+        Key={"chamado": chamado},
+        UpdateExpression="SET statusFinal = :s",
+        ExpressionAttributeValues={":s": status_final},
+    )
+    log("update_status_final DB update OK", resp=resp)
+
+    message = {"action": "statusFinalUpdated", "chamado": chamado, "statusFinal": status_final}
+    return broadcast(event, message)
+
+def update_status(event):
+    body = json.loads(event.get("body") or "{}")
+    chamado = int(body["chamado"])
+    status = str(body["status"])
+
+    log("update_status", chamado=chamado, status=status)
+
+    resp = chamados_table.update_item(
+        Key={"chamado": chamado},
+        UpdateExpression="SET #s = :s",
+        ExpressionAttributeNames={"#s": "status"},
+        ExpressionAttributeValues={":s": status},
+    )
+    log("update_status DB update OK", resp=resp)
+
+    message = {"action": "statusUpdated", "chamado": chamado, "status": status}
+    return broadcast(event, message)
+
+def get_state(event):
+    body = json.loads(event.get("body") or "{}")
+    chamado = int(body["chamado"])
+    connection_id = event["requestContext"]["connectionId"]
+
+    resp = chamados_table.get_item(Key={"chamado": chamado})
+    item = resp.get("Item", {})
+    log("get_state DB get OK", item=item)
+
+    message = {"action": "currentState", "chamado": chamado, "serverTime": now_ts(), **item}
+
+    if DISABLE_APIGW_POST:
+        log("get_state SKIPPED send_to_connection (DISABLE_APIGW_POST=1)",
+            connectionId=connection_id, message=message)
+        return {"statusCode": 200, "body": "get_state ok (sem enviar via WS)"}
+
+    apigw = get_apigw_client(event)
+    log("get_state -> enviando", chamado=chamado, connectionId=connection_id)
+    send_to_connection(apigw, connection_id, message)
+    return {"statusCode": 200}
