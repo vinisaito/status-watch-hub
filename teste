@@ -1,28 +1,264 @@
-      tick: () => {
-        set((state) => {
-          const novos: Record<string, ChamadoState> = {};
-          for (const [id, chamado] of Object.entries(state.chamados)) {
-            if (chamado.timerActive && chamado.timeRemaining > 0) {
-              novos[id] = {
-                ...chamado,
-                timeRemaining: chamado.timeRemaining - 1,
-              };
-            } else if (chamado.timerActive && chamado.timeRemaining <= 0) {
-              novos[id] = {
-                ...chamado,
-                timerActive: false,
-                timeRemaining: 0,
-              };
-            } else {
-              novos[id] = chamado;
-            }
-          }
-          return { chamados: novos };
+// src/store/useChamadoStore.ts
+import { create } from "zustand";
+import { persist } from "zustand/middleware";
+import { ws } from "@/services/websocket"; // ajuste o caminho se necessário
+
+export type ChamadoState = {
+  status: "idle" | "pending" | "confirmed" | "escalating" | "completed";
+  timeRemaining: number;
+  timerActive: boolean;
+  observations: string;
+  currentLevel: number;
+  isAttended: boolean;
+};
+
+type Store = {
+  chamados: Record<string, ChamadoState>;
+
+  // ações
+  startConfirmation: (alertId: string | number) => void;
+  confirmReceived: (alertId: string | number, obs?: string) => void;
+  startEscalation: (alertId: string | number, level: 1 | 2 | 3 | 4, obs?: string) => void;
+  updateObservation: (alertId: string | number, obs: string) => void;
+  completeChamado: (alertId: string | number, obs?: string) => void;
+
+  // updates vindos do backend
+  setFromServer: (alertId: string | number, data: Partial<ChamadoState>) => void;
+
+  // timer
+  tick: () => void;
+};
+
+// helper para normalizar ID
+const keyOf = (id: string | number) => String(id);
+
+export const useChamadoStore = create<Store>()(
+  persist(
+    (set, get) => ({
+      chamados: {},
+
+      startConfirmation: (alertId) => {
+        const key = keyOf(alertId);
+
+        // estado otimista local
+        set((state) => ({
+          chamados: {
+            ...state.chamados,
+            [key]: {
+              status: "pending",
+              timeRemaining: 20 * 60, // 20 min (ajuste se quiser)
+              timerActive: true,
+              observations: state.chamados[key]?.observations ?? "",
+              currentLevel: 0,
+              isAttended: false,
+            },
+          },
+        }));
+
+        // WS para backend (Lambda)
+        ws.send({
+          action: "startTimer",
+          chamado: Number(alertId),
+          timer: "primeiroAcionado",
         });
       },
 
+      confirmReceived: (alertId, obs = "") => {
+        const key = keyOf(alertId);
+        set((state) => {
+          const atual = state.chamados[key];
+          if (!atual) return state;
+          return {
+            chamados: {
+              ...state.chamados,
+              [key]: {
+                ...atual,
+                status: "confirmed",
+                timerActive: false,
+                observations: obs || atual.observations,
+              },
+            },
+          };
+        });
 
+        ws.send({
+          action: "updateStatus",
+          chamado: Number(alertId),
+          status: "confirmed",
+        });
+        ws.send({
+          action: "updateObservacao",
+          chamado: Number(alertId),
+          timer: "primeiroAcionado",
+          observacao: obs,
+        });
+      },
 
+      startEscalation: (alertId, level, obs = "") => {
+        const key = keyOf(alertId);
+        set((state) => {
+          const atual = state.chamados[key];
+          if (!atual) return state;
+          return {
+            chamados: {
+              ...state.chamados,
+              [key]: {
+                ...atual,
+                status: "escalating",
+                currentLevel: level,
+                timeRemaining: 10 * 60, // 10 min por nível
+                timerActive: true,
+                observations: obs || atual.observations,
+              },
+            },
+          };
+        });
 
+        ws.send({
+          action: "startTimer",
+          chamado: Number(alertId),
+          timer: `escalacao${level}`,
+        });
+        if (obs) {
+          ws.send({
+            action: "updateObservacao",
+            chamado: Number(alertId),
+            timer: `escalacao${level}`,
+            observacao: obs,
+          });
+        }
+      },
 
-import create from "zustand";
+      updateObservation: (alertId, obs) => {
+        const key = keyOf(alertId);
+        set((state) => {
+          const atual = state.chamados[key];
+          if (!atual) return state;
+          return {
+            chamados: {
+              ...state.chamados,
+              [key]: { ...atual, observations: obs },
+            },
+          };
+        });
+        // envie ao backend se quiser salvar imediatamente:
+        // ws.send({ action: "updateObservacao", chamado: Number(alertId), timer: "primeiroAcionado", observacao: obs });
+      },
+
+      completeChamado: (alertId, obs = "") => {
+        const key = keyOf(alertId);
+        set((state) => {
+          const atual = state.chamados[key];
+          if (!atual) return state;
+          return {
+            chamados: {
+              ...state.chamados,
+              [key]: {
+                ...atual,
+                status: "completed",
+                timerActive: false,
+                timeRemaining: 0,
+                observations: obs || atual.observations,
+              },
+            },
+          };
+        });
+
+        ws.send({
+          action: "updateStatus",
+          chamado: Number(alertId),
+          status: "completed",
+        });
+        if (obs) {
+          ws.send({
+            action: "updateObservacao",
+            chamado: Number(alertId),
+            timer: "primeiroAcionado",
+            observacao: obs,
+          });
+        }
+      },
+
+      setFromServer: (alertId, data) => {
+        const key = keyOf(alertId);
+        set((state) => {
+          const atual: ChamadoState =
+            state.chamados[key] ?? {
+              status: "idle",
+              timeRemaining: 0,
+              timerActive: false,
+              observations: "",
+              currentLevel: 0,
+              isAttended: false,
+            };
+          return {
+            chamados: {
+              ...state.chamados,
+              [key]: { ...atual, ...data },
+            },
+          };
+        });
+      },
+
+      // ✅ Versão tipada sem usar Object.entries (evita 'unknown')
+      tick: () => {
+        set((state) => {
+          const next: Record<string, ChamadoState> = {};
+          const atual = state.chamados;
+
+          for (const id in atual) {
+            const c = atual[id];
+            if (c.timerActive) {
+              const tr = Math.max(0, c.timeRemaining - 1);
+              next[id] = {
+                ...c,
+                timeRemaining: tr,
+                timerActive: tr > 0,
+              };
+            } else {
+              next[id] = c;
+            }
+          }
+
+          return { chamados: next };
+        });
+      },
+    }),
+    { name: "chamados-store" }
+  )
+);
+
+// dispara o tick a cada segundo
+setInterval(() => {
+  useChamadoStore.getState().tick();
+}, 1000);
+
+// --- (Opcional) Integração de mensagens do backend ---
+// Se quiser que o serviço WS atualize automaticamente o store ao receber mensagens:
+ws.subscribe((msg) => {
+  // ignore mensagens não-JSON (strings do API Gateway)
+  if (!msg || typeof msg !== "object") return;
+
+  // a Lambda usa "action" e "chamado"
+  const { action, chamado, ...rest } = msg as {
+    action?: string;
+    chamado?: number;
+    [k: string]: any;
+  };
+  if (typeof chamado !== "number") return;
+
+  switch (action) {
+    case "currentState":
+    case "timerStarted":
+    case "statusUpdated":
+    case "operadorUpdated":
+    case "observacaoUpdated":
+    case "statusFinalUpdated":
+      useChamadoStore.getState().setFromServer(String(chamado), rest);
+      break;
+    default:
+      // outras ações → ignore ou logue
+      // console.debug("[WS] ação não mapeada:", action, msg);
+      break;
+  }
+});
