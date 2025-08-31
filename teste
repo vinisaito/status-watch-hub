@@ -1,123 +1,118 @@
-// websocket.ts
-export interface WSMessage {
-  action: string;
-  chamadoId?: number;
-  observation?: string;
-  level?: number;
-}
-
-class WebSocketService {
-  private ws: WebSocket | null = null;
-  private url: string;
-  private isConnected = false;
-  private listeners: ((msg: any) => void)[] = [];
-  private queue: WSMessage[] = []; // fila para mensagens enviadas antes da conexão abrir
-
-  constructor(url: string) {
-    this.url = url;
-    this.connect();
-  }
-
-  private connect() {
-    this.ws = new WebSocket(this.url);
-
-    this.ws.onopen = () => {
-      this.isConnected = true;
-      console.log("[WS] Conectado!");
-
-      // drena a fila
-      while (this.queue.length > 0) {
-        const msg = this.queue.shift();
-        if (msg) this.send(msg);
-      }
-    };
-
-    this.ws.onclose = () => {
-      this.isConnected = false;
-      console.warn("[WS] Desconectado. Tentando reconectar em 2s...");
-      setTimeout(() => this.connect(), 2000);
-    };
-
-    this.ws.onmessage = (event) => {
-      try {
-        const msg = JSON.parse(event.data);
-        this.listeners.forEach((cb) => cb(msg));
-      } catch (err) {
-        console.error("[WS] Erro parseando mensagem:", err);
-      }
-    };
-  }
-
-  send(msg: WSMessage) {
-    if (this.isConnected && this.ws?.readyState === WebSocket.OPEN) {
-      this.ws.send(JSON.stringify(msg));
-    } else {
-      console.log("[WS] Não conectado. Enfileirando mensagem:", msg);
-      this.queue.push(msg);
-    }
-  }
-
-  subscribe(cb: (msg: any) => void) {
-    this.listeners.push(cb);
-  }
-}
-
-export const WS = new WebSocketService("wss://SEU-ENDPOINT.execute-api.us-east-1.amazonaws.com/dev");
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-// useChamadoStore.ts
 import { create } from "zustand";
-import { WS } from "./websocket";
+import { ws } from "@/services/websocket"; // deve exportar: subscribe(cb) e send(payload)
 
-interface ChamadoState {
-  chamados: Record<number, any>;
-  startChamado: (chamadoId: number) => void;
-  confirmChamado: (chamadoId: number, observation: string) => void;
-  escalateChamado: (chamadoId: number, level: number) => void;
+// --- helpers ---
+type ID = string | number;
+const toNum = (id: ID) =>
+  typeof id === "number" ? id : Number(String(id).trim());
+
+const isValidNum = (n: number) => Number.isFinite(n) && !Number.isNaN(n);
+
+// --- mensagens que a Lambda envia ---
+type IncomingAction =
+  | "currentState"
+  | "timerStarted"
+  | "statusUpdated"
+  | "operadorUpdated"
+  | "observacaoUpdated"
+  | "statusFinalUpdated";
+
+type IncomingMsg = {
+  action: IncomingAction;
+  chamado?: number; // a Lambda usa 'chamado'
+  [k: string]: any;
+};
+
+interface StoreState {
+  // chaveada por string para não ter surpresa com keys numéricas no objeto
+  chamados: Record<string, any>;
+
+  // inicialização/estado
+  initChamado: (id: ID) => void;
+
+  // ações de negócio que a coluna usa
+  startChamado: (id: ID) => void; // inicia "primeiroAcionado"
+  confirmChamado: (id: ID, observation: string) => void; // confirma + salva obs
+  escalateChamado: (id: ID, level: 1 | 2 | 3 | 4) => void; // inicia escalacaoN
+
+  // (opcionais caso use)
+  updateOperador?: (id: ID, operador: string) => void;
+  updateStatusFinal?: (id: ID, statusFinal: string) => void;
 }
 
-export const useChamadoStore = create<ChamadoState>((set, get) => {
-  // assina o WS só uma vez
-  WS.subscribe((msg) => {
-    console.log("[WS] Mensagem recebida:", msg);
-    if (msg.type === "stateUpdate") {
-      set((state) => ({
+// assinamos o WS apenas uma vez por processo
+let subscribed = false;
+
+export const useChamadoStore = create<StoreState>((set, get) => {
+  const ensureSubscribed = () => {
+    if (subscribed) return;
+    subscribed = true;
+
+    ws.subscribe((raw: any) => {
+      const msg: IncomingMsg = raw || {};
+      const chamado = typeof msg.chamado === "number" ? msg.chamado : undefined;
+      if (chamado === undefined) return;
+
+      const key = String(chamado);
+
+      // atualiza o estado do chamado com o payload recebido
+      set((s) => ({
         chamados: {
-          ...state.chamados,
-          [msg.chamadoId]: msg.state,
+          ...s.chamados,
+          [key]: {
+            ...(s.chamados[key] || {}),
+            ...msg, // você pode normalizar aqui se preferir
+          },
         },
       }));
-    }
-  });
+    });
+  };
 
   return {
     chamados: {},
 
-    startChamado: (chamadoId) => {
-      WS.send({ action: "startTimer", chamadoId });
+    initChamado: (id) => {
+      ensureSubscribed();
+      const n = toNum(id);
+      if (!isValidNum(n)) {
+        console.warn("[Store] chamado inválido:", id);
+        return;
+      }
+      // pede o estado inicial desse chamado
+      ws.send({ action: "getState", chamado: n });
     },
 
-    confirmChamado: (chamadoId, observation) => {
-      WS.send({ action: "confirmTimer", chamadoId, observation });
+    // Inicia o timer do "Primeiro Acionado" (20min) — alinha com a Lambda
+    startChamado: (id) => {
+      const n = toNum(id);
+      if (!isValidNum(n)) return;
+      ws.send({ action: "startTimer", chamado: n, timer: "primeiroAcionado" });
     },
 
-    escalateChamado: (chamadoId, level) => {
-      WS.send({ action: "escalateTimer", chamadoId, level });
+    // Confirma recebimento: salva observação no passo atual e marca status
+    // -> mapeei para: updateObservacao (no passo base) + updateStatus
+    confirmChamado: (id, observation) => {
+      const n = toNum(id);
+      if (!isValidNum(n)) return;
+
+      // salva observação do "primeiroAcionado" (ajuste se quiser em etapa corrente)
+      ws.send({
+        action: "updateObservacao",
+        chamado: n,
+        timer: "primeiroAcionado",
+        observacao: observation,
+      });
+
+      // marca status "confirmed" (ajuste conforme seu domínio)
+      ws.send({ action: "updateStatus", chamado: n, status: "confirmed" });
+    },
+
+    // Escalação N => inicia timer escalacao{N}
+    escalateChamado: (id, level) => {
+      const n = toNum(id);
+      if (!isValidNum(n)) return;
+      const timerKey = `escalacao${level}` as const;
+      ws.send({ action: "startTimer", chamado: n, timer: timerKey });
     },
   };
 });
