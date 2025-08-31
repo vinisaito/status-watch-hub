@@ -36,6 +36,45 @@ def log(msg, **kwargs):
 def now_ts():
     return int(datetime.utcnow().timestamp())
 
+def json_response(status:int, body_obj:dict):
+    """Garante sempre JSON no body."""
+    return {
+        "statusCode": status,
+        "headers": {"Content-Type": "application/json"},
+        "body": to_json(body_obj)
+    }
+
+def parse_body_safe(event):
+    """Faz o parse do body uma única vez e guarda em event['parsedBody']."""
+    if "parsedBody" in event:
+        return event["parsedBody"]
+
+    body_raw = event.get("body")
+    body = {}
+    if body_raw:
+        if isinstance(body_raw, str):
+            try:
+                body = json.loads(body_raw)
+            except Exception as e:
+                log("JSON parse error", error=str(e), bodyRaw=body_raw)
+                body = {}
+        elif isinstance(body_raw, dict):
+            body = body_raw
+        else:
+            # body pode vir como bytes em alguns proxies — tenta decodificar
+            try:
+                body = json.loads(body_raw.decode("utf-8"))
+            except Exception as e:
+                log("JSON parse error (bytes?)", error=str(e))
+                body = {}
+    event["parsedBody"] = body
+    return body
+
+def get_body_field(event, key, default=None):
+    """Helper para pegar campos do body já parseado."""
+    body = parse_body_safe(event)
+    return body.get(key, default)
+
 def get_apigw_client(event):
     rc = event["requestContext"]
     endpoint_url = f"https://{rc['domainName']}/{rc['stage']}"
@@ -66,7 +105,7 @@ def broadcast(event, message):
     if DISABLE_APIGW_POST:
         log("broadcast SKIPPED (DISABLE_APIGW_POST=1)",
             action=message.get("action"), chamado=message.get("chamado"), message=message)
-        return {"statusCode": 200, "body": to_json({"ok": True, "skipped": True})}
+        return json_response(200, {"ok": True, "skipped": True})
 
     apigw = get_apigw_client(event)
     try:
@@ -75,7 +114,7 @@ def broadcast(event, message):
         log("broadcast scan OK", total=len(connections))
     except Exception as e:
         log("broadcast scan ERROR", error=str(e))
-        return {"statusCode": 500, "body": to_json({"error": "erro ao listar conexões"})}
+        return json_response(500, {"error": "erro ao listar conexões"})
 
     log("broadcast begin", total=len(connections),
         action=message.get("action"), chamado=message.get("chamado"))
@@ -84,7 +123,7 @@ def broadcast(event, message):
         if send_to_connection(apigw, conn["connectionId"], message):
             sent += 1
     log("broadcast end", sent=sent, total=len(connections))
-    return {"statusCode": 200, "body": to_json({"ok": True, "sent": sent, "total": len(connections)})}
+    return json_response(200, {"ok": True, "sent": sent, "total": len(connections)})
 
 # ---------- Handler ----------
 def lambda_handler(event, context):
@@ -110,15 +149,20 @@ def lambda_handler(event, context):
                 },
                 "body": event.get("body")
             }
+            # parse seguro também no caminho de teste
+            parse_body_safe(fake_event)
             return _dispatch(fake_event)
-        return {"statusCode": 400, "body": to_json({"error": "Evento inválido"})}
+        return json_response(400, {"error": "Evento inválido"})
 
+    # faz o parse seguro uma única vez
+    parse_body_safe(event)
     return _dispatch(event)
 
 def _dispatch(event):
     route = event["requestContext"]["routeKey"]
     rc = event["requestContext"]
-    log("invoke", routeKey=route, connectionId=rc.get("connectionId"), body=event.get("body"))
+    body = parse_body_safe(event)
+    log("invoke", routeKey=route, connectionId=rc.get("connectionId"), body=body)
 
     try:
         if route == "$connect":
@@ -138,11 +182,6 @@ def _dispatch(event):
         elif route == "updateStatus":
             return update_status(event)
         elif route == "$default":
-            try:
-                body = json.loads(event.get("body") or "{}")
-            except Exception as e:
-                log("$default parse error", error=str(e), bodyRaw=event.get("body"))
-                body = {}
             action = body.get("action")
             log("$default received", action=action)
             if action in ("getState", "startTimer", "updateOperador",
@@ -150,21 +189,22 @@ def _dispatch(event):
                 event2 = dict(event)
                 event2["requestContext"] = dict(event["requestContext"])
                 event2["requestContext"]["routeKey"] = action
+                # reutiliza o parsedBody já pronto
                 return _dispatch(event2)
-            return {"statusCode": 200, "body": to_json({"ok": True, "noop": True})}
+            return json_response(200, {"ok": True, "noop": True})
         else:
             log("rota inválida", route=route)
-            return {"statusCode": 400, "body": to_json({"error": "rota inválida"})}
+            return json_response(400, {"error": "rota inválida"})
     except Exception as e:
         log("dispatch ERROR", error=str(e))
-        return {"statusCode": 500, "body": to_json({"error": str(e)})}
+        return json_response(500, {"error": str(e)})
 
 # ---------- Rotas ----------
 def on_connect(event):
     connection_id = event["requestContext"]["connectionId"]
     resp = connections_table.put_item(Item={"connectionId": connection_id, "connectedAt": now_ts()})
     log("on_connect OK", connectionId=connection_id, resp=resp)
-    return {"statusCode": 200, "body": to_json({"ok": True})}
+    return json_response(200, {"ok": True})
 
 def on_disconnect(event):
     connection_id = event["requestContext"]["connectionId"]
@@ -173,12 +213,12 @@ def on_disconnect(event):
         log("on_disconnect OK", connectionId=connection_id, resp=resp)
     except Exception as e:
         log("on_disconnect ERROR", connectionId=connection_id, error=str(e))
-    return {"statusCode": 200, "body": to_json({"ok": True})}
+    return json_response(200, {"ok": True})
 
 def start_timer(event):
-    body = json.loads(event.get("body") or "{}")
+    body = parse_body_safe(event)
     chamado = int(body["chamado"])
-    timer = body["timer"]
+    timer = body["timer"]  # ex.: "primeiroAcionado" ou "escalacao1..4"
 
     duration = 20*60 if timer == "primeiroAcionado" else 10*60
     timer_start = now_ts()
@@ -214,7 +254,7 @@ def start_timer(event):
     return broadcast(event, message)
 
 def update_operador(event):
-    body = json.loads(event.get("body") or "{}")
+    body = parse_body_safe(event)
     chamado = int(body["chamado"])
     operador = body["operador"]
 
@@ -231,7 +271,7 @@ def update_operador(event):
     return broadcast(event, message)
 
 def update_observacao(event):
-    body = json.loads(event.get("body") or "{}")
+    body = parse_body_safe(event)
     chamado = int(body["chamado"])
     timer = body["timer"]
     observacao = body["observacao"]
@@ -250,7 +290,7 @@ def update_observacao(event):
     return broadcast(event, message)
 
 def update_status_final(event):
-    body = json.loads(event.get("body") or "{}")
+    body = parse_body_safe(event)
     chamado = int(body["chamado"])
     status_final = body["statusFinal"]
 
@@ -267,7 +307,7 @@ def update_status_final(event):
     return broadcast(event, message)
 
 def update_status(event):
-    body = json.loads(event.get("body") or "{}")
+    body = parse_body_safe(event)
     chamado = int(body["chamado"])
     status = str(body["status"])
 
@@ -285,7 +325,7 @@ def update_status(event):
     return broadcast(event, message)
 
 def get_state(event):
-    body = json.loads(event.get("body") or "{}")
+    body = parse_body_safe(event)
     chamado = int(body["chamado"])
     connection_id = event["requestContext"]["connectionId"]
 
@@ -298,9 +338,9 @@ def get_state(event):
     if DISABLE_APIGW_POST:
         log("get_state SKIPPED send_to_connection (DISABLE_APIGW_POST=1)",
             connectionId=connection_id, message=message)
-        return {"statusCode": 200, "body": to_json({"ok": True, "skipped": True})}
+        return json_response(200, {"ok": True, "skipped": True})
 
     apigw = get_apigw_client(event)
     log("get_state -> enviando", chamado=chamado, connectionId=connection_id)
     send_to_connection(apigw, connection_id, message)
-    return {"statusCode": 200, "body": to_json({"ok": True})}
+    return json_response(200, {"ok": True})
