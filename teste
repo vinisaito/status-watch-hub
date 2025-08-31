@@ -1,6 +1,16 @@
-sendWS("startTimer", { chamado: 123, timer: "primeiroAcionado" })
-sendWS("updateOperador", { chamado: 123, operador: "Maria" })
-sendWS("updateObservacao", { chamado: 123, timer: "primeiroAcionado", observacao: "Iniciado" })
-sendWS("updateStatus", { chamado: 123, status: "Em andamento" })
-sendWS("updateStatusFinal", { chamado: 123, statusFinal: "Concluído" })
-sendWS("getState", { chamado: 123 })
+{
+    "trace": "a774703d",
+    "msg": "invoke",
+    "routeKey": "$default",
+    "connectionId": "QMAK7c3wIAMCINA=",
+    "body": "\"getState\""
+}
+
+
+{"trace": "a774703d", "msg": "invoke", "routeKey": "$default", "connectionId": "QMAK7c3wIAMCINA=", "body": "\"getState\""}
+2025-08-31T20:16:40.525Z
+{
+    "trace": "a774703d",
+    "msg": "dispatch ERROR",
+    "error": "'str' object has no attribute 'get'"
+}
