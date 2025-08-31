@@ -130,6 +130,80 @@ export const ws = new WebSocketService();
 
 
 
+// src/store/useChamadoStore.ts
+import { create } from "zustand";
+import { ws } from "../api/websocket";
+
+interface Chamado {
+  chamado: number;
+  status?: string;
+  operador?: string;
+  observacoes?: Record<string, string>; // por etapa
+  timerStart?: number | null;
+  timerEnd?: number | null;
+  duration?: number | null;
+}
+
+interface ChamadoState {
+  chamados: Record<number, Chamado>;
+  setChamado: (id: number, data: Partial<Chamado>) => void;
+  updateCampo: (id: number, campo: keyof Chamado, valor: any) => void;
+  init: (id: number, endpoint: string) => void;
+  sendUpdate: (id: number, campo: string, valor: any) => void;
+}
+
+export const useChamadoStore = create<ChamadoState>((set, get) => ({
+  chamados: {},
+
+  setChamado: (id, data) =>
+    set((state) => ({
+      chamados: { ...state.chamados, [id]: { ...state.chamados[id], ...data } },
+    })),
+
+  updateCampo: (id, campo, valor) =>
+    set((state) => ({
+      chamados: {
+        ...state.chamados,
+        [id]: { ...state.chamados[id], [campo]: valor },
+      },
+    })),
+
+  init: (id, endpoint) => {
+    if (!ws) return;
+
+    ws.connect(endpoint);
+
+    ws.subscribe((msg) => {
+      if (msg.chamado !== id) return;
+
+      if (
+        ["currentState", "statusUpdated", "timerStarted", "operadorUpdated", "observacaoUpdated"].includes(
+          msg.action
+        )
+      ) {
+        get().setChamado(id, msg);
+      }
+    });
+
+    ws.send("getState", { chamado: id });
+  },
+
+  sendUpdate: (id, campo, valor) => {
+    const actionMap: Record<string, string> = {
+      status: "updateStatus",
+      operador: "updateOperador",
+      observacoes: "updateObservacao",
+    };
+
+    const action = actionMap[campo];
+    if (!action) {
+      console.warn("[Store] Campo não mapeado para update:", campo);
+      return;
+    }
+
+    ws.send(action, { chamado: id, [campo]: valor });
+  },
+}));
 
 
 
