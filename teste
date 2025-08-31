@@ -2,15 +2,12 @@ import json
 import boto3
 import os
 import decimal
-from datetime import datetime, timedelta
+from datetime import datetime
 
 dynamodb = boto3.resource("dynamodb", region_name="us-east-1")
 connections_table = dynamodb.Table(os.environ["CONNECTIONS_TABLE"])
 chamados_table = dynamodb.Table(os.environ["CHAMADOS_TABLE"])
 
-# ----------------------
-# Helpers
-# ----------------------
 class DecimalEncoder(json.JSONEncoder):
     def default(self, o):
         if isinstance(o, decimal.Decimal):
@@ -21,22 +18,15 @@ def to_json(data):
     return json.dumps(data, cls=DecimalEncoder)
 
 def get_apigw_client(event):
-    """Cria o client correto para o API Gateway Management API."""
     request_context = event["requestContext"]
     domain_name = request_context["domainName"]
     stage = request_context["stage"]
-
     endpoint_url = f"https://{domain_name}/{stage}"
-    print(f"[DEBUG] Criando API GW client com endpoint: {endpoint_url}")
-
+    print(f"[DEBUG] Criando apigw client com endpoint {endpoint_url}")
     return boto3.client("apigatewaymanagementapi", endpoint_url=endpoint_url)
 
-# ----------------------
-# Lambda handler
-# ----------------------
 def lambda_handler(event, context):
     print("[DEBUG] Evento recebido:", json.dumps(event))
-
     route = event["requestContext"]["routeKey"]
 
     if route == "$connect":
@@ -52,9 +42,6 @@ def lambda_handler(event, context):
     else:
         return {"statusCode": 400, "body": "Rota inválida"}
 
-# ----------------------
-# Conectar
-# ----------------------
 def on_connect(event):
     connection_id = event["requestContext"]["connectionId"]
     connections_table.put_item(
@@ -63,31 +50,23 @@ def on_connect(event):
             "connectedAt": int(datetime.utcnow().timestamp())
         }
     )
-    print(f"[DEBUG] Nova conexão registrada: {connection_id}")
+    print(f"[DEBUG] Conexão registrada: {connection_id}")
     return {"statusCode": 200, "body": "Connected"}
 
-# ----------------------
-# Desconectar
-# ----------------------
 def on_disconnect(event):
     connection_id = event["requestContext"]["connectionId"]
     connections_table.delete_item(Key={"connectionId": connection_id})
     print(f"[DEBUG] Conexão removida: {connection_id}")
     return {"statusCode": 200, "body": "Disconnected"}
 
-# ----------------------
-# Iniciar Timer
-# ----------------------
 def start_timer(event):
     body = json.loads(event["body"])
     chamado = int(body["chamado"])
-    timer_start = int(datetime.utcnow().timestamp())
-    timer_end = timer_start + (20 * 60)  # 20 minutos
+    timer_end = int(datetime.utcnow().timestamp()) + (20 * 60)  # 20 minutos
 
     chamados_table.put_item(
         Item={
             "chamado": chamado,
-            "timerStart": timer_start,
             "timerEnd": timer_end,
             "status": "pendente"
         }
@@ -97,14 +76,10 @@ def start_timer(event):
     return broadcast(event, {
         "action": "timerStarted",
         "chamado": chamado,
-        "status": "pendente",
         "timerEnd": timer_end,
         "serverTime": int(datetime.utcnow().timestamp())
     })
 
-# ----------------------
-# Atualizar Status
-# ----------------------
 def update_status(event):
     body = json.loads(event["body"])
     chamado = int(body["chamado"])
@@ -124,55 +99,56 @@ def update_status(event):
         "status": status
     })
 
-# ----------------------
-# Recuperar Estado Atual
-# ----------------------
 def get_state(event):
-    body = json.loads(event.get("body", "{}"))
-    chamado = int(body["chamado"])
+    try:
+        body = json.loads(event.get("body") or "{}")
+    except Exception:
+        body = {}
+
+    chamado = int(body.get("chamado", 0))
     connection_id = event["requestContext"]["connectionId"]
     apigw = get_apigw_client(event)
 
-    response = chamados_table.get_item(Key={"chamado": chamado})
-    item = response.get("Item")
-
-    if not item:
-        message = {
-            "action": "currentState",
-            "chamado": chamado,
-            "status": "pendente",
-            "timerEnd": None,
-            "serverTime": int(datetime.utcnow().timestamp())
-        }
+    if chamado:
+        response = chamados_table.get_item(Key={"chamado": chamado})
+        item = response.get("Item")
+        if item:
+            message = {
+                "action": "currentState",
+                "chamado": chamado,
+                "status": item.get("status", "pendente"),
+                "timerEnd": int(item["timerEnd"]),
+                "serverTime": int(datetime.utcnow().timestamp())
+            }
+        else:
+            message = {
+                "action": "currentState",
+                "chamado": chamado,
+                "status": "pendente",
+                "timerEnd": None,
+                "serverTime": int(datetime.utcnow().timestamp())
+            }
+        print(f"[DEBUG] Enviando estado inicial para {connection_id}: {message}")
+        apigw.post_to_connection(Data=to_json(message), ConnectionId=connection_id)
     else:
-        message = {
-            "action": "currentState",
-            "chamado": chamado,
-            "status": item.get("status", "pendente"),
-            "timerEnd": int(item["timerEnd"]),
-            "serverTime": int(datetime.utcnow().timestamp())
-        }
-
-    print(f"[DEBUG] Enviando estado inicial para {connection_id}: {message}")
-
-    try:
-        apigw.post_to_connection(
-            Data=to_json(message),
-            ConnectionId=connection_id
-        )
-    except Exception as e:
-        print(f"[ERRO] Falha ao enviar estado para {connection_id}: {e}")
+        response = chamados_table.scan()
+        for item in response.get("Items", []):
+            message = {
+                "action": "currentState",
+                "chamado": int(item["chamado"]),
+                "status": item.get("status", "pendente"),
+                "timerEnd": int(item["timerEnd"]),
+                "serverTime": int(datetime.utcnow().timestamp())
+            }
+            print(f"[DEBUG] Enviando estado ALL para {connection_id}: {message}")
+            apigw.post_to_connection(Data=to_json(message), ConnectionId=connection_id)
 
     return {"statusCode": 200, "body": "State sent"}
 
-# ----------------------
-# Broadcast para todos
-# ----------------------
 def broadcast(event, message):
     apigw = get_apigw_client(event)
-
     connections = connections_table.scan().get("Items", [])
-    print(f"[DEBUG] Broadcast para {len(connections)} conexões. Mensagem: {message}")
+    print(f"[DEBUG] Enviando para {len(connections)} conexões. Mensagem: {message}")
 
     for conn in connections:
         try:
@@ -181,9 +157,114 @@ def broadcast(event, message):
                 ConnectionId=conn["connectionId"]
             )
         except apigw.exceptions.GoneException:
-            print(f"[WARN] Conexão {conn['connectionId']} não encontrada (Gone). Removendo.")
+            print(f"Conexão {conn['connectionId']} não encontrada (GoneException). Removendo.")
             connections_table.delete_item(Key={"connectionId": conn["connectionId"]})
         except Exception as e:
-            print(f"[ERRO] Falha ao enviar para {conn['connectionId']}: {e}")
+            print(f"Erro genérico ao enviar para {conn['connectionId']}: {e}")
 
     return {"statusCode": 200, "body": "Mensagem enviada"}
+
+
+
+
+
+
+
+
+
+import React, { useEffect, useRef, useState } from "react";
+
+interface TimerProps {
+  chamadoId: number;
+}
+
+const Timer: React.FC<TimerProps> = ({ chamadoId }) => {
+  const [timeLeft, setTimeLeft] = useState<number | null>(null);
+  const [status, setStatus] = useState<string>("pendente");
+  const wsRef = useRef<WebSocket | null>(null);
+  const intervalRef = useRef<NodeJS.Timeout | null>(null);
+
+  useEffect(() => {
+    const ws = new WebSocket("wss://SEU-ENDPOINT.execute-api.us-east-1.amazonaws.com/dev");
+
+    ws.onopen = () => {
+      console.log("Conectado ao WebSocket");
+    };
+
+    ws.onmessage = (event) => {
+      const data = JSON.parse(event.data);
+      console.log("[WS MESSAGE]", data);
+
+      if (data.action === "timerStarted" && data.chamado === chamadoId) {
+        startCountdown(data.timerEnd, data.serverTime);
+      }
+      if (data.action === "currentState" && data.chamado === chamadoId) {
+        startCountdown(data.timerEnd, data.serverTime);
+        setStatus(data.status);
+      }
+      if (data.action === "statusUpdated" && data.chamado === chamadoId) {
+        setStatus(data.status);
+      }
+    };
+
+    wsRef.current = ws;
+    return () => {
+      if (intervalRef.current) clearInterval(intervalRef.current);
+      ws.close();
+    };
+  }, [chamadoId]);
+
+  const startCountdown = (timerEnd: number, serverTime: number) => {
+    if (intervalRef.current) clearInterval(intervalRef.current);
+
+    const now = Math.floor(Date.now() / 1000);
+    const offset = now - serverTime;
+    let remaining = timerEnd - (now - offset);
+
+    setTimeLeft(remaining);
+
+    intervalRef.current = setInterval(() => {
+      remaining -= 1;
+      if (remaining <= 0) {
+        clearInterval(intervalRef.current!);
+        setTimeLeft(0);
+      } else {
+        setTimeLeft(remaining);
+      }
+    }, 1000);
+  };
+
+  const startTimer = () => {
+    wsRef.current?.send(JSON.stringify({ action: "startTimer", chamado: chamadoId }));
+  };
+
+  const updateStatus = (newStatus: string) => {
+    wsRef.current?.send(JSON.stringify({ action: "updateStatus", chamado: chamadoId, status: newStatus }));
+  };
+
+  const getState = () => {
+    wsRef.current?.send(JSON.stringify({ action: "getState", chamado: chamadoId }));
+  };
+
+  return (
+    <div className="p-4 border rounded-lg shadow-md">
+      <h2 className="text-xl font-bold">Chamado {chamadoId}</h2>
+      <p>Status: {status}</p>
+      <p>
+        Tempo restante:{" "}
+        {timeLeft !== null ? `${Math.floor(timeLeft / 60)}:${(timeLeft % 60).toString().padStart(2, "0")}` : "N/A"}
+      </p>
+      <button onClick={startTimer} className="px-4 py-2 bg-green-500 text-white rounded-lg m-2">
+        Iniciar
+      </button>
+      <button onClick={getState} className="px-4 py-2 bg-blue-500 text-white rounded-lg m-2">
+        Atualizar Estado
+      </button>
+      <button onClick={() => updateStatus("finalizado")} className="px-4 py-2 bg-red-500 text-white rounded-lg m-2">
+        Finalizar
+      </button>
+    </div>
+  );
+};
+
+export default Timer;
