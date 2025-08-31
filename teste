@@ -1,31 +1,23 @@
 socket.onmessage = (event) => {
-  if (!event.data) {
-    console.warn("[WS] ⚠️ Mensagem vazia ignorada");
-    return;
-  }
-
   try {
-    const data = JSON.parse(event.data);
-
-    if (!data || typeof data !== "object") {
-      console.warn("[WS] ⚠️ Payload não é um objeto:", event.data);
+    if (!event.data || event.data.trim() === "") {
+      console.warn("[WS] ⚠️ Mensagem vazia ignorada");
       return;
     }
 
-    if (!("chamado" in data)) {
-      console.warn("[WS] ⚠️ Mensagem recebida sem 'chamado':", data);
+    const msg = JSON.parse(event.data);
+
+    if (!msg.chamado && !msg.action) {
+      console.warn("[WS] ⚠️ Mensagem recebida sem 'chamado':", msg);
       return;
     }
 
-    // 👉 só aqui processa de fato
-    handleChamadoUpdate(data);
+    console.log("[WS] ✅ Mensagem recebida:", msg);
+
+    // aqui você trata suas mensagens normalmente...
+    handleMessage(msg);
 
   } catch (err) {
-    console.error(
-      "[WS] ❌ Erro ao processar mensagem:",
-      err,
-      "RAW:",
-      event.data
-    );
+    console.error("[WS] ❌ Erro ao processar mensagem:", err);
   }
 };
