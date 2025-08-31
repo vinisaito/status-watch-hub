@@ -62,7 +62,7 @@ def broadcast(event, message):
         log("broadcast scan ERROR", error=str(e))
         return {"statusCode": 500, "body": "erro ao listar conexões"}
 
-    log("broadcast begin", total=len(connections), message=message)
+    log("broadcast begin", total=len(connections), action=message.get("action"), chamado=message.get("chamado"))
     sent = 0
     for conn in connections:
         if send_to_connection(apigw, conn["connectionId"], message):
@@ -118,11 +118,13 @@ def on_disconnect(event):
 def start_timer(event):
     body = json.loads(event.get("body") or "{}")
     chamado = int(body["chamado"])
-    timer = body["timer"]  # "primeiroAcionado" ou "escalacao1..4"
+    timer = body["timer"]
 
     duration = 20*60 if timer == "primeiroAcionado" else 10*60
     timer_start = now_ts()
     timer_end = timer_start + duration
+
+    log("start_timer invoked", chamado=chamado, timer=timer, duration=duration)
 
     update_expr = f"SET {timer} = :val"
     chamados_table.update_item(
@@ -137,14 +139,25 @@ def start_timer(event):
         }
     )
 
-    message = {"action": "timerStarted", "chamado": chamado, "timer": timer,
-               "timerStart": timer_start, "timerEnd": timer_end, "duration": duration}
+    # recupera estado atualizado
+    resp = chamados_table.get_item(Key={"chamado": chamado})
+    item = resp.get("Item", {})
+
+    message = {
+        "action": "timerStarted",
+        "chamado": chamado,
+        "serverTime": now_ts(),
+        "duration": duration,
+        **item
+    }
     return broadcast(event, message)
 
 def update_operador(event):
     body = json.loads(event.get("body") or "{}")
     chamado = int(body["chamado"])
     operador = body["operador"]
+
+    log("update_operador", chamado=chamado, operador=operador)
 
     chamados_table.update_item(
         Key={"chamado": chamado},
@@ -161,6 +174,8 @@ def update_observacao(event):
     timer = body["timer"]
     observacao = body["observacao"]
 
+    log("update_observacao", chamado=chamado, timer=timer, observacao=observacao)
+
     update_expr = f"SET {timer}.observacao = :obs"
     chamados_table.update_item(
         Key={"chamado": chamado},
@@ -176,6 +191,8 @@ def update_status_final(event):
     chamado = int(body["chamado"])
     status_final = body["statusFinal"]
 
+    log("update_status_final", chamado=chamado, statusFinal=status_final)
+
     chamados_table.update_item(
         Key={"chamado": chamado},
         UpdateExpression="SET statusFinal = :s",
@@ -189,6 +206,8 @@ def update_status(event):
     body = json.loads(event.get("body") or "{}")
     chamado = int(body["chamado"])
     status = str(body["status"])
+
+    log("update_status", chamado=chamado, status=status)
 
     chamados_table.update_item(
         Key={"chamado": chamado},
@@ -210,6 +229,6 @@ def get_state(event):
     item = resp.get("Item", {})
 
     message = {"action": "currentState", "chamado": chamado, "serverTime": now_ts(), **item}
-    log("get_state -> enviando", message=message)
+    log("get_state -> enviando", chamado=chamado, message=message)
     send_to_connection(apigw, connection_id, message)
     return {"statusCode": 200}
