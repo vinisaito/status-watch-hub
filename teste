@@ -1,48 +1,23 @@
-$utils.toJson($context.result.items)
-
-
-
 {
-  "version" : "2018-05-29",
-  "operation" : "GetItem",
-  "key" : {
-    "id" : $util.dynamodb.toDynamoDBJson($ctx.args.id)
-  }
-}
-
-$utils.toJson($context.result)
-
-{
-  "version" : "2018-05-29",
-  "operation" : "PutItem",
-  "key": {
-    "id": $util.dynamodb.toDynamoDBJson($ctx.args.id)
+  "data": {
+    "startTimer": null
   },
-  "attributeValues": {
-    "status": { "S": "pendente" },
-    "timerStart": { "S": $util.time.nowISO8601() }
-  }
-}
-
-$utils.toJson($context.result)
-
-
-
-{
-  "version": "2018-05-29",
-  "operation": "UpdateItem",
-  "key": {
-    "id": $util.dynamodb.toDynamoDBJson($ctx.args.id)
-  },
-  "update": {
-    "expression": "SET #s = :s",
-    "expressionNames": {
-      "#s": "status"
-    },
-    "expressionValues": {
-      ":s": $util.dynamodb.toDynamoDBJson($ctx.args.status)
+  "errors": [
+    {
+      "path": [
+        "startTimer"
+      ],
+      "data": null,
+      "errorType": "MappingTemplate",
+      "errorInfo": null,
+      "locations": [
+        {
+          "line": 2,
+          "column": 3,
+          "sourceName": null
+        }
+      ],
+      "message": "Unable to parse the JSON document"
     }
-  }
+  ]
 }
-
-$utils.toJson($context.result)
