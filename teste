@@ -11,7 +11,6 @@ dynamodb = boto3.resource("dynamodb", region_name="us-east-1")
 connections_table = dynamodb.Table(os.environ["CONNECTIONS_TABLE"])  # PK: connectionId
 chamados_table = dynamodb.Table(os.environ["CHAMADOS_TABLE"])        # PK: chamado (Number)
 
-# Modo de teste: quando = "1", não chama API Gateway Management (post_to_connection/broadcast)
 DISABLE_APIGW_POST = os.environ.get("DISABLE_APIGW_POST", "0") == "1"
 
 # ---------- Utils ----------
@@ -26,7 +25,6 @@ def to_json(data):
 
 TRACE_ID = None
 def log(msg, **kwargs):
-    """Log estruturado e com flush para CloudWatch"""
     global TRACE_ID
     if not TRACE_ID:
         TRACE_ID = str(uuid.uuid4())[:8]
@@ -64,7 +62,7 @@ def send_to_connection(apigw, connection_id, message: dict):
         log("post_to_connection ERROR", connectionId=connection_id, error=str(e))
         return False
 
-def broadcast(event, message):
+def broadcast(event, message: dict):
     if DISABLE_APIGW_POST:
         log("broadcast SKIPPED (DISABLE_APIGW_POST=1)",
             action=message.get("action"), chamado=message.get("chamado"), message=message)
@@ -86,7 +84,7 @@ def broadcast(event, message):
         if send_to_connection(apigw, conn["connectionId"], message):
             sent += 1
     log("broadcast end", sent=sent, total=len(connections))
-    return {"statusCode": 200, "body": f"Mensagem enviada para {sent}/{len(connections)} conexões"}
+    return {"statusCode": 200, "body": to_json({"sent": sent, "total": len(connections)})}
 
 # ---------- Handler ----------
 def lambda_handler(event, context):
@@ -96,18 +94,13 @@ def lambda_handler(event, context):
     print("=== Lambda Iniciada ===", flush=True)
     print(json.dumps(event, default=str), flush=True)
 
-    # Guarda para testes via Console da Lambda
     rc = event.get("requestContext")
     if not isinstance(rc, dict):
         log("invalid_test_event_missing_requestContext",
-            eventKeys=list(event.keys()),
-            hint="Este Lambda foi feito para ser invocado pelo API Gateway WebSocket. "
-                 "Use um Test Event com o shape correto (veja exemplos) ou ative DISABLE_APIGW_POST=1.")
-        # Opcional: permitir exercitar rotas passando 'route' e 'body' diretamente
+            eventKeys=list(event.keys()))
         route = event.get("route")
         if route:
             log("direct_invoke_route_detected", route=route)
-            # Faz um shim mínimo para reusar as rotas (sem post_to_connection):
             fake_event = {
                 "requestContext": {
                     "routeKey": route,
@@ -145,7 +138,6 @@ def _dispatch(event):
         elif route == "updateStatus":
             return update_status(event)
         elif route == "$default":
-            # Caso a seleção de rota esteja por body.action
             try:
                 body = json.loads(event.get("body") or "{}")
             except Exception as e:
@@ -155,7 +147,6 @@ def _dispatch(event):
             log("$default received", action=action)
             if action in ("getState", "startTimer", "updateOperador",
                           "updateObservacao", "updateStatusFinal", "updateStatus"):
-                # Roteia internamente
                 event2 = dict(event)
                 event2["requestContext"] = dict(event["requestContext"])
                 event2["requestContext"]["routeKey"] = action
@@ -187,7 +178,7 @@ def on_disconnect(event):
 def start_timer(event):
     body = json.loads(event.get("body") or "{}")
     chamado = int(body["chamado"])
-    timer = body["timer"]  # "primeiroAcionado" ou "escalacao1..4"
+    timer = body["timer"]
 
     duration = 20*60 if timer == "primeiroAcionado" else 10*60
     timer_start = now_ts()
@@ -196,7 +187,7 @@ def start_timer(event):
     log("start_timer invoked", chamado=chamado, timer=timer, duration=duration)
 
     update_expr = f"SET {timer} = :val"
-    resp = chamados_table.update_item(
+    chamados_table.update_item(
         Key={"chamado": chamado},
         UpdateExpression=update_expr,
         ExpressionAttributeValues={
@@ -207,18 +198,16 @@ def start_timer(event):
             }
         }
     )
-    log("start_timer DB update OK", resp=resp)
 
     resp = chamados_table.get_item(Key={"chamado": chamado})
     item = resp.get("Item", {})
-    log("start_timer DB get OK", item=item)
 
     message = {
         "action": "timerStarted",
         "chamado": chamado,
         "serverTime": now_ts(),
         "duration": duration,
-        **item
+        "item": item
     }
     return broadcast(event, message)
 
@@ -227,14 +216,11 @@ def update_operador(event):
     chamado = int(body["chamado"])
     operador = body["operador"]
 
-    log("update_operador", chamado=chamado, operador=operador)
-
-    resp = chamados_table.update_item(
+    chamados_table.update_item(
         Key={"chamado": chamado},
         UpdateExpression="SET operador = :o",
         ExpressionAttributeValues={":o": operador},
     )
-    log("update_operador DB update OK", resp=resp)
 
     message = {"action": "operadorUpdated", "chamado": chamado, "operador": operador}
     return broadcast(event, message)
@@ -245,15 +231,12 @@ def update_observacao(event):
     timer = body["timer"]
     observacao = body["observacao"]
 
-    log("update_observacao", chamado=chamado, timer=timer, observacao=observacao)
-
     update_expr = f"SET {timer}.observacao = :obs"
-    resp = chamados_table.update_item(
+    chamados_table.update_item(
         Key={"chamado": chamado},
         UpdateExpression=update_expr,
         ExpressionAttributeValues={":obs": observacao},
     )
-    log("update_observacao DB update OK", resp=resp)
 
     message = {"action": "observacaoUpdated", "chamado": chamado, "timer": timer, "observacao": observacao}
     return broadcast(event, message)
@@ -263,14 +246,11 @@ def update_status_final(event):
     chamado = int(body["chamado"])
     status_final = body["statusFinal"]
 
-    log("update_status_final", chamado=chamado, statusFinal=status_final)
-
-    resp = chamados_table.update_item(
+    chamados_table.update_item(
         Key={"chamado": chamado},
         UpdateExpression="SET statusFinal = :s",
         ExpressionAttributeValues={":s": status_final},
     )
-    log("update_status_final DB update OK", resp=resp)
 
     message = {"action": "statusFinalUpdated", "chamado": chamado, "statusFinal": status_final}
     return broadcast(event, message)
@@ -280,15 +260,12 @@ def update_status(event):
     chamado = int(body["chamado"])
     status = str(body["status"])
 
-    log("update_status", chamado=chamado, status=status)
-
-    resp = chamados_table.update_item(
+    chamados_table.update_item(
         Key={"chamado": chamado},
         UpdateExpression="SET #s = :s",
         ExpressionAttributeNames={"#s": "status"},
         ExpressionAttributeValues={":s": status},
     )
-    log("update_status DB update OK", resp=resp)
 
     message = {"action": "statusUpdated", "chamado": chamado, "status": status}
     return broadcast(event, message)
@@ -300,9 +277,8 @@ def get_state(event):
 
     resp = chamados_table.get_item(Key={"chamado": chamado})
     item = resp.get("Item", {})
-    log("get_state DB get OK", item=item)
 
-    message = {"action": "currentState", "chamado": chamado, "serverTime": now_ts(), **item}
+    message = {"action": "currentState", "chamado": chamado, "serverTime": now_ts(), "item": item}
 
     if DISABLE_APIGW_POST:
         log("get_state SKIPPED send_to_connection (DISABLE_APIGW_POST=1)",
@@ -310,6 +286,5 @@ def get_state(event):
         return {"statusCode": 200, "body": "get_state ok (sem enviar via WS)"}
 
     apigw = get_apigw_client(event)
-    log("get_state -> enviando", chamado=chamado, connectionId=connection_id)
     send_to_connection(apigw, connection_id, message)
     return {"statusCode": 200}
