@@ -1,12 +1,140 @@
+import json
+import boto3
+import os
+import decimal
+from datetime import datetime, timedelta
+
+dynamodb = boto3.resource("dynamodb", region_name="us-east-1")
+connections_table = dynamodb.Table(os.environ["CONNECTIONS_TABLE"])
+chamados_table = dynamodb.Table(os.environ["CHAMADOS_TABLE"])
+
+# ----------------------
+# Helpers
+# ----------------------
+class DecimalEncoder(json.JSONEncoder):
+    def default(self, o):
+        if isinstance(o, decimal.Decimal):
+            return int(o) if o % 1 == 0 else float(o)
+        return super(DecimalEncoder, self).default(o)
+
+def to_json(data):
+    return json.dumps(data, cls=DecimalEncoder)
+
+def get_apigw_client(event):
+    """Cria o client correto para o API Gateway Management API."""
+    request_context = event["requestContext"]
+    domain_name = request_context["domainName"]
+    stage = request_context["stage"]
+
+    endpoint_url = f"https://{domain_name}/{stage}"
+    print(f"[DEBUG] Criando API GW client com endpoint: {endpoint_url}")
+
+    return boto3.client("apigatewaymanagementapi", endpoint_url=endpoint_url)
+
+# ----------------------
+# Lambda handler
+# ----------------------
+def lambda_handler(event, context):
+    print("[DEBUG] Evento recebido:", json.dumps(event))
+
+    route = event["requestContext"]["routeKey"]
+
+    if route == "$connect":
+        return on_connect(event)
+    elif route == "$disconnect":
+        return on_disconnect(event)
+    elif route == "startTimer":
+        return start_timer(event)
+    elif route == "updateStatus":
+        return update_status(event)
+    elif route == "getState":
+        return get_state(event)
+    else:
+        return {"statusCode": 400, "body": "Rota inválida"}
+
+# ----------------------
+# Conectar
+# ----------------------
+def on_connect(event):
+    connection_id = event["requestContext"]["connectionId"]
+    connections_table.put_item(
+        Item={
+            "connectionId": connection_id,
+            "connectedAt": int(datetime.utcnow().timestamp())
+        }
+    )
+    print(f"[DEBUG] Nova conexão registrada: {connection_id}")
+    return {"statusCode": 200, "body": "Connected"}
+
+# ----------------------
+# Desconectar
+# ----------------------
+def on_disconnect(event):
+    connection_id = event["requestContext"]["connectionId"]
+    connections_table.delete_item(Key={"connectionId": connection_id})
+    print(f"[DEBUG] Conexão removida: {connection_id}")
+    return {"statusCode": 200, "body": "Disconnected"}
+
+# ----------------------
+# Iniciar Timer
+# ----------------------
+def start_timer(event):
+    body = json.loads(event["body"])
+    chamado = int(body["chamado"])
+    timer_start = int(datetime.utcnow().timestamp())
+    timer_end = timer_start + (20 * 60)  # 20 minutos
+
+    chamados_table.put_item(
+        Item={
+            "chamado": chamado,
+            "timerStart": timer_start,
+            "timerEnd": timer_end,
+            "status": "pendente"
+        }
+    )
+    print(f"[DEBUG] Chamado salvo: {chamado} - timerEnd={timer_end}")
+
+    return broadcast(event, {
+        "action": "timerStarted",
+        "chamado": chamado,
+        "status": "pendente",
+        "timerEnd": timer_end,
+        "serverTime": int(datetime.utcnow().timestamp())
+    })
+
+# ----------------------
+# Atualizar Status
+# ----------------------
+def update_status(event):
+    body = json.loads(event["body"])
+    chamado = int(body["chamado"])
+    status = body["status"]
+
+    chamados_table.update_item(
+        Key={"chamado": chamado},
+        UpdateExpression="SET #s = :s",
+        ExpressionAttributeNames={"#s": "status"},
+        ExpressionAttributeValues={":s": status}
+    )
+    print(f"[DEBUG] Status atualizado: {chamado} -> {status}")
+
+    return broadcast(event, {
+        "action": "statusUpdated",
+        "chamado": chamado,
+        "status": status
+    })
+
+# ----------------------
+# Recuperar Estado Atual
+# ----------------------
 def get_state(event):
     body = json.loads(event.get("body", "{}"))
     chamado = int(body["chamado"])
+    connection_id = event["requestContext"]["connectionId"]
+    apigw = get_apigw_client(event)
 
     response = chamados_table.get_item(Key={"chamado": chamado})
     item = response.get("Item")
-
-    apigw = get_apigw_client(event)   # <-- importante, usa o event da NOVA conexão
-    connection_id = event["requestContext"]["connectionId"]
 
     if not item:
         message = {
@@ -25,12 +153,37 @@ def get_state(event):
             "serverTime": int(datetime.utcnow().timestamp())
         }
 
+    print(f"[DEBUG] Enviando estado inicial para {connection_id}: {message}")
+
     try:
         apigw.post_to_connection(
             Data=to_json(message),
             ConnectionId=connection_id
         )
     except Exception as e:
-        print(f"Erro ao enviar estado atual: {e}")
+        print(f"[ERRO] Falha ao enviar estado para {connection_id}: {e}")
 
     return {"statusCode": 200, "body": "State sent"}
+
+# ----------------------
+# Broadcast para todos
+# ----------------------
+def broadcast(event, message):
+    apigw = get_apigw_client(event)
+
+    connections = connections_table.scan().get("Items", [])
+    print(f"[DEBUG] Broadcast para {len(connections)} conexões. Mensagem: {message}")
+
+    for conn in connections:
+        try:
+            apigw.post_to_connection(
+                Data=to_json(message),
+                ConnectionId=conn["connectionId"]
+            )
+        except apigw.exceptions.GoneException:
+            print(f"[WARN] Conexão {conn['connectionId']} não encontrada (Gone). Removendo.")
+            connections_table.delete_item(Key={"connectionId": conn["connectionId"]})
+        except Exception as e:
+            print(f"[ERRO] Falha ao enviar para {conn['connectionId']}: {e}")
+
+    return {"statusCode": 200, "body": "Mensagem enviada"}
