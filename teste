@@ -59,7 +59,7 @@ const ON_CHAMADO_UPDATED = gql`
 // ------------------
 // Timer Component
 // ------------------
-const Timer: React.FC = () => {
+const TimerComponent: React.FC = () => {
   const { data: queryData } = useQuery(GET_CHAMADOS);
   const { data: subData } = useSubscription(ON_CHAMADO_UPDATED);
   const [startTimer] = useMutation(START_TIMER);
@@ -111,7 +111,9 @@ const Timer: React.FC = () => {
               </button>
               <button
                 className="bg-blue-500 text-white px-2 py-1 rounded"
-                onClick={() => updateStatus({ variables: { chamado: c.chamado, status: "finalizado" } })}
+                onClick={() =>
+                  updateStatus({ variables: { chamado: c.chamado, status: "finalizado" } })
+                }
               >
                 Finalizar
               </button>
@@ -124,12 +126,12 @@ const Timer: React.FC = () => {
 };
 
 // ------------------
-// App Wrapper
+// Exportando com ApolloProvider
 // ------------------
-const App: React.FC = () => (
+const Timer: React.FC = () => (
   <ApolloProvider client={client}>
-    <Timer />
+    <TimerComponent />
   </ApolloProvider>
 );
 
-export default App;
+export default Timer;
