@@ -1,3 +1,23 @@
-useChamadoStore.ts:202  [WS] ❌ Erro ao processar mensagem: SyntaxError: Unexpected token ''', "'str' obje"... is not valid JSON
-    at JSON.parse (<anonymous>)
-    at socket.onmessage (useChamadoStore.ts:192:25)
+
+def error_response(message: str, trace: str = None, status: int = 500):
+    body = {"error": message}
+    if trace:
+        body["trace"] = trace
+    return {
+        "statusCode": status,
+        "body": json.dumps(body),
+        "headers": {"Content-Type": "application/json"}
+    }
+
+
+
+
+
+
+
+
+
+
+except Exception as e:
+    print("dispatch ERROR", e)
+    return error_response(str(e), trace="dispatch")
