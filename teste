@@ -5,7 +5,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Check, Clock, Play, CheckCircle, FastForward, RotateCcw, X } from 'lucide-react';
 import { AlertData, EscalationState, PendingStatusChange } from '@/types/ActionTable';
-import { useTimer } from '@/hooks/useTimer';
+import { useTimer } from '@/hooks/UseTimer';
 
 interface ConfirmationColumnProps {
   alert: AlertData;
