@@ -1,88 +1,199 @@
-// src/services/websocket.ts
-// Serviço WebSocket robusto com fila, reconexão e subscrição
+import create from "zustand";
+import { persist } from "zustand/middleware";
+import { ws } from "@/services/websocket"; // seu websocket.ts
 
-type Listener = (msg: any) => void;
+export type ChamadoState = {
+  status: "idle" | "pending" | "confirmed" | "escalating" | "completed";
+  timeRemaining: number;
+  timerActive: boolean;
+  observations: string;
+  currentLevel: number;
+  isAttended: boolean;
+};
 
-class WebSocketService {
-  private socket: WebSocket | null = null;
-  private listeners: Listener[] = [];
-  private pendingMessages: any[] = [];
-  private isConnecting = false;
+type ChamadosStore = {
+  chamados: Record<string, ChamadoState>;
+  startConfirmation: (alertId: string) => void;
+  confirmReceived: (alertId: string, obs?: string) => void;
+  startEscalation: (alertId: string, level: 1 | 2 | 3 | 4, obs?: string) => void;
+  updateObservation: (alertId: string, obs: string) => void;
+  completeChamado: (alertId: string, obs?: string) => void;
+  setFromServer: (alertId: string, data: Partial<ChamadoState>) => void;
+  tick: () => void;
+};
 
-  // 🔥 Defina aqui a URL fixa do seu WebSocket no API Gateway
-  private url: string = "wss://rsgjd6wsza.execute-api.us-east-1.amazonaws.com/dev";
+export const useChamadoStore = create<ChamadosStore>()(
+  persist(
+    (set, get) => ({
+      chamados: {},
 
-  private connect() {
-    if (this.isConnecting || this.socket?.readyState === WebSocket.OPEN) {
-      return;
-    }
+      // quando clica em "Iniciar"
+      startConfirmation: (alertId) => {
+        set((state) => ({
+          chamados: {
+            ...state.chamados,
+            [alertId]: {
+              status: "pending",
+              timeRemaining: 300, // 5 minutos por exemplo
+              timerActive: true,
+              observations: "",
+              currentLevel: 0,
+              isAttended: false,
+            },
+          },
+        }));
 
-    this.isConnecting = true;
-    console.info("[WS] Conectando em:", this.url);
+        ws.send({
+          action: "startConfirmation",
+          chamado: alertId,
+        });
+      },
 
-    this.socket = new WebSocket(this.url);
+      // confirmar chamado
+      confirmReceived: (alertId, obs = "") => {
+        set((state) => {
+          const atual = state.chamados[alertId];
+          if (!atual) return state;
+          return {
+            chamados: {
+              ...state.chamados,
+              [alertId]: {
+                ...atual,
+                status: "confirmed",
+                timerActive: false,
+                observations: obs || atual.observations,
+              },
+            },
+          };
+        });
 
-    this.socket.onopen = () => {
-      console.info("[WS] ✅ Conectado");
-      this.isConnecting = false;
+        ws.send({
+          action: "confirmReceived",
+          chamado: alertId,
+          observations: obs,
+        });
+      },
 
-      // drena fila
-      while (this.pendingMessages.length > 0) {
-        const msg = this.pendingMessages.shift();
-        this.send(msg);
-      }
-    };
+      // iniciar escalonamento
+      startEscalation: (alertId, level, obs = "") => {
+        set((state) => {
+          const atual = state.chamados[alertId];
+          if (!atual) return state;
+          return {
+            chamados: {
+              ...state.chamados,
+              [alertId]: {
+                ...atual,
+                status: "escalating",
+                currentLevel: level,
+                timeRemaining: 300,
+                timerActive: true,
+                observations: obs || atual.observations,
+              },
+            },
+          };
+        });
 
-    this.socket.onmessage = (event) => {
-      let data: any = event.data;
+        ws.send({
+          action: "startEscalation",
+          chamado: alertId,
+          level,
+          observations: obs,
+        });
+      },
 
-      try {
-        data = JSON.parse(event.data);
-      } catch {
-        console.debug("[WS] Mensagem recebida (texto):", event.data);
-      }
+      // atualizar observação local
+      updateObservation: (alertId, obs) => {
+        set((state) => {
+          const atual = state.chamados[alertId];
+          if (!atual) return state;
+          return {
+            chamados: {
+              ...state.chamados,
+              [alertId]: {
+                ...atual,
+                observations: obs,
+              },
+            },
+          };
+        });
+      },
 
-      this.listeners.forEach((cb) => cb(data));
-    };
+      // finalizar chamado
+      completeChamado: (alertId, obs = "") => {
+        set((state) => {
+          const atual = state.chamados[alertId];
+          if (!atual) return state;
+          return {
+            chamados: {
+              ...state.chamados,
+              [alertId]: {
+                ...atual,
+                status: "completed",
+                timerActive: false,
+                timeRemaining: 0,
+                observations: obs || atual.observations,
+              },
+            },
+          };
+        });
 
-    this.socket.onclose = () => {
-      console.warn("[WS] ❌ Desconectado, tentando reconectar em 3s...");
-      this.isConnecting = false;
-      setTimeout(() => this.connect(), 3000);
-    };
+        ws.send({
+          action: "completeChamado",
+          chamado: alertId,
+          observations: obs,
+        });
+      },
 
-    this.socket.onerror = (err) => {
-      console.error("[WS] ⚠️ Erro:", err);
-      this.socket?.close();
-    };
-  }
+      // quando vem update do servidor
+      setFromServer: (alertId, data) => {
+        set((state) => {
+          const atual = state.chamados[alertId] || {
+            status: "idle",
+            timeRemaining: 0,
+            timerActive: false,
+            observations: "",
+            currentLevel: 0,
+            isAttended: false,
+          };
+          return {
+            chamados: {
+              ...state.chamados,
+              [alertId]: { ...atual, ...data },
+            },
+          };
+        });
+      },
 
-  public subscribe(cb: Listener) {
-    if (!this.socket || this.socket.readyState !== WebSocket.OPEN) {
-      this.connect();
-    }
-    this.listeners.push(cb);
+      // decrementa os timers ativos
+      tick: () => {
+        set((state) => {
+          const novos: Record<string, ChamadoState> = {};
+          for (const [id, chamado] of Object.entries(state.chamados)) {
+            if (chamado.timerActive && chamado.timeRemaining > 0) {
+              novos[id] = {
+                ...chamado,
+                timeRemaining: chamado.timeRemaining - 1,
+              };
+            } else if (chamado.timerActive && chamado.timeRemaining <= 0) {
+              novos[id] = {
+                ...chamado,
+                timerActive: false,
+                timeRemaining: 0,
+              };
+            } else {
+              novos[id] = chamado;
+            }
+          }
+          return { chamados: novos };
+        });
+      },
+    }),
+    { name: "chamados-store" }
+  )
+);
 
-    return () => {
-      this.listeners = this.listeners.filter((fn) => fn !== cb);
-    };
-  }
-
-  public send(payload: any) {
-    const msg = JSON.stringify(payload);
-
-    if (this.socket?.readyState === WebSocket.OPEN) {
-      this.socket.send(msg);
-      console.debug("[WS] Enviado:", payload);
-    } else {
-      console.warn("[WS] não conectado, enfileirando:", payload);
-      this.pendingMessages.push(payload);
-      if (!this.isConnecting) {
-        this.connect();
-      }
-    }
-  }
-}
-
-// Exporta instância global
-export const ws = new WebSocketService();
+// dispara o tick a cada segundo
+setInterval(() => {
+  useChamadoStore.getState().tick();
+}, 1000);
