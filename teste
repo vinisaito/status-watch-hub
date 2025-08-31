@@ -1,18 +1,288 @@
-if (
-  (data.action === "timerStarted" || data.action === "currentState") &&
-  data.chamado === chamadoId
-) {
-  if (data.timerEnd) {
-    const now = Math.floor(Date.now() / 1000);
-    const newRemaining = data.timerEnd - now;
+import json
+import boto3
+import os
+import decimal
+from datetime import datetime
 
-    if (newRemaining > 0) {
-      setRemaining(newRemaining);
-      startCountdown(newRemaining);
-    } else {
-      setRemaining(0); // já expirou
-    }
-  } else {
-    setRemaining(null); // nunca foi iniciado
-  }
+# ---------- Config ----------
+dynamodb = boto3.resource("dynamodb", region_name="us-east-1")
+connections_table = dynamodb.Table(os.environ["CONNECTIONS_TABLE"])  # PK: connectionId (string)
+chamados_table = dynamodb.Table(os.environ["CHAMADOS_TABLE"])        # PK: chamado (number)
+
+# ---------- Utils ----------
+class DecimalEncoder(json.JSONEncoder):
+    def default(self, o):
+        if isinstance(o, decimal.Decimal):
+            return int(o) if o % 1 == 0 else float(o)
+        return super(DecimalEncoder, self).default(o)
+
+def to_json(data):
+    return json.dumps(data, cls=DecimalEncoder)
+
+def now_ts():
+    return int(datetime.utcnow().timestamp())
+
+def get_apigw_client(event):
+    request_context = event["requestContext"]
+    domain_name = request_context["domainName"]
+    stage = request_context["stage"]
+    endpoint_url = f"https://{domain_name}/{stage}"
+    return boto3.client("apigatewaymanagementapi", endpoint_url=endpoint_url)
+
+# ---------- Handler ----------
+def lambda_handler(event, context):
+    print("[DEBUG] Evento:", json.dumps(event))
+    route = event["requestContext"]["routeKey"]
+
+    if route == "$connect":
+        return on_connect(event)
+    elif route == "$disconnect":
+        return on_disconnect(event)
+    elif route == "startTimer":
+        return start_timer(event)
+    elif route == "updateStatus":
+        return update_status(event)
+    elif route == "getState":
+        return get_state(event)
+    else:
+        return {"statusCode": 400, "body": "Rota inválida"}
+
+# ---------- Rotas ----------
+def on_connect(event):
+    connection_id = event["requestContext"]["connectionId"]
+    connections_table.put_item(
+        Item={
+            "connectionId": connection_id,
+            "connectedAt": now_ts(),
+        }
+    )
+    print(f"[DEBUG] Conexão registrada: {connection_id}")
+    # Não envia estado aqui → o cliente deve chamar getState
+    return {"statusCode": 200, "body": "Connected"}
+
+def on_disconnect(event):
+    connection_id = event["requestContext"]["connectionId"]
+    connections_table.delete_item(Key={"connectionId": connection_id})
+    print(f"[DEBUG] Conexão removida: {connection_id}")
+    return {"statusCode": 200, "body": "Disconnected"}
+
+def start_timer(event):
+    body = json.loads(event.get("body") or "{}")
+    chamado = int(body["chamado"])
+
+    ts_start = now_ts()
+    duration = 20 * 60  # 20 minutos
+    ts_end = ts_start + duration
+
+    chamados_table.put_item(
+        Item={
+            "chamado": chamado,
+            "timerStart": ts_start,
+            "timerEnd": ts_end,
+            "duration": duration,
+            "status": "pendente",
+        }
+    )
+    print(f"[DEBUG] Timer iniciado: chamado={chamado} start={ts_start} end={ts_end}")
+
+    return broadcast(event, {
+        "action": "timerStarted",
+        "chamado": chamado,
+        "timerStart": ts_start,
+        "timerEnd": ts_end,
+        "duration": duration,
+        "serverTime": now_ts(),
+    })
+
+def update_status(event):
+    body = json.loads(event.get("body") or "{}")
+    chamado = int(body["chamado"])
+    status = body["status"]
+
+    chamados_table.update_item(
+        Key={"chamado": chamado},
+        UpdateExpression="SET #s = :s",
+        ExpressionAttributeNames={"#s": "status"},
+        ExpressionAttributeValues={":s": status},
+    )
+    print(f"[DEBUG] Status atualizado: {chamado} -> {status}")
+
+    return broadcast(event, {
+        "action": "statusUpdated",
+        "chamado": chamado,
+        "status": status,
+        "serverTime": now_ts(),
+    })
+
+def get_state(event):
+    """Cliente chama após abrir o WS para obter estado atual de um chamado"""
+    body = json.loads(event.get("body") or "{}")
+    chamado = int(body["chamado"])
+
+    item = chamados_table.get_item(Key={"chamado": chamado}).get("Item")
+    connection_id = event["requestContext"]["connectionId"]
+    apigw = get_apigw_client(event)
+
+    if not item:
+        # Nenhum timer iniciado ainda para esse chamado
+        message = {
+            "action": "currentState",
+            "chamado": chamado,
+            "status": "pendente",
+            "timerStart": None,
+            "timerEnd": None,
+            "duration": None,
+            "serverTime": now_ts(),
+        }
+    else:
+        message = {
+            "action": "currentState",
+            "chamado": chamado,
+            "status": str(item.get("status", "pendente")),
+            "timerStart": int(item["timerStart"]),
+            "timerEnd": int(item["timerEnd"]),
+            "duration": int(item["duration"]),
+            "serverTime": now_ts(),
+        }
+
+    print(f"[DEBUG] Enviando estado para {connection_id}: {message}")
+
+    try:
+        apigw.post_to_connection(
+            Data=to_json(message),
+            ConnectionId=connection_id,
+        )
+    except Exception as e:
+        print(f"[ERRO] Falha ao enviar estado: {e}")
+
+    return {"statusCode": 200, "body": "Estado enviado"}
+
+# ---------- Broadcast ----------
+def broadcast(event, message):
+    apigw = get_apigw_client(event)
+    connections = connections_table.scan().get("Items", [])
+    print(f"[DEBUG] Enviando para {len(connections)} conexões. Mensagem: {message}")
+
+    for conn in connections:
+        try:
+            apigw.post_to_connection(
+                Data=to_json(message),
+                ConnectionId=conn["connectionId"],
+            )
+        except apigw.exceptions.GoneException:
+            print(f"Conexão {conn['connectionId']} não encontrada. Removendo.")
+            connections_table.delete_item(Key={"connectionId": conn["connectionId"]})
+        except Exception as e:
+            print(f"Erro ao enviar para {conn['connectionId']}: {e}")
+
+    return {"statusCode": 200, "body": "Mensagem enviada"}
+
+
+
+
+
+
+
+
+
+
+
+import React, { useEffect, useState, useRef } from "react";
+
+interface TimerProps {
+  chamadoId: number;
 }
+
+const Timer: React.FC<TimerProps> = ({ chamadoId }) => {
+  const [remaining, setRemaining] = useState<number | null>(null);
+  const [status, setStatus] = useState<string>("pendente");
+  const wsRef = useRef<WebSocket | null>(null);
+  const intervalRef = useRef<NodeJS.Timeout | null>(null);
+
+  // função para iniciar o contador local
+  const startCountdown = (timerEnd: number, serverTime: number) => {
+    const now = Math.floor(Date.now() / 1000);
+    const drift = now - serverTime; // diferença cliente x servidor
+    let timeLeft = timerEnd - now + drift;
+
+    setRemaining(timeLeft);
+
+    if (intervalRef.current) clearInterval(intervalRef.current);
+
+    intervalRef.current = setInterval(() => {
+      timeLeft -= 1;
+      if (timeLeft <= 0) {
+        clearInterval(intervalRef.current!);
+        setRemaining(0);
+      } else {
+        setRemaining(timeLeft);
+      }
+    }, 1000);
+  };
+
+  // conectar ao websocket
+  useEffect(() => {
+    const ws = new WebSocket("wss://SEU-ENDPOINT.execute-api.us-east-1.amazonaws.com/dev");
+    wsRef.current = ws;
+
+    ws.onopen = () => {
+      console.log("[WS] Conectado");
+      // assim que conectar, pede o estado atual
+      ws.send(JSON.stringify({ action: "getState", chamado: chamadoId }));
+    };
+
+    ws.onmessage = (event) => {
+      const msg = JSON.parse(event.data);
+      console.log("[WS] Mensagem recebida:", msg);
+
+      if (msg.action === "currentState" || msg.action === "timerStarted") {
+        setStatus(msg.status);
+        if (msg.timerEnd && msg.serverTime) {
+          startCountdown(msg.timerEnd, msg.serverTime);
+        }
+      }
+
+      if (msg.action === "statusUpdated") {
+        setStatus(msg.status);
+      }
+    };
+
+    ws.onclose = () => {
+      console.log("[WS] Conexão fechada");
+    };
+
+    return () => {
+      ws.close();
+      if (intervalRef.current) clearInterval(intervalRef.current);
+    };
+  }, [chamadoId]);
+
+  // botão para iniciar o timer (envia startTimer)
+  const handleStart = () => {
+    wsRef.current?.send(JSON.stringify({ action: "startTimer", chamado: chamadoId }));
+  };
+
+  // formatador de tempo (mm:ss)
+  const formatTime = (seconds: number | null) => {
+    if (seconds === null) return "--:--";
+    const m = Math.floor(seconds / 60);
+    const s = seconds % 60;
+    return `${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`;
+  };
+
+  return (
+    <div className="p-4 border rounded-lg shadow w-64 text-center">
+      <h2 className="text-lg font-bold mb-2">Chamado #{chamadoId}</h2>
+      <p className="text-2xl font-mono">{formatTime(remaining)}</p>
+      <p className="text-sm text-gray-600 mb-2">Status: {status}</p>
+      <button
+        className="px-4 py-2 bg-blue-500 text-white rounded"
+        onClick={handleStart}
+      >
+        Iniciar
+      </button>
+    </div>
+  );
+};
+
+export default Timer;
