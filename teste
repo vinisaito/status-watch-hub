@@ -1,307 +1,43 @@
-// src/store/useChamadoStore.ts
-import { create } from "zustand";
+sendWS({
+  action: "update_status",
+  chamado: 101,
+  status: "pending",
+  duration: 300, // 5 minutos
+  timer: "primeiroAcionado",
+  primeiroAcionado: {
+    timerStart: Math.floor(Date.now() / 1000),
+    timerEnd: Math.floor(Date.now() / 1000) + 300,
+    observacao: "Chamado aberto",
+  },
+  serverTime: Math.floor(Date.now() / 1000),
+});
 
-export interface ChamadoState {
-  status: "pending" | "confirmed" | "escalating" | "completed";
-  currentLevel: number;
-  timeRemaining: number;
-  timerActive: boolean;
-  observations: string;
-  isAttended: boolean;
-}
 
-interface ChamadoStore {
-  chamados: Record<string, ChamadoState>;
-  initChamado: (id: string) => void;
-  startChamado: (id: string, duration?: number) => void;
-  updateChamado: (id: string, data: Partial<ChamadoState>) => void;
-  confirmChamado: (id: string, observations: string) => void;
-  escalateChamado: (id: string, level: number) => void;
-  completeChamado: (id: string, observations: string) => void;
-  tick: () => void;
-  setFromWS: (id: string, data: Partial<ChamadoState>) => void;
-  reset: () => void;
-}
 
-export const useChamadoStore = create<ChamadoStore>((set) => ({
-  chamados: {},
 
-  initChamado: (id: string) =>
-    set((state) => {
-      if (state.chamados[id]) return state;
-      return {
-        chamados: {
-          ...state.chamados,
-          [id]: {
-            status: "pending",
-            currentLevel: 0,
-            timeRemaining: 300,
-            timerActive: true,
-            observations: "",
-            isAttended: false,
-          },
-        },
-      };
-    }),
 
-  startChamado: (id: string, duration: number = 300) =>
-    set((state) => ({
-      chamados: {
-        ...state.chamados,
-        [id]: {
-          status: "pending",
-          currentLevel: 0,
-          timeRemaining: duration,
-          timerActive: true,
-          observations: "",
-          isAttended: false,
-        },
-      },
-    })),
+sendWS({
+  action: "update_status",
+  chamado: 101,
+  status: "confirmed",
+  primeiroAcionado: {
+    observacao: "Chamado confirmado pelo operador",
+  },
+  serverTime: Math.floor(Date.now() / 1000),
+});
 
-  updateChamado: (id: string, data: Partial<ChamadoState>) =>
-    set((state) => ({
-      chamados: {
-        ...state.chamados,
-        [id]: {
-          ...state.chamados[id],
-          ...data,
-        },
-      },
-    })),
 
-  confirmChamado: (id: string, observations: string) =>
-    set((state) => ({
-      chamados: {
-        ...state.chamados,
-        [id]: {
-          ...state.chamados[id],
-          status: "confirmed",
-          timerActive: false,
-          observations,
-        },
-      },
-    })),
 
-  escalateChamado: (id: string, level: number) =>
-    set((state) => ({
-      chamados: {
-        ...state.chamados,
-        [id]: {
-          ...state.chamados[id],
-          status: "escalating",
-          currentLevel: level,
-          timerActive: true,
-          timeRemaining: 300,
-        },
-      },
-    })),
 
-  completeChamado: (id: string, observations: string) =>
-    set((state) => ({
-      chamados: {
-        ...state.chamados,
-        [id]: {
-          ...state.chamados[id],
-          status: "completed",
-          timerActive: false,
-          observations,
-        },
-      },
-    })),
-
-  tick: () =>
-    set((state) => {
-      const novos: Record<string, ChamadoState> = {};
-      for (const [id, chamado] of Object.entries(state.chamados)) {
-        if (chamado.timerActive && chamado.timeRemaining > 0) {
-          novos[id] = {
-            ...chamado,
-            timeRemaining: chamado.timeRemaining - 1,
-          };
-        } else if (chamado.timerActive && chamado.timeRemaining <= 0) {
-          novos[id] = {
-            ...chamado,
-            timerActive: false,
-            timeRemaining: 0,
-          };
-        } else {
-          novos[id] = chamado;
-        }
-      }
-      return { chamados: novos };
-    }),
-
-  setFromWS: (id: string, data: Partial<ChamadoState>) =>
-    set((state) => ({
-      chamados: {
-        ...state.chamados,
-        [id]: {
-          ...state.chamados[id],
-          ...data,
-        },
-      },
-    })),
-
-  reset: () => set({ chamados: {} }),
-}));
-
-// -------------------
-// WebSocket integração
-// -------------------
-
-const WS_URL = "wss://rsgjd6wsza.execute-api.us-east-1.amazonaws.com/dev";
-let socket: WebSocket | null = null;
-
-// ====== Helpers de mapeamento ======
-
-type ServerTimer = { timerStart?: number; timerEnd?: number; observacao?: string };
-type ServerPayload = {
-  action?: string;
-  chamado?: number;
-  serverTime?: number;
-  duration?: number;
-  status?: string;
-  statusFinal?: string;
-  operador?: string;
-  primeiroAcionado?: ServerTimer;
-  escalacao1?: ServerTimer;
-  escalacao2?: ServerTimer;
-  escalacao3?: ServerTimer;
-  escalacao4?: ServerTimer;
-  timer?: string;
-  [k: string]: any;
-};
-
-function secondsRemaining(timer: ServerTimer | undefined, serverTime?: number) {
-  if (!timer || typeof timer.timerEnd !== "number" || typeof serverTime !== "number") return undefined;
-  return Math.max(0, Math.floor(timer.timerEnd - serverTime));
-}
-
-function pickActiveTimer(p: ServerPayload): { name: string; obj?: ServerTimer; level: number } {
-  const timers: Array<{ name: string; obj?: ServerTimer; level: number }> = [
-    { name: "escalacao4", obj: p.escalacao4, level: 4 },
-    { name: "escalacao3", obj: p.escalacao3, level: 3 },
-    { name: "escalacao2", obj: p.escalacao2, level: 2 },
-    { name: "escalacao1", obj: p.escalacao1, level: 1 },
-    { name: "primeiroAcionado", obj: p.primeiroAcionado, level: 0 },
-  ];
-
-  if (p.timer) {
-    const found = timers.find((t) => t.name === p.timer);
-    if (found) return found;
-  }
-
-  let best = timers[4];
-  let bestEnd = best.obj?.timerEnd ?? 0;
-  for (const t of timers) {
-    const end = t.obj?.timerEnd ?? 0;
-    if (end > bestEnd) {
-      best = t;
-      bestEnd = end;
-    }
-  }
-  return best;
-}
-
-function deriveStatus(
-  p: ServerPayload,
-  active: boolean,
-  level: number
-): "pending" | "confirmed" | "escalating" | "completed" {
-  if (p.statusFinal) return "completed";
-  if (p.status === "confirmed") return "confirmed";
-  if (active) return level > 0 ? "escalating" : "pending";
-  return "pending";
-}
-
-function mapServerToStore(p: ServerPayload): Partial<ChamadoState> {
-  const chosen = pickActiveTimer(p);
-  const remaining = secondsRemaining(chosen.obj, p.serverTime);
-  const timerActive = typeof remaining === "number" ? remaining > 0 : false;
-
-  const status = deriveStatus(p, timerActive, chosen.level);
-  const observations = chosen.obj?.observacao ?? "";
-  const isAttended = p.status === "attended";
-
-  return {
-    status,
-    currentLevel: chosen.level,
-    timeRemaining: typeof remaining === "number" ? remaining : 0,
-    timerActive,
-    observations,
-    isAttended,
-  };
-}
-
-// ====== WebSocket Init ======
-
-export const initWebSocket = () => {
-  if (socket) return;
-
-  socket = new WebSocket(WS_URL);
-
-  socket.onopen = () => {
-    console.log("[WS] Conectado ao servidor");
-  };
-
-  socket.onmessage = (event) => {
-    try {
-      if (!event.data || (typeof event.data === "string" && event.data.trim() === "")) {
-        console.warn("[WS] ⚠️ Mensagem vazia ignorada");
-        return;
-      }
-
-      let msg: any;
-      if (typeof event.data === "string") {
-        msg = JSON.parse(event.data);
-      } else {
-        console.warn("[WS] ⚠️ Mensagem não-textual ignorada:", event.data);
-        return;
-      }
-
-      if (msg && msg.ok && !msg.action && !msg.chamado) {
-        return; // ignora ACK
-      }
-
-      if (typeof msg.chamado !== "number") {
-        console.warn("[WS] ⚠️ Mensagem recebida sem 'chamado' numérico:", msg);
-        return;
-      }
-
-      const id = String(msg.chamado);
-      const mapped = mapServerToStore(msg as ServerPayload);
-      useChamadoStore.getState().setFromWS(id, mapped);
-
-    } catch (err) {
-      console.error("[WS] ❌ Erro ao processar mensagem:", err, "RAW:", event.data);
-    }
-  };
-
-  socket.onclose = () => {
-    console.log("[WS] Conexão fechada. Tentando reconectar em 3s...");
-    socket = null;
-    setTimeout(initWebSocket, 3000);
-  };
-
-  socket.onerror = (err) => {
-    console.error("[WS] Erro:", err);
-    socket?.close();
-  };
-};
-
-export const sendWS = (msg: any) => {
-  if (socket && socket.readyState === WebSocket.OPEN) {
-    socket.send(JSON.stringify(msg));
-  } else {
-    console.warn("[WS] ❌ Não foi possível enviar, socket não conectado:", msg);
-  }
-};
-
-// -------------------
-// Tick global
-// -------------------
-
-setInterval(() => {
-  useChamadoStore.getState().tick();
-}, 1000);
+sendWS({
+  action: "update_status",
+  chamado: 101,
+  status: "escalating",
+  timer: "escalacao1",
+  escalacao1: {
+    timerStart: Math.floor(Date.now() / 1000),
+    timerEnd: Math.floor(Date.now() / 1000) + 200,
+    observacao: "Escalado para nível 1",
+  },
+  serverTime: Math.floor(Date.now() / 1000),
+});
