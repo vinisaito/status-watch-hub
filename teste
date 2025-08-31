@@ -1,22 +1,4 @@
-scalar AWSDateTime
-
-type Chamado {
-  id: ID!
-  status: String!
-  timerStart: AWSDateTime
-}
-
-type Query {
-  getChamados: [Chamado]
-  getChamado(id: ID!): Chamado
-}
-
-type Mutation {
-  startTimer(id: ID!): Chamado
-  updateStatus(id: ID!, status: String!): Chamado
-}
-
-type Subscription {
-  onChamadoUpdated: Chamado
-    @aws_subscribe(mutations: ["startTimer", "updateStatus"])
+{
+  "version": "2018-05-29",
+  "operation": "Scan"
 }
