@@ -1,1 +1,1 @@
-  const { initChamado, startChamado, confirmChamado, escalateChamado } = useChamadoStore();
+const { startConfirmation, confirmReceived, startEscalation } = useChamadoStore();
