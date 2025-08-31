@@ -1,5 +1,158 @@
-Timer.tsx:25 
- WebSocket connection to 'wss://ksup7kq4ivgg3ooxnpitqs4hve.appsync-realtime-api.us-east-1.amazonaws.com/graphql' failed: Error during WebSocket handshake: Sent non-empty 'Sec-WebSocket-Protocol' header but no response was received
-Timer.tsx:44 
- ❌ Subscription error: 
-Event {isTrusted: true, type: 'error', target: WebSocket, currentTarget: WebSocket, eventPhase: 2, …}
+import React, { useEffect, useState, useRef } from "react";
+
+const WS_URL = "wss://xxxxxx.execute-api.sa-east-1.amazonaws.com/dev"; 
+// 🔴 Substitua pelo endpoint exato do API Gateway WebSocket
+
+const Timer: React.FC = () => {
+  const [connected, setConnected] = useState(false);
+  const [status, setStatus] = useState<string>("pendente");
+  const [elapsed, setElapsed] = useState<number>(0);
+  const [chamado, setChamado] = useState<number | null>(null);
+  const wsRef = useRef<WebSocket | null>(null);
+  const timerRef = useRef<NodeJS.Timeout | null>(null);
+  const timerStartRef = useRef<number | null>(null);
+
+  // Conecta ao WebSocket
+  useEffect(() => {
+    connectWS();
+
+    return () => {
+      if (wsRef.current) wsRef.current.close();
+      if (timerRef.current) clearInterval(timerRef.current);
+    };
+  }, []);
+
+  const connectWS = () => {
+    console.log("[WS] Conectando em:", WS_URL);
+    const ws = new WebSocket(WS_URL);
+    wsRef.current = ws;
+
+    ws.onopen = () => {
+      console.log("[WS] ✅ Conectado");
+      setConnected(true);
+    };
+
+    ws.onclose = () => {
+      console.log("[WS] ❌ Desconectado, tentando reconectar...");
+      setConnected(false);
+      setTimeout(connectWS, 3000);
+    };
+
+    ws.onerror = (err) => {
+      console.error("[WS] Erro:", err);
+    };
+
+    ws.onmessage = (msg) => {
+      if (!msg.data) return;
+
+      try {
+        const data = JSON.parse(msg.data);
+        console.log("[WS] Mensagem recebida:", data);
+
+        if (data.action === "timerStarted") {
+          setChamado(data.chamado);
+          timerStartRef.current = data.timerStart;
+          startTimer();
+        }
+
+        if (data.action === "statusUpdated") {
+          setChamado(data.chamado);
+          setStatus(data.status);
+        }
+
+        if (data.action === "currentState") {
+          // Estado inicial ao conectar
+          setChamado(data.chamado);
+          setStatus(data.status);
+          if (data.timerStart) {
+            timerStartRef.current = data.timerStart;
+            startTimer();
+          }
+        }
+      } catch (e) {
+        console.warn("[WS] Mensagem não era JSON, ignorada:", msg.data);
+      }
+    };
+  };
+
+  const startTimer = () => {
+    if (timerRef.current) clearInterval(timerRef.current);
+
+    timerRef.current = setInterval(() => {
+      if (timerStartRef.current) {
+        const now = Math.floor(Date.now() / 1000);
+        setElapsed(now - timerStartRef.current);
+      }
+    }, 1000);
+  };
+
+  const sendMessage = (action: string, payload: any) => {
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      const msg = JSON.stringify({ action, ...payload });
+      console.log("[WS] Enviando:", msg);
+      wsRef.current.send(msg);
+    } else {
+      console.warn("[WS] Conexão não está aberta");
+    }
+  };
+
+  const handleStart = () => {
+    if (!chamado) {
+      sendMessage("startTimer", { chamado: 1 }); // 🔴 Ajuste o ID do chamado
+    } else {
+      sendMessage("startTimer", { chamado });
+    }
+  };
+
+  const handleUpdateStatus = (newStatus: string) => {
+    if (chamado) {
+      sendMessage("updateStatus", { chamado, status: newStatus });
+    }
+  };
+
+  return (
+    <div className="p-4 bg-gray-100 rounded-xl shadow-md w-96">
+      <h2 className="text-xl font-bold mb-2">⏱ Timer WebSocket</h2>
+
+      <p>
+        <strong>Status Conexão:</strong>{" "}
+        {connected ? "🟢 Conectado" : "🔴 Desconectado"}
+      </p>
+
+      <p>
+        <strong>Chamado:</strong> {chamado ?? "Nenhum"}
+      </p>
+
+      <p>
+        <strong>Status:</strong> {status}
+      </p>
+
+      <p>
+        <strong>Tempo decorrido:</strong> {elapsed}s
+      </p>
+
+      <div className="mt-4 space-x-2">
+        <button
+          className="bg-blue-500 text-white px-4 py-2 rounded"
+          onClick={handleStart}
+        >
+          Iniciar Timer
+        </button>
+        <button
+          className="bg-green-500 text-white px-4 py-2 rounded"
+          onClick={() => handleUpdateStatus("acionado")}
+        >
+          Acionado
+        </button>
+        <button
+          className="bg-yellow-500 text-white px-4 py-2 rounded"
+          onClick={() => handleUpdateStatus("escalado")}
+        >
+          Escalado
+        </button>
+      </div>
+    </div>
+  );
+};
+
+export default Timer;
