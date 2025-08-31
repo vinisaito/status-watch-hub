@@ -1,16 +1,3 @@
-{
-    "trace": "a774703d",
-    "msg": "invoke",
-    "routeKey": "$default",
-    "connectionId": "QMAK7c3wIAMCINA=",
-    "body": "\"getState\""
-}
-
-
-{"trace": "a774703d", "msg": "invoke", "routeKey": "$default", "connectionId": "QMAK7c3wIAMCINA=", "body": "\"getState\""}
-2025-08-31T20:16:40.525Z
-{
-    "trace": "a774703d",
-    "msg": "dispatch ERROR",
-    "error": "'str' object has no attribute 'get'"
-}
+useChamadoStore.ts:195 
+ [WS] ⚠️ Mensagem recebida sem 'chamado': 
+{ok: true}
