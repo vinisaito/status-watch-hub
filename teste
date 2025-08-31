@@ -1,184 +1,3 @@
-import json
-import boto3
-import os
-import decimal
-from datetime import datetime
-
-dynamodb = boto3.resource("dynamodb", region_name="us-east-1")
-connections_table = dynamodb.Table(os.environ["CONNECTIONS_TABLE"])
-chamados_table = dynamodb.Table(os.environ["CHAMADOS_TABLE"])
-
-# ----------------------
-# Encoder para Decimals
-# ----------------------
-class DecimalEncoder(json.JSONEncoder):
-    def default(self, o):
-        if isinstance(o, decimal.Decimal):
-            return int(o) if o % 1 == 0 else float(o)
-        return super(DecimalEncoder, self).default(o)
-
-def to_json(data):
-    return json.dumps(data, cls=DecimalEncoder)
-
-# ----------------------
-# Cria cliente para API Gateway
-# ----------------------
-def get_apigw_client(event):
-    request_context = event["requestContext"]
-    domain_name = request_context["domainName"]
-    stage = request_context["stage"]
-    endpoint_url = f"https://{domain_name}/{stage}"
-    return boto3.client("apigatewaymanagementapi", endpoint_url=endpoint_url)
-
-# ----------------------
-# Lambda Handler
-# ----------------------
-def lambda_handler(event, context):
-    print("[DEBUG] Evento recebido:", json.dumps(event))
-    route = event["requestContext"]["routeKey"]
-
-    if route == "$connect":
-        return on_connect(event)
-    elif route == "$disconnect":
-        return on_disconnect(event)
-    elif route == "startTimer":
-        return start_timer(event)
-    elif route == "updateStatus":
-        return update_status(event)
-    else:
-        return {"statusCode": 400, "body": "Rota inválida"}
-
-# ----------------------
-# Conectar
-# ----------------------
-def on_connect(event):
-    connection_id = event["requestContext"]["connectionId"]
-    connections_table.put_item(
-        Item={
-            "connectionId": connection_id,
-            "connectedAt": int(datetime.utcnow().timestamp())
-        }
-    )
-    print(f"[DEBUG] Conexão registrada: {connection_id}")
-
-    # Envia estado atual dos chamados para o novo cliente
-    apigw = get_apigw_client(event)
-    response = chamados_table.scan()
-    print(f"[DEBUG] Estado atual: {response.get('Items', [])}")
-
-    for item in response.get("Items", []):
-        try:
-            message = {
-                "action": "currentState",
-                "chamado": int(item["chamado"]),
-                "status": str(item.get("status", "pendente")),
-                "timerStart": int(item["timerStart"]) if "timerStart" in item else None,
-                "timerEnd": int(item["timerEnd"]) if "timerEnd" in item else None,
-                "duration": int(item["duration"]) if "duration" in item else None
-            }
-            apigw.post_to_connection(
-                Data=to_json(message),
-                ConnectionId=connection_id
-            )
-        except Exception as e:
-            print(f"Erro ao enviar estado inicial: {e}")
-
-    return {"statusCode": 200, "body": "Connected"}
-
-# ----------------------
-# Desconectar
-# ----------------------
-def on_disconnect(event):
-    connection_id = event["requestContext"]["connectionId"]
-    connections_table.delete_item(Key={"connectionId": connection_id})
-    print(f"[DEBUG] Conexão removida: {connection_id}")
-    return {"statusCode": 200, "body": "Disconnected"}
-
-# ----------------------
-# Iniciar Timer
-# ----------------------
-def start_timer(event):
-    body = json.loads(event["body"])
-    chamado = int(body["chamado"])
-    timer_start = int(datetime.utcnow().timestamp())
-    duration = 20 * 60  # 20 minutos
-    timer_end = timer_start + duration
-
-    chamados_table.put_item(
-        Item={
-            "chamado": chamado,
-            "timerStart": timer_start,
-            "timerEnd": timer_end,
-            "duration": duration,
-            "status": "pendente"
-        }
-    )
-    print(f"[DEBUG] Chamado salvo: {chamado} - timerStart={timer_start}, timerEnd={timer_end}")
-
-    return broadcast(event, {
-        "action": "timerStarted",
-        "chamado": chamado,
-        "timerStart": timer_start,
-        "timerEnd": timer_end,
-        "duration": duration
-    })
-
-# ----------------------
-# Atualizar Status
-# ----------------------
-def update_status(event):
-    body = json.loads(event["body"])
-    chamado = int(body["chamado"])
-    status = body["status"]
-
-    chamados_table.update_item(
-        Key={"chamado": chamado},
-        UpdateExpression="SET #s = :s",
-        ExpressionAttributeNames={"#s": "status"},
-        ExpressionAttributeValues={":s": status}
-    )
-    print(f"[DEBUG] Status atualizado: {chamado} -> {status}")
-
-    return broadcast(event, {
-        "action": "statusUpdated",
-        "chamado": chamado,
-        "status": status
-    })
-
-# ----------------------
-# Broadcast para todos
-# ----------------------
-def broadcast(event, message):
-    apigw = get_apigw_client(event)
-    connections = connections_table.scan().get("Items", [])
-    print(f"[DEBUG] Enviando para {len(connections)} conexões. Mensagem: {message}")
-
-    for conn in connections:
-        try:
-            apigw.post_to_connection(
-                Data=to_json(message),
-                ConnectionId=conn["connectionId"]
-            )
-        except apigw.exceptions.GoneException:
-            print(f"Conexão {conn['connectionId']} não encontrada. Removendo.")
-            connections_table.delete_item(Key={"connectionId": conn["connectionId"]})
-        except Exception as e:
-            print(f"Erro ao enviar para {conn['connectionId']}: {e}")
-
-    return {"statusCode": 200, "body": "Mensagem enviada"}
-
-
-
-
-
-
-
-
-
-
-
-
-
 import React, { useEffect, useState, useRef } from "react";
 
 type TimerMessage = {
@@ -193,7 +12,7 @@ type TimerMessage = {
 const Timer: React.FC<{ chamadoId: number }> = ({ chamadoId }) => {
   const [remaining, setRemaining] = useState<number | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
-  const intervalRef = useRef<NodeJS.Timer | null>(null);
+  const intervalRef = useRef<number | null>(null); // corrigido para browser
 
   // Conecta ao WebSocket
   useEffect(() => {
@@ -251,10 +70,10 @@ const Timer: React.FC<{ chamadoId: number }> = ({ chamadoId }) => {
     if (intervalRef.current) clearInterval(intervalRef.current);
     setRemaining(initial);
 
-    intervalRef.current = setInterval(() => {
+    intervalRef.current = window.setInterval(() => {
       setRemaining((prev) => {
         if (!prev || prev <= 1) {
-          clearInterval(intervalRef.current!);
+          if (intervalRef.current) clearInterval(intervalRef.current);
           return 0;
         }
         return prev - 1;
