@@ -1,106 +1,18 @@
-import React, { useEffect, useState, useRef } from "react";
+if (
+  (data.action === "timerStarted" || data.action === "currentState") &&
+  data.chamado === chamadoId
+) {
+  if (data.timerEnd) {
+    const now = Math.floor(Date.now() / 1000);
+    const newRemaining = data.timerEnd - now;
 
-type TimerMessage = {
-  action: string;
-  chamado: number;
-  timerStart?: number;
-  timerEnd?: number;
-  duration?: number;
-  status?: string;
-};
-
-const Timer: React.FC<{ chamadoId: number }> = ({ chamadoId }) => {
-  const [remaining, setRemaining] = useState<number | null>(null);
-  const wsRef = useRef<WebSocket | null>(null);
-  const intervalRef = useRef<number | null>(null); // corrigido para browser
-
-  // Conecta ao WebSocket
-  useEffect(() => {
-    const ws = new WebSocket("wss://SEU_ENDPOINT.execute-api.us-east-1.amazonaws.com/dev"); // <-- ajuste aqui
-    wsRef.current = ws;
-
-    ws.onopen = () => {
-      console.log("Conectado ao WebSocket");
-    };
-
-    ws.onmessage = (event) => {
-      const data: TimerMessage = JSON.parse(event.data);
-      console.log("[WS] Mensagem recebida:", data);
-
-      if (
-        (data.action === "timerStarted" || data.action === "currentState") &&
-        data.chamado === chamadoId &&
-        data.timerEnd
-      ) {
-        const now = Math.floor(Date.now() / 1000);
-        const newRemaining = data.timerEnd - now;
-        if (newRemaining > 0) {
-          setRemaining(newRemaining);
-          startCountdown(newRemaining);
-        } else {
-          setRemaining(0);
-        }
-      }
-    };
-
-    ws.onclose = () => {
-      console.log("Desconectado do WebSocket");
-    };
-
-    return () => {
-      ws.close();
-      if (intervalRef.current) clearInterval(intervalRef.current);
-    };
-  }, [chamadoId]);
-
-  // Função para iniciar o cronômetro
-  const startTimer = () => {
-    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-      wsRef.current.send(
-        JSON.stringify({
-          action: "startTimer",
-          chamado: chamadoId,
-        })
-      );
+    if (newRemaining > 0) {
+      setRemaining(newRemaining);
+      startCountdown(newRemaining);
+    } else {
+      setRemaining(0); // já expirou
     }
-  };
-
-  // Atualiza countdown local
-  const startCountdown = (initial: number) => {
-    if (intervalRef.current) clearInterval(intervalRef.current);
-    setRemaining(initial);
-
-    intervalRef.current = window.setInterval(() => {
-      setRemaining((prev) => {
-        if (!prev || prev <= 1) {
-          if (intervalRef.current) clearInterval(intervalRef.current);
-          return 0;
-        }
-        return prev - 1;
-      });
-    }, 1000);
-  };
-
-  // Formata mm:ss
-  const formatTime = (seconds: number | null) => {
-    if (seconds === null) return "--:--";
-    const m = Math.floor(seconds / 60);
-    const s = seconds % 60;
-    return `${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`;
-  };
-
-  return (
-    <div className="p-4 rounded-2xl shadow-md bg-white flex flex-col items-center gap-4">
-      <h2 className="text-xl font-bold">Chamado #{chamadoId}</h2>
-      <div className="text-3xl font-mono">{formatTime(remaining)}</div>
-      <button
-        onClick={startTimer}
-        className="px-4 py-2 bg-blue-600 text-white rounded-xl shadow hover:bg-blue-700"
-      >
-        Iniciar Timer
-      </button>
-    </div>
-  );
-};
-
-export default Timer;
+  } else {
+    setRemaining(null); // nunca foi iniciado
+  }
+}
