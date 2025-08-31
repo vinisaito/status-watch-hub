@@ -19,23 +19,23 @@ interface ChamadoStore {
   escalateChamado: (id: string, level: number) => void;
   completeChamado: (id: string, observations: string) => void;
   tick: () => void;
+  setFromWS: (id: string, data: Partial<ChamadoState>) => void;
   reset: () => void;
 }
 
 export const useChamadoStore = create<ChamadoStore>((set) => ({
   chamados: {},
 
-  // cria chamado ao clicar em "Iniciar"
   initChamado: (id: string) =>
     set((state) => {
-      if (state.chamados[id]) return state; // já existe
+      if (state.chamados[id]) return state;
       return {
         chamados: {
           ...state.chamados,
           [id]: {
             status: "pending",
             currentLevel: 0,
-            timeRemaining: 300, // 5 min default
+            timeRemaining: 300,
             timerActive: true,
             observations: "",
             isAttended: false,
@@ -44,7 +44,6 @@ export const useChamadoStore = create<ChamadoStore>((set) => ({
       };
     }),
 
-  // inicia manualmente com duração configurável
   startChamado: (id: string, duration: number = 300) =>
     set((state) => ({
       chamados: {
@@ -60,7 +59,6 @@ export const useChamadoStore = create<ChamadoStore>((set) => ({
       },
     })),
 
-  // atualização parcial do chamado
   updateChamado: (id: string, data: Partial<ChamadoState>) =>
     set((state) => ({
       chamados: {
@@ -72,7 +70,6 @@ export const useChamadoStore = create<ChamadoStore>((set) => ({
       },
     })),
 
-  // confirmar atendimento
   confirmChamado: (id: string, observations: string) =>
     set((state) => ({
       chamados: {
@@ -86,7 +83,6 @@ export const useChamadoStore = create<ChamadoStore>((set) => ({
       },
     })),
 
-  // escalar chamado
   escalateChamado: (id: string, level: number) =>
     set((state) => ({
       chamados: {
@@ -96,12 +92,11 @@ export const useChamadoStore = create<ChamadoStore>((set) => ({
           status: "escalating",
           currentLevel: level,
           timerActive: true,
-          timeRemaining: 300, // reinicia 5 min
+          timeRemaining: 300,
         },
       },
     })),
 
-  // finalizar chamado
   completeChamado: (id: string, observations: string) =>
     set((state) => ({
       chamados: {
@@ -115,7 +110,6 @@ export const useChamadoStore = create<ChamadoStore>((set) => ({
       },
     })),
 
-  // decrementa tempo de todos os timers ativos
   tick: () =>
     set((state) => {
       const novos: Record<string, ChamadoState> = {};
@@ -138,5 +132,63 @@ export const useChamadoStore = create<ChamadoStore>((set) => ({
       return { chamados: novos };
     }),
 
+  setFromWS: (id: string, data: Partial<ChamadoState>) =>
+    set((state) => ({
+      chamados: {
+        ...state.chamados,
+        [id]: {
+          ...state.chamados[id],
+          ...data,
+        },
+      },
+    })),
+
   reset: () => set({ chamados: {} }),
 }));
+
+// -------------------
+// WebSocket integração
+// -------------------
+
+const WS_URL = "ws://localhost:8080"; // altere se necessário
+let socket: WebSocket | null = null;
+
+export const initWebSocket = () => {
+  if (socket) return; // evita múltiplas conexões
+
+  socket = new WebSocket(WS_URL);
+
+  socket.onopen = () => {
+    console.log("[WS] Conectado ao servidor");
+  };
+
+  socket.onmessage = (event) => {
+    try {
+      const data = JSON.parse(event.data);
+      const { id, ...rest } = data;
+
+      // Atualiza direto no store
+      useChamadoStore.getState().setFromWS(id, rest);
+    } catch (err) {
+      console.error("[WS] Erro ao processar mensagem:", err);
+    }
+  };
+
+  socket.onclose = () => {
+    console.log("[WS] Conexão fechada. Tentando reconectar em 3s...");
+    socket = null;
+    setTimeout(initWebSocket, 3000);
+  };
+
+  socket.onerror = (err) => {
+    console.error("[WS] Erro:", err);
+    socket?.close();
+  };
+};
+
+// Permite enviar eventos para o servidor
+export const sendWS = (msg: any) => {
+  if (socket && socket.readyState === WebSocket.OPEN) {
+    socket.send(JSON.stringify(msg));
+  }
+};
