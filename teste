@@ -1,6 +1,23 @@
-useChamadoStore.ts:251 
- [WS] ⚠️ Mensagem vazia ignorada
-socket.onmessage
+socket.onmessage = (event) => {
+  try {
+    if (!event.data) {
+      console.warn("[WS] ⚠️ Mensagem vazia ignorada", event);
+      return;
+    }
+
+    const msg = JSON.parse(event.data);
+
+    // Ignora mensagens de ACK da Lambda
+    if (msg.ok === true && !msg.chamado) {
+      console.debug("[WS] ℹ️ ACK ignorado", msg);
+      return;
+    }
+
+    handleMessage(msg);
+  } catch (err) {
+    console.error("[WS] ❌ Erro ao parsear mensagem", err, event.data);
+  }
+};
 
 
 
