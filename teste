@@ -3,11 +3,11 @@ import boto3
 import os
 import decimal
 import uuid
-from datetime import datetime, timedelta
+from datetime import datetime
 
 # ---------- Config ----------
 dynamodb = boto3.resource("dynamodb", region_name="us-east-1")
-connections_table = dynamodb.Table(os.environ["CONNECTIONS_TABLE"])  # PK: connectionId (String)
+connections_table = dynamodb.Table(os.environ["CONNECTIONS_TABLE"])  # PK: connectionId
 chamados_table = dynamodb.Table(os.environ["CHAMADOS_TABLE"])        # PK: chamado (Number)
 
 # ---------- Utils ----------
@@ -15,14 +15,13 @@ class DecimalEncoder(json.JSONEncoder):
     def default(self, o):
         if isinstance(o, decimal.Decimal):
             return int(o) if o % 1 == 0 else float(o)
-        return super(DecimalEncoder, self).default(o)
+        return super().default(o)
 
 def to_json(data):
     return json.dumps(data, cls=DecimalEncoder)
 
 TRACE_ID = None
 def log(msg, **kwargs):
-    # log estruturado com trace_id
     global TRACE_ID
     if not TRACE_ID:
         TRACE_ID = str(uuid.uuid4())[:8]
@@ -36,7 +35,6 @@ def now_ts():
 def get_apigw_client(event):
     rc = event["requestContext"]
     endpoint_url = f"https://{rc['domainName']}/{rc['stage']}"
-    # IMPORTANTE: usar endpoint com stage
     return boto3.client("apigatewaymanagementapi", endpoint_url=endpoint_url)
 
 def send_to_connection(apigw, connection_id, message: dict):
@@ -45,80 +43,68 @@ def send_to_connection(apigw, connection_id, message: dict):
         log("post_to_connection OK", connectionId=connection_id, action=message.get("action"))
         return True
     except apigw.exceptions.GoneException:
-        log("post_to_connection GoneException - removendo conexão", connectionId=connection_id)
+        log("GoneException - removendo conexão", connectionId=connection_id)
         try:
             connections_table.delete_item(Key={"connectionId": connection_id})
         except Exception as e:
-            log("erro ao remover conexão Gone", error=str(e), type=str(type(e)))
+            log("erro ao remover conexão Gone", error=str(e))
         return False
     except Exception as e:
-        log("post_to_connection ERROR",
-            connectionId=connection_id,
-            error=str(e),
-            type=str(type(e)),
-            message=message)
+        log("post_to_connection ERROR", connectionId=connection_id, error=str(e))
         return False
 
-def clone_event_with_route(event, new_route):
-    # handler para $default: reusa o mesmo event, trocando routeKey
-    new_event = dict(event)
-    new_event["requestContext"] = dict(event["requestContext"])
-    new_event["requestContext"]["routeKey"] = new_route
-    return new_event
+def broadcast(event, message):
+    apigw = get_apigw_client(event)
+    try:
+        scan = connections_table.scan()
+        connections = scan.get("Items", [])
+    except Exception as e:
+        log("broadcast scan ERROR", error=str(e))
+        return {"statusCode": 500, "body": "erro ao listar conexões"}
+
+    log("broadcast begin", total=len(connections), message=message)
+    sent = 0
+    for conn in connections:
+        if send_to_connection(apigw, conn["connectionId"], message):
+            sent += 1
+    log("broadcast end", sent=sent, total=len(connections))
+    return {"statusCode": 200, "body": f"Mensagem enviada para {sent}/{len(connections)} conexões"}
 
 # ---------- Handler ----------
 def lambda_handler(event, context):
     global TRACE_ID
-    TRACE_ID = str(uuid.uuid4())[:8]  # novo trace por invocação
+    TRACE_ID = str(uuid.uuid4())[:8]
 
-    # logs iniciais
     route = event["requestContext"]["routeKey"]
     rc = event["requestContext"]
-    log("invoke",
-        routeKey=route,
-        stage=rc.get("stage"),
-        domain=rc.get("domainName"),
-        connectionId=rc.get("connectionId"),
-        isBase64=event.get("isBase64Encoded"),
-        bodyRaw=event.get("body"))
+    log("invoke", routeKey=route, connectionId=rc.get("connectionId"), body=event.get("body"))
 
     if route == "$connect":
         return on_connect(event)
     elif route == "$disconnect":
         return on_disconnect(event)
-    elif route == "startTimer":
-        return start_timer(event)
-    elif route == "updateStatus":
-        return update_status(event)
     elif route == "getState":
         return get_state(event)
-    elif route == "$default":
-        # Se o Route Selection Expression NÃO estiver como $request.body.action
-        # tudo cai aqui. Tentamos roteá-lo manualmente lendo o body.action.
-        try:
-            body = json.loads(event.get("body") or "{}")
-        except Exception as e:
-            log("default_parse_body_error", error=str(e))
-            body = {}
-        action = body.get("action")
-        log("$default recebido", parsedAction=action, body=body)
-        if action in ("getState", "startTimer", "updateStatus"):
-            # roteia internamente
-            return lambda_handler(clone_event_with_route(event, action), context)
-        # caso contrário, apenas loga e responde
-        return {"statusCode": 200, "body": "No-op $default"}
+    elif route == "startTimer":
+        return start_timer(event)
+    elif route == "updateOperador":
+        return update_operador(event)
+    elif route == "updateObservacao":
+        return update_observacao(event)
+    elif route == "updateStatusFinal":
+        return update_status_final(event)
+    elif route == "updateStatus":
+        return update_status(event)
     else:
-        return {"statusCode": 400, "body": "Rota inválida"}
+        log("rota inválida", route=route)
+        return {"statusCode": 400, "body": "rota inválida"}
 
 # ---------- Rotas ----------
 def on_connect(event):
     connection_id = event["requestContext"]["connectionId"]
-    connections_table.put_item(
-        Item={"connectionId": connection_id, "connectedAt": now_ts()}
-    )
+    connections_table.put_item(Item={"connectionId": connection_id, "connectedAt": now_ts()})
     log("on_connect OK", connectionId=connection_id)
-    # não enviamos estado aqui (fluxo é via getState)
-    return {"statusCode": 200, "body": "Connected"}
+    return {"statusCode": 200}
 
 def on_disconnect(event):
     connection_id = event["requestContext"]["connectionId"]
@@ -127,147 +113,103 @@ def on_disconnect(event):
         log("on_disconnect OK", connectionId=connection_id)
     except Exception as e:
         log("on_disconnect ERROR", connectionId=connection_id, error=str(e))
-    return {"statusCode": 200, "body": "Disconnected"}
+    return {"statusCode": 200}
 
 def start_timer(event):
-    # inicia 20 min para o chamado
     body = json.loads(event.get("body") or "{}")
-    try:
-        chamado = int(body["chamado"])
-    except Exception as e:
-        log("start_timer chamado inválido", body=body, error=str(e))
-        return {"statusCode": 400, "body": "chamado inválido"}
+    chamado = int(body["chamado"])
+    timer = body["timer"]  # "primeiroAcionado" ou "escalacao1..4"
 
+    duration = 20*60 if timer == "primeiroAcionado" else 10*60
     timer_start = now_ts()
-    timer_end = timer_start + 20 * 60
+    timer_end = timer_start + duration
 
-    item = {
-        "chamado": chamado,           # Number
-        "timerStart": timer_start,
-        "timerEnd": timer_end,
-        "duration": 20 * 60,
-        "status": "pendente",
-    }
-    chamados_table.put_item(Item=item)
-    log("start_timer salvo", item=item)
+    update_expr = f"SET {timer} = :val"
+    chamados_table.update_item(
+        Key={"chamado": chamado},
+        UpdateExpression=update_expr,
+        ExpressionAttributeValues={
+            ":val": {
+                "timerStart": timer_start,
+                "timerEnd": timer_end,
+                "observacao": body.get("observacao", "")
+            }
+        }
+    )
 
-    message = {
-        "action": "timerStarted",
-        "chamado": chamado,
-        "timerStart": timer_start,
-        "timerEnd": timer_end,
-        "duration": 20 * 60,
-        "serverTime": now_ts(),
-    }
+    message = {"action": "timerStarted", "chamado": chamado, "timer": timer,
+               "timerStart": timer_start, "timerEnd": timer_end, "duration": duration}
+    return broadcast(event, message)
+
+def update_operador(event):
+    body = json.loads(event.get("body") or "{}")
+    chamado = int(body["chamado"])
+    operador = body["operador"]
+
+    chamados_table.update_item(
+        Key={"chamado": chamado},
+        UpdateExpression="SET operador = :o",
+        ExpressionAttributeValues={":o": operador},
+    )
+
+    message = {"action": "operadorUpdated", "chamado": chamado, "operador": operador}
+    return broadcast(event, message)
+
+def update_observacao(event):
+    body = json.loads(event.get("body") or "{}")
+    chamado = int(body["chamado"])
+    timer = body["timer"]
+    observacao = body["observacao"]
+
+    update_expr = f"SET {timer}.observacao = :obs"
+    chamados_table.update_item(
+        Key={"chamado": chamado},
+        UpdateExpression=update_expr,
+        ExpressionAttributeValues={":obs": observacao},
+    )
+
+    message = {"action": "observacaoUpdated", "chamado": chamado, "timer": timer, "observacao": observacao}
+    return broadcast(event, message)
+
+def update_status_final(event):
+    body = json.loads(event.get("body") or "{}")
+    chamado = int(body["chamado"])
+    status_final = body["statusFinal"]
+
+    chamados_table.update_item(
+        Key={"chamado": chamado},
+        UpdateExpression="SET statusFinal = :s",
+        ExpressionAttributeValues={":s": status_final},
+    )
+
+    message = {"action": "statusFinalUpdated", "chamado": chamado, "statusFinal": status_final}
     return broadcast(event, message)
 
 def update_status(event):
     body = json.loads(event.get("body") or "{}")
-    try:
-        chamado = int(body["chamado"])
-        status = str(body["status"])
-    except Exception as e:
-        log("update_status inválido", body=body, error=str(e))
-        return {"statusCode": 400, "body": "payload inválido"}
+    chamado = int(body["chamado"])
+    status = str(body["status"])
 
-    try:
-        chamados_table.update_item(
-            Key={"chamado": chamado},
-            UpdateExpression="SET #s = :s",
-            ExpressionAttributeNames={"#s": "status"},
-            ExpressionAttributeValues={":s": status},
-        )
-        log("update_status OK", chamado=chamado, status=status)
-    except Exception as e:
-        log("update_status ERROR", error=str(e), chamado=chamado)
-        return {"statusCode": 500, "body": "erro ao atualizar status"}
+    chamados_table.update_item(
+        Key={"chamado": chamado},
+        UpdateExpression="SET #s = :s",
+        ExpressionAttributeNames={"#s": "status"},
+        ExpressionAttributeValues={":s": status},
+    )
 
-    message = {
-        "action": "statusUpdated",
-        "chamado": chamado,
-        "status": status,
-        "serverTime": now_ts(),
-    }
+    message = {"action": "statusUpdated", "chamado": chamado, "status": status}
     return broadcast(event, message)
 
 def get_state(event):
-    # chamado obrigatório
-    try:
-        body = json.loads(event.get("body") or "{}")
-    except Exception as e:
-        log("get_state parse body error", error=str(e), bodyRaw=event.get("body"))
-        body = {}
-
-    chamado_raw = body.get("chamado")
+    body = json.loads(event.get("body") or "{}")
+    chamado = int(body["chamado"])
     connection_id = event["requestContext"]["connectionId"]
     apigw = get_apigw_client(event)
-    log("get_state begin", chamadoRaw=chamado_raw, connectionId=connection_id)
 
-    try:
-        chamado = int(chamado_raw)
-    except Exception as e:
-        log("get_state chamado inválido", error=str(e), body=body)
-        # responde explicitamente erro para a própria conexão
-        return send_error_to_sender(apigw, connection_id, "chamado inválido")
+    resp = chamados_table.get_item(Key={"chamado": chamado})
+    item = resp.get("Item", {})
 
-    try:
-        resp = chamados_table.get_item(Key={"chamado": chamado})
-        log("dynamo get_item", key=chamado, found=("Item" in resp))
-    except Exception as e:
-        log("dynamo get_item ERROR", error=str(e), key=chamado)
-        return send_error_to_sender(apigw, connection_id, "erro ao ler estado")
-
-    if "Item" not in resp:
-        message = {
-            "action": "currentState",
-            "chamado": chamado,
-            "status": "pendente",
-            "timerStart": None,
-            "timerEnd": None,
-            "duration": None,
-            "serverTime": now_ts(),
-        }
-        log("get_state not found -> enviando estado vazio", message=message)
-        send_to_connection(apigw, connection_id, message)
-        return {"statusCode": 200, "body": "estado vazio enviado"}
-
-    item = resp["Item"]
-    message = {
-        "action": "currentState",
-        "chamado": int(item["chamado"]),
-        "status": item.get("status", "pendente"),
-        "timerStart": int(item.get("timerStart", 0)) if item.get("timerStart") is not None else None,
-        "timerEnd": int(item.get("timerEnd", 0)) if item.get("timerEnd") is not None else None,
-        "duration": int(item.get("duration", 0)) if item.get("duration") is not None else None,
-        "serverTime": now_ts(),
-    }
-    log("get_state found -> enviando", message=message)
+    message = {"action": "currentState", "chamado": chamado, "serverTime": now_ts(), **item}
+    log("get_state -> enviando", message=message)
     send_to_connection(apigw, connection_id, message)
-    return {"statusCode": 200, "body": "estado enviado"}
-
-def send_error_to_sender(apigw, connection_id, error_msg):
-    payload = {
-        "action": "error",
-        "message": error_msg,
-        "serverTime": now_ts(),
-    }
-    send_to_connection(apigw, connection_id, payload)
-    return {"statusCode": 400, "body": error_msg}
-
-def broadcast(event, message):
-    apigw = get_apigw_client(event)
-    try:
-        scan = connections_table.scan()
-        connections = scan.get("Items", [])
-    except Exception as e:
-        log("broadcast scan connections ERROR", error=str(e))
-        return {"statusCode": 500, "body": "erro ao listar conexões"}
-
-    log("broadcast begin", total=len(connections), message=message)
-    sent = 0
-    for conn in connections:
-        ok = send_to_connection(apigw, conn["connectionId"], message)
-        if ok:
-            sent += 1
-    log("broadcast end", sent=sent, total=len(connections))
-    return {"statusCode": 200, "body": f"Mensagem enviada para {sent}/{len(connections)} conexões"}
+    return {"statusCode": 200}
