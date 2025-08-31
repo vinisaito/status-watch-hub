@@ -1,149 +1,64 @@
-import { create } from "zustand";
+import React, { useState } from "react";
+import { useChamadoStore } from "../store/useChamadoStore";
 
-// Tipos
-export interface ChamadoState {
-  id: string;
-  status: "idle" | "pending" | "confirmed" | "escalating" | "completed";
-  timeRemaining: number;
-  timerActive: boolean;
-  currentLevel: number;
-  observations?: string;
-  isAttended?: boolean;
+interface Props {
+  alertId: string;
 }
 
-interface ChamadoStore {
-  chamados: Record<string, ChamadoState>;
-  startConfirmation: (alertId: string) => void;
-  confirmReceived: (alertId: string, obs?: string) => void;
-  startEscalation: (
-    alertId: string,
-    level: 1 | 2 | 3 | 4,
-    obs?: string
-  ) => void;
-  completeChamado: (alertId: string, obs?: string) => void;
-  tick: () => void;
+const ConfirmationColumn: React.FC<Props> = ({ alertId }) => {
+  const {
+    chamados,
+    initChamado,
+    startChamado,
+    confirmChamado,
+    escalateChamado,
+    completeChamado,
+  } = useChamadoStore();
 
-  // ✅ Aliases (para compatibilidade com componentes existentes)
-  initChamado: (alertId: string) => void;
-  startChamado: (alertId: string) => void;
-  confirmChamado: (alertId: string, obs?: string) => void;
-  escalateChamado: (
-    alertId: string,
-    level: 1 | 2 | 3 | 4,
-    obs?: string
-  ) => void;
-}
+  const chamado = chamados[alertId];
+  const [obs, setObs] = useState("");
 
-// Constante do tempo (5 min = 300s, ajuste conforme regra de negócio)
-const INITIAL_TIME = 300;
+  const handleStart = () => {
+    initChamado(alertId);
+  };
 
-export const useChamadoStore = create<ChamadoStore>((set, get) => ({
-  chamados: {},
+  const handleConfirm = () => {
+    confirmChamado(alertId, obs);
+    setObs("");
+  };
 
-  startConfirmation: (alertId) => {
-    set((state) => ({
-      chamados: {
-        ...state.chamados,
-        [alertId]: {
-          id: alertId,
-          status: "pending",
-          timeRemaining: INITIAL_TIME,
-          timerActive: true,
-          currentLevel: 0,
-        },
-      },
-    }));
-  },
+  const handleEscalate = (level: 1 | 2 | 3 | 4) => {
+    escalateChamado(alertId, level, obs);
+    setObs("");
+  };
 
-  confirmReceived: (alertId, obs) => {
-    set((state) => {
-      const chamado = state.chamados[alertId];
-      if (!chamado) return state;
-      return {
-        chamados: {
-          ...state.chamados,
-          [alertId]: {
-            ...chamado,
-            status: "confirmed",
-            timerActive: false,
-            observations: obs,
-          },
-        },
-      };
-    });
-  },
+  const handleComplete = () => {
+    completeChamado(alertId, obs);
+    setObs("");
+  };
 
-  startEscalation: (alertId, level, obs) => {
-    set((state) => {
-      const chamado = state.chamados[alertId];
-      if (!chamado) return state;
-      return {
-        chamados: {
-          ...state.chamados,
-          [alertId]: {
-            ...chamado,
-            status: "escalating",
-            currentLevel: level,
-            timerActive: true,
-            timeRemaining: INITIAL_TIME,
-            observations: obs || chamado.observations,
-          },
-        },
-      };
-    });
-  },
+  return (
+    <div style={{ border: "1px solid #ddd", padding: 10, margin: 10 }}>
+      <h3>Chamado {alertId}</h3>
+      <p>Status: {chamado?.status || "idle"}</p>
+      <p>Tempo restante: {chamado?.timeRemaining ?? "-"}</p>
+      <p>Nível atual: {chamado?.currentLevel ?? "-"}</p>
 
-  completeChamado: (alertId, obs) => {
-    set((state) => {
-      const chamado = state.chamados[alertId];
-      if (!chamado) return state;
-      return {
-        chamados: {
-          ...state.chamados,
-          [alertId]: {
-            ...chamado,
-            status: "completed",
-            timerActive: false,
-            timeRemaining: 0,
-            observations: obs || chamado.observations,
-          },
-        },
-      };
-    });
-  },
+      <textarea
+        placeholder="Observações"
+        value={obs}
+        onChange={(e) => setObs(e.target.value)}
+      />
 
-  tick: () => {
-    set((state) => {
-      const novos: Record<string, ChamadoState> = {};
-      for (const [id, chamado] of Object.entries(state.chamados)) {
-        if (chamado.timerActive && chamado.timeRemaining > 0) {
-          novos[id] = {
-            ...chamado,
-            timeRemaining: chamado.timeRemaining - 1,
-          };
-        } else if (chamado.timerActive && chamado.timeRemaining <= 0) {
-          novos[id] = {
-            ...chamado,
-            timerActive: false,
-            timeRemaining: 0,
-          };
-        } else {
-          novos[id] = chamado;
-        }
-      }
-      return { chamados: novos };
-    });
-  },
+      <div style={{ marginTop: 10 }}>
+        <button onClick={handleStart}>Iniciar</button>
+        <button onClick={handleConfirm}>Confirmar</button>
+        <button onClick={() => handleEscalate(1)}>Escalar N1</button>
+        <button onClick={() => handleEscalate(2)}>Escalar N2</button>
+        <button onClick={handleComplete}>Concluir</button>
+      </div>
+    </div>
+  );
+};
 
-  // ✅ Aliases para compatibilidade
-  initChamado: (alertId) => get().startConfirmation(alertId),
-  startChamado: (alertId) => get().startConfirmation(alertId),
-  confirmChamado: (alertId, obs) => get().confirmReceived(alertId, obs),
-  escalateChamado: (alertId, level, obs) =>
-    get().startEscalation(alertId, level, obs),
-}));
-
-// Intervalo global para atualizar timers
-setInterval(() => {
-  useChamadoStore.getState().tick();
-}, 1000);
+export default ConfirmationColumn;
