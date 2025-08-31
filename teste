@@ -1,1 +1,145 @@
-const { startConfirmation, confirmReceived, startEscalation } = useChamadoStore();
+import { create } from "zustand";
+
+// Tipos
+export interface ChamadoState {
+  id: string;
+  status: "idle" | "pending" | "confirmed" | "escalating" | "completed";
+  timeRemaining: number;
+  timerActive: boolean;
+  currentLevel: number;
+  observations?: string;
+  isAttended?: boolean;
+}
+
+interface ChamadoStore {
+  chamados: Record<string, ChamadoState>;
+  startConfirmation: (alertId: string) => void;
+  confirmReceived: (alertId: string, obs?: string) => void;
+  startEscalation: (alertId: string, level: 1 | 2 | 3 | 4, obs?: string) => void;
+  completeChamado: (alertId: string, obs?: string) => void;
+  tick: () => void;
+
+  // ✅ Aliases para compatibilidade
+  initChamado: (alertId: string) => void;
+  startChamado: (alertId: string) => void;
+  confirmChamado: (alertId: string, obs?: string) => void;
+  escalateChamado: (alertId: string, level: 1 | 2 | 3 | 4, obs?: string) => void;
+}
+
+// Constante do tempo (5 min = 300s, ajuste se precisar)
+const INITIAL_TIME = 300;
+
+export const useChamadoStore = create<ChamadoStore>((set, get) => ({
+  chamados: {},
+
+  // Inicia o chamado
+  startConfirmation: (alertId) => {
+    set((state) => ({
+      chamados: {
+        ...state.chamados,
+        [alertId]: {
+          id: alertId,
+          status: "pending",
+          timeRemaining: INITIAL_TIME,
+          timerActive: true,
+          currentLevel: 0,
+        },
+      },
+    }));
+  },
+
+  // Confirma recebimento
+  confirmReceived: (alertId, obs) => {
+    set((state) => {
+      const chamado = state.chamados[alertId];
+      if (!chamado) return state;
+      return {
+        chamados: {
+          ...state.chamados,
+          [alertId]: {
+            ...chamado,
+            status: "confirmed",
+            timerActive: false,
+            observations: obs,
+          },
+        },
+      };
+    });
+  },
+
+  // Escalação
+  startEscalation: (alertId, level, obs) => {
+    set((state) => {
+      const chamado = state.chamados[alertId];
+      if (!chamado) return state;
+      return {
+        chamados: {
+          ...state.chamados,
+          [alertId]: {
+            ...chamado,
+            status: "escalating",
+            currentLevel: level,
+            timerActive: true,
+            timeRemaining: INITIAL_TIME,
+            observations: obs || chamado.observations,
+          },
+        },
+      };
+    });
+  },
+
+  // Finalização
+  completeChamado: (alertId, obs) => {
+    set((state) => {
+      const chamado = state.chamados[alertId];
+      if (!chamado) return state;
+      return {
+        chamados: {
+          ...state.chamados,
+          [alertId]: {
+            ...chamado,
+            status: "completed",
+            timerActive: false,
+            timeRemaining: 0,
+            observations: obs || chamado.observations,
+          },
+        },
+      };
+    });
+  },
+
+  // Tick do timer (decrementa 1s)
+  tick: () => {
+    set((state) => {
+      const novos: Record<string, ChamadoState> = {};
+      for (const [id, chamado] of Object.entries(state.chamados)) {
+        if (chamado.timerActive && chamado.timeRemaining > 0) {
+          novos[id] = {
+            ...chamado,
+            timeRemaining: chamado.timeRemaining - 1,
+          };
+        } else if (chamado.timerActive && chamado.timeRemaining <= 0) {
+          novos[id] = {
+            ...chamado,
+            timerActive: false,
+            timeRemaining: 0,
+          };
+        } else {
+          novos[id] = chamado;
+        }
+      }
+      return { chamados: novos };
+    });
+  },
+
+  // ✅ Aliases (para compatibilidade com seu ConfirmationColumn)
+  initChamado: (alertId) => get().startConfirmation(alertId),
+  startChamado: (alertId) => get().startConfirmation(alertId),
+  confirmChamado: (alertId, obs) => get().confirmReceived(alertId, obs),
+  escalateChamado: (alertId, level, obs) => get().startEscalation(alertId, level, obs),
+}));
+
+// Intervalo global para atualizar timers
+setInterval(() => {
+  useChamadoStore.getState().tick();
+}, 1000);
