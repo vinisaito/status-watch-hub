@@ -1,23 +1,131 @@
+// ================= Helpers de mapeamento =================
+
+type ServerTimer = { timerStart?: number; timerEnd?: number; observacao?: string };
+type ServerPayload = {
+  action?: string;
+  chamado?: number;         // vem number da Lambda
+  serverTime?: number;      // epoch em segundos
+  duration?: number;
+  status?: string;          // ex: "pending" | "confirmed" | "attended" | "not-attended"
+  statusFinal?: string;     // se existir, consideramos "completed"
+  operador?: string;
+  primeiroAcionado?: ServerTimer;
+  escalacao1?: ServerTimer;
+  escalacao2?: ServerTimer;
+  escalacao3?: ServerTimer;
+  escalacao4?: ServerTimer;
+  timer?: string;           // opcional (nome do timer que disparou)
+  [k: string]: any;
+};
+
+function secondsRemaining(timer: ServerTimer | undefined, serverTime?: number) {
+  if (!timer || typeof timer.timerEnd !== "number" || typeof serverTime !== "number") return undefined;
+  const diff = Math.max(0, Math.floor(timer.timerEnd - serverTime));
+  return diff;
+}
+
+// decide qual timer está mais “recente/ativo”
+function pickActiveTimer(p: ServerPayload): { name: string; obj?: ServerTimer; level: number } {
+  const timers: Array<{ name: string; obj?: ServerTimer; level: number }> = [
+    { name: "escalacao4", obj: p.escalacao4, level: 4 },
+    { name: "escalacao3", obj: p.escalacao3, level: 3 },
+    { name: "escalacao2", obj: p.escalacao2, level: 2 },
+    { name: "escalacao1", obj: p.escalacao1, level: 1 },
+    { name: "primeiroAcionado", obj: p.primeiroAcionado, level: 0 },
+  ];
+
+  // 1) se veio explicitamente o nome do timer na msg, prioriza ele
+  if (p.timer) {
+    const found = timers.find(t => t.name === p.timer);
+    if (found) return found;
+  }
+
+  // 2) senão, pega o que tiver maior timerEnd
+  let best = timers[4]; // primeiroAcionado por padrão
+  let bestEnd = best.obj?.timerEnd ?? 0;
+  for (const t of timers) {
+    const end = t.obj?.timerEnd ?? 0;
+    if (end > bestEnd) {
+      best = t;
+      bestEnd = end;
+    }
+  }
+  return best;
+}
+
+function deriveStatus(p: ServerPayload, active: boolean, level: number): "pending" | "confirmed" | "escalating" | "completed" {
+  if (p.statusFinal) return "completed";
+  if (p.status === "confirmed") return "confirmed";
+  if (active) return level > 0 ? "escalating" : "pending";
+  return "pending";
+}
+
+function mapServerToStore(p: ServerPayload): Partial<ChamadoState> {
+  const chosen = pickActiveTimer(p);
+  const remaining = secondsRemaining(chosen.obj, p.serverTime);
+  const timerActive = typeof remaining === "number" ? remaining > 0 : false;
+
+  const status = deriveStatus(p, timerActive, chosen.level);
+  const observations = chosen.obj?.observacao ?? "";
+
+  // Se o backend mandar “attended”/“not-attended” em status, refletem em isAttended
+  const isAttended = p.status === "attended";
+
+  const out: Partial<ChamadoState> = {
+    status,
+    currentLevel: chosen.level,
+    timeRemaining: typeof remaining === "number" ? remaining : 0,
+    timerActive,
+    observations,
+    isAttended,
+  };
+
+  return out;
+}
+
+// ================= onmessage robusto =================
+
 socket.onmessage = (event) => {
   try {
-    if (!event.data || event.data.trim() === "") {
+    // 1) Ignora frames vazios do API Gateway (ex.: retorno HTTP do Lambda)
+    if (!event.data || (typeof event.data === "string" && event.data.trim() === "")) {
       console.warn("[WS] ⚠️ Mensagem vazia ignorada");
       return;
     }
 
-    const msg = JSON.parse(event.data);
-
-    if (!msg.chamado && !msg.action) {
-      console.warn("[WS] ⚠️ Mensagem recebida sem 'chamado':", msg);
+    // 2) Parse seguro
+    let msg: any;
+    if (typeof event.data === "string") {
+      msg = JSON.parse(event.data);
+    } else {
+      // alguns browsers/ambientes podem mandar Blob/ArrayBuffer; se for o caso, adapte
+      // por ora, apenas loga e sai
+      console.warn("[WS] ⚠️ Mensagem não-textual ignorada:", event.data);
       return;
     }
 
-    console.log("[WS] ✅ Mensagem recebida:", msg);
+    // 3) Ignora ACKs/NOOPs
+    if (msg && msg.ok && !msg.action && !msg.chamado) {
+      // console.debug("[WS] ACK recebido e ignorado:", msg);
+      return;
+    }
 
-    // aqui você trata suas mensagens normalmente...
-    handleMessage(msg);
+    // 4) Exige 'chamado' (número) para atualizar store
+    if (typeof msg.chamado !== "number") {
+      console.warn("[WS] ⚠️ Mensagem recebida sem 'chamado' numérico:", msg);
+      return;
+    }
+
+    const id = String(msg.chamado); // nossa store usa string como chave
+    const mapped = mapServerToStore(msg as ServerPayload);
+
+    // 5) Atualiza store
+    useChamadoStore.getState().setFromWS(id, mapped);
+
+    // 6) (opcional) logs úteis
+    // console.log("[WS] ✅ Atualizado chamado", id, "=>", mapped, "raw:", msg);
 
   } catch (err) {
-    console.error("[WS] ❌ Erro ao processar mensagem:", err);
+    console.error("[WS] ❌ Erro ao processar mensagem:", err, "RAW:", event.data);
   }
 };
