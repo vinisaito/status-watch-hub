@@ -1,16 +1,6 @@
-sendWS({
-  action: "update_status",
-  chamado: 101,
-  status: "pending",
-  duration: 300, // 5 minutos
-  timer: "primeiroAcionado",
-  primeiroAcionado: {
-    timerStart: Math.floor(Date.now() / 1000),
-    timerEnd: Math.floor(Date.now() / 1000) + 300,
-    observacao: "Chamado aberto",
-  },
-  serverTime: Math.floor(Date.now() / 1000),
-});
+useChamadoStore.ts:251 
+ [WS] ⚠️ Mensagem vazia ignorada
+socket.onmessage
 
 
 
