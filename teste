@@ -1,1 +1,9 @@
-sendWS("startTimer", { chamado: 123, timer: "primeiroAcionado" })
+useChamadoStore.ts:195 
+ [WS] ⚠️ Mensagem recebida sem 'chamado': 
+{error: "'str' object has no attribute 'get'"}
+error
+: 
+"'str' object has no attribute 'get'"
+[[Prototype]]
+: 
+Object
