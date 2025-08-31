@@ -1,234 +1,89 @@
-import json
-import boto3
-import os
-import decimal
-import uuid
-from datetime import datetime
+import { create } from "zustand";
 
-# ---------- Config ----------
-dynamodb = boto3.resource("dynamodb", region_name="us-east-1")
-connections_table = dynamodb.Table(os.environ["CONNECTIONS_TABLE"])  # PK: connectionId
-chamados_table = dynamodb.Table(os.environ["CHAMADOS_TABLE"])        # PK: chamado (Number)
+export interface ChamadoState {
+  chamado: number;
+  status?: string;
+  operador?: string;
+  statusFinal?: string;
+  observacao?: string;
+  timerStart?: number;
+  timerEnd?: number;
+}
 
-# ---------- Utils ----------
-class DecimalEncoder(json.JSONEncoder):
-    def default(self, o):
-        if isinstance(o, decimal.Decimal):
-            return int(o) if o % 1 == 0 else float(o)
-        return super().default(o)
+interface Store {
+  chamados: Record<number, ChamadoState>;
+  initChamado: (chamado: number, state: ChamadoState) => void;
+  updateFromWS: (msg: any) => void;
+  send: (action: string, data: any) => void;
+}
 
-def to_json(data):
-    return json.dumps(data, cls=DecimalEncoder)
+const WS_URL = "wss://SEU-ENDPOINT.execute-api.us-east-1.amazonaws.com/dev"; // altere para o endpoint da API Gateway
 
-TRACE_ID = None
-def log(msg, **kwargs):
-    global TRACE_ID
-    if not TRACE_ID:
-        TRACE_ID = str(uuid.uuid4())[:8]
-    payload = {"trace": TRACE_ID, "msg": msg}
-    payload.update(kwargs)
-    print(json.dumps(payload, default=str))
+let socket: WebSocket | null = null;
 
-def now_ts():
-    return int(datetime.utcnow().timestamp())
+export const useChamadoStore = create<Store>((set, get) => ({
+  chamados: {},
 
-def get_apigw_client(event):
-    rc = event["requestContext"]
-    endpoint_url = f"https://{rc['domainName']}/{rc['stage']}"
-    return boto3.client("apigatewaymanagementapi", endpoint_url=endpoint_url)
+  initChamado: (chamado, state) =>
+    set((prev) => ({
+      chamados: {
+        ...prev.chamados,
+        [chamado]: state,
+      },
+    })),
 
-def send_to_connection(apigw, connection_id, message: dict):
-    try:
-        apigw.post_to_connection(Data=to_json(message), ConnectionId=connection_id)
-        log("post_to_connection OK", connectionId=connection_id, action=message.get("action"))
-        return True
-    except apigw.exceptions.GoneException:
-        log("GoneException - removendo conexão", connectionId=connection_id)
-        try:
-            connections_table.delete_item(Key={"connectionId": connection_id})
-        except Exception as e:
-            log("erro ao remover conexão Gone", error=str(e))
-        return False
-    except Exception as e:
-        log("post_to_connection ERROR", connectionId=connection_id, error=str(e))
-        return False
+  updateFromWS: (msg) =>
+    set((prev) => {
+      const { chamado, ...rest } = msg;
+      if (!chamado) return prev;
 
-def broadcast(event, message):
-    apigw = get_apigw_client(event)
-    try:
-        scan = connections_table.scan()
-        connections = scan.get("Items", [])
-    except Exception as e:
-        log("broadcast scan ERROR", error=str(e))
-        return {"statusCode": 500, "body": "erro ao listar conexões"}
+      return {
+        chamados: {
+          ...prev.chamados,
+          [chamado]: {
+            ...(prev.chamados[chamado] || { chamado }),
+            ...rest,
+          },
+        },
+      };
+    }),
 
-    log("broadcast begin", total=len(connections), action=message.get("action"), chamado=message.get("chamado"))
-    sent = 0
-    for conn in connections:
-        if send_to_connection(apigw, conn["connectionId"], message):
-            sent += 1
-    log("broadcast end", sent=sent, total=len(connections))
-    return {"statusCode": 200, "body": f"Mensagem enviada para {sent}/{len(connections)} conexões"}
-
-# ---------- Handler ----------
-def lambda_handler(event, context):
-    global TRACE_ID
-    TRACE_ID = str(uuid.uuid4())[:8]
-
-    route = event["requestContext"]["routeKey"]
-    rc = event["requestContext"]
-    log("invoke", routeKey=route, connectionId=rc.get("connectionId"), body=event.get("body"))
-
-    if route == "$connect":
-        return on_connect(event)
-    elif route == "$disconnect":
-        return on_disconnect(event)
-    elif route == "getState":
-        return get_state(event)
-    elif route == "startTimer":
-        return start_timer(event)
-    elif route == "updateOperador":
-        return update_operador(event)
-    elif route == "updateObservacao":
-        return update_observacao(event)
-    elif route == "updateStatusFinal":
-        return update_status_final(event)
-    elif route == "updateStatus":
-        return update_status(event)
-    else:
-        log("rota inválida", route=route)
-        return {"statusCode": 400, "body": "rota inválida"}
-
-# ---------- Rotas ----------
-def on_connect(event):
-    connection_id = event["requestContext"]["connectionId"]
-    connections_table.put_item(Item={"connectionId": connection_id, "connectedAt": now_ts()})
-    log("on_connect OK", connectionId=connection_id)
-    return {"statusCode": 200}
-
-def on_disconnect(event):
-    connection_id = event["requestContext"]["connectionId"]
-    try:
-        connections_table.delete_item(Key={"connectionId": connection_id})
-        log("on_disconnect OK", connectionId=connection_id)
-    except Exception as e:
-        log("on_disconnect ERROR", connectionId=connection_id, error=str(e))
-    return {"statusCode": 200}
-
-def start_timer(event):
-    body = json.loads(event.get("body") or "{}")
-    chamado = int(body["chamado"])
-    timer = body["timer"]
-
-    duration = 20*60 if timer == "primeiroAcionado" else 10*60
-    timer_start = now_ts()
-    timer_end = timer_start + duration
-
-    log("start_timer invoked", chamado=chamado, timer=timer, duration=duration)
-
-    update_expr = f"SET {timer} = :val"
-    chamados_table.update_item(
-        Key={"chamado": chamado},
-        UpdateExpression=update_expr,
-        ExpressionAttributeValues={
-            ":val": {
-                "timerStart": timer_start,
-                "timerEnd": timer_end,
-                "observacao": body.get("observacao", "")
-            }
-        }
-    )
-
-    # recupera estado atualizado
-    resp = chamados_table.get_item(Key={"chamado": chamado})
-    item = resp.get("Item", {})
-
-    message = {
-        "action": "timerStarted",
-        "chamado": chamado,
-        "serverTime": now_ts(),
-        "duration": duration,
-        **item
+  send: (action, data) => {
+    if (socket && socket.readyState === WebSocket.OPEN) {
+      socket.send(JSON.stringify({ action, ...data }));
+    } else {
+      console.warn("[WS] não conectado, ignorando envio");
     }
-    return broadcast(event, message)
+  },
+}));
 
-def update_operador(event):
-    body = json.loads(event.get("body") or "{}")
-    chamado = int(body["chamado"])
-    operador = body["operador"]
+// ---- WebSocket init ----
+function connectWS() {
+  socket = new WebSocket(WS_URL);
 
-    log("update_operador", chamado=chamado, operador=operador)
+  socket.onopen = () => {
+    console.log("[WS] conectado");
+  };
 
-    chamados_table.update_item(
-        Key={"chamado": chamado},
-        UpdateExpression="SET operador = :o",
-        ExpressionAttributeValues={":o": operador},
-    )
+  socket.onclose = () => {
+    console.log("[WS] desconectado, tentando reconectar...");
+    setTimeout(connectWS, 2000);
+  };
 
-    message = {"action": "operadorUpdated", "chamado": chamado, "operador": operador}
-    return broadcast(event, message)
+  socket.onerror = (err) => {
+    console.error("[WS] erro", err);
+  };
 
-def update_observacao(event):
-    body = json.loads(event.get("body") or "{}")
-    chamado = int(body["chamado"])
-    timer = body["timer"]
-    observacao = body["observacao"]
+  socket.onmessage = (event) => {
+    try {
+      const msg = JSON.parse(event.data);
+      console.log("[WS] recebido", msg);
+      useChamadoStore.getState().updateFromWS(msg);
+    } catch (e) {
+      console.error("[WS] Erro parse mensagem", e, event.data);
+    }
+  };
+}
 
-    log("update_observacao", chamado=chamado, timer=timer, observacao=observacao)
-
-    update_expr = f"SET {timer}.observacao = :obs"
-    chamados_table.update_item(
-        Key={"chamado": chamado},
-        UpdateExpression=update_expr,
-        ExpressionAttributeValues={":obs": observacao},
-    )
-
-    message = {"action": "observacaoUpdated", "chamado": chamado, "timer": timer, "observacao": observacao}
-    return broadcast(event, message)
-
-def update_status_final(event):
-    body = json.loads(event.get("body") or "{}")
-    chamado = int(body["chamado"])
-    status_final = body["statusFinal"]
-
-    log("update_status_final", chamado=chamado, statusFinal=status_final)
-
-    chamados_table.update_item(
-        Key={"chamado": chamado},
-        UpdateExpression="SET statusFinal = :s",
-        ExpressionAttributeValues={":s": status_final},
-    )
-
-    message = {"action": "statusFinalUpdated", "chamado": chamado, "statusFinal": status_final}
-    return broadcast(event, message)
-
-def update_status(event):
-    body = json.loads(event.get("body") or "{}")
-    chamado = int(body["chamado"])
-    status = str(body["status"])
-
-    log("update_status", chamado=chamado, status=status)
-
-    chamados_table.update_item(
-        Key={"chamado": chamado},
-        UpdateExpression="SET #s = :s",
-        ExpressionAttributeNames={"#s": "status"},
-        ExpressionAttributeValues={":s": status},
-    )
-
-    message = {"action": "statusUpdated", "chamado": chamado, "status": status}
-    return broadcast(event, message)
-
-def get_state(event):
-    body = json.loads(event.get("body") or "{}")
-    chamado = int(body["chamado"])
-    connection_id = event["requestContext"]["connectionId"]
-    apigw = get_apigw_client(event)
-
-    resp = chamados_table.get_item(Key={"chamado": chamado})
-    item = resp.get("Item", {})
-
-    message = {"action": "currentState", "chamado": chamado, "serverTime": now_ts(), **item}
-    log("get_state -> enviando", chamado=chamado, message=message)
-    send_to_connection(apigw, connection_id, message)
-    return {"statusCode": 200}
+// conectar assim que o módulo for carregado
+connectWS();
