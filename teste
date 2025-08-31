@@ -1,5 +1,5 @@
 // src/services/websocket.ts
-// Serviço WebSocket com fila de mensagens e sistema de subscribers
+// Serviço WebSocket robusto com fila, reconexão e subscrição
 
 type Listener = (msg: any) => void;
 
@@ -9,28 +9,24 @@ class WebSocketService {
   private pendingMessages: any[] = [];
   private isConnecting = false;
 
-  private url: string;
-
-  constructor() {
-    // Usa env var (ex: VITE_WS_URL="wss://xxxx.execute-api.sa-east-1.amazonaws.com/production")
-    this.url =
-      import.meta.env.VITE_WS_URL ??
-      "ws://localhost:8080"; // fallback local
-  }
+  // 🔥 Defina aqui a URL fixa do seu WebSocket no API Gateway
+  private url: string = "wss://rsgjd6wsza.execute-api.us-east-1.amazonaws.com/dev";
 
   private connect() {
     if (this.isConnecting || this.socket?.readyState === WebSocket.OPEN) {
       return;
     }
+
     this.isConnecting = true;
+    console.info("[WS] Conectando em:", this.url);
 
     this.socket = new WebSocket(this.url);
 
     this.socket.onopen = () => {
-      console.info("[WS] Conectado");
+      console.info("[WS] ✅ Conectado");
       this.isConnecting = false;
 
-      // envia tudo que ficou na fila
+      // drena fila
       while (this.pendingMessages.length > 0) {
         const msg = this.pendingMessages.shift();
         this.send(msg);
@@ -40,20 +36,21 @@ class WebSocketService {
     this.socket.onmessage = (event) => {
       try {
         const data = JSON.parse(event.data);
+        console.debug("[WS] Mensagem recebida:", data);
         this.listeners.forEach((cb) => cb(data));
       } catch (err) {
-        console.error("[WS] erro parse msg", err);
+        console.error("[WS] Erro parse mensagem:", err);
       }
     };
 
     this.socket.onclose = () => {
-      console.warn("[WS] desconectado, tentando reconectar em 3s...");
+      console.warn("[WS] ❌ Desconectado, tentando reconectar em 3s...");
       this.isConnecting = false;
       setTimeout(() => this.connect(), 3000);
     };
 
     this.socket.onerror = (err) => {
-      console.error("[WS] erro", err);
+      console.error("[WS] ⚠️ Erro:", err);
       this.socket?.close();
     };
   }
@@ -63,6 +60,7 @@ class WebSocketService {
       this.connect();
     }
     this.listeners.push(cb);
+
     return () => {
       this.listeners = this.listeners.filter((fn) => fn !== cb);
     };
@@ -73,6 +71,7 @@ class WebSocketService {
 
     if (this.socket?.readyState === WebSocket.OPEN) {
       this.socket.send(msg);
+      console.debug("[WS] Enviado:", payload);
     } else {
       console.warn("[WS] não conectado, enfileirando:", payload);
       this.pendingMessages.push(payload);
@@ -83,5 +82,5 @@ class WebSocketService {
   }
 }
 
-// Exporta uma instância global
+// Exporta instância global
 export const ws = new WebSocketService();
