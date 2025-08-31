@@ -150,11 +150,11 @@ export const useChamadoStore = create<ChamadoStore>((set) => ({
 // WebSocket integração
 // -------------------
 
-const WS_URL = "ws://localhost:8080"; // altere se necessário
+const WS_URL = "ws://localhost:8080";
 let socket: WebSocket | null = null;
 
 export const initWebSocket = () => {
-  if (socket) return; // evita múltiplas conexões
+  if (socket) return;
 
   socket = new WebSocket(WS_URL);
 
@@ -166,8 +166,6 @@ export const initWebSocket = () => {
     try {
       const data = JSON.parse(event.data);
       const { id, ...rest } = data;
-
-      // Atualiza direto no store
       useChamadoStore.getState().setFromWS(id, rest);
     } catch (err) {
       console.error("[WS] Erro ao processar mensagem:", err);
@@ -186,9 +184,17 @@ export const initWebSocket = () => {
   };
 };
 
-// Permite enviar eventos para o servidor
 export const sendWS = (msg: any) => {
   if (socket && socket.readyState === WebSocket.OPEN) {
     socket.send(JSON.stringify(msg));
   }
 };
+
+// -------------------
+// Tick global
+// -------------------
+
+// roda o tick do store a cada 1s
+setInterval(() => {
+  useChamadoStore.getState().tick();
+}, 1000);
