@@ -1,50 +1,135 @@
-socket.onmessage = (event) => {
-  try {
-    if (!event.data) {
-      console.warn("[WS] ⚠️ Mensagem vazia ignorada", event);
+// useChamadoStore.ts
+import create from "zustand";
+
+type ChamadoMessage =
+  | { action: "currentState"; chamado: number; serverTime: number; [k: string]: any }
+  | { action: "timerStarted"; chamado: number; duration: number; serverTime: number; [k: string]: any }
+  | { action: "operadorUpdated"; chamado: number; operador: string }
+  | { action: "observacaoUpdated"; chamado: number; timer: string; observacao: string }
+  | { action: "statusFinalUpdated"; chamado: number; statusFinal: string }
+  | { action: "statusUpdated"; chamado: number; status: string }
+  | { ok: true; [k: string]: any }; // ACK da Lambda
+
+interface ChamadoState {
+  chamado?: number;
+  operador?: string;
+  status?: string;
+  statusFinal?: string;
+  timers?: Record<string, any>;
+  connect: () => void;
+  disconnect: () => void;
+  sendWS: (payload: any) => void;
+}
+
+let socket: WebSocket | null = null;
+
+export const useChamadoStore = create<ChamadoState>((set, get) => ({
+  chamado: undefined,
+  operador: undefined,
+  status: undefined,
+  statusFinal: undefined,
+  timers: {},
+
+  connect: () => {
+    if (socket && socket.readyState === WebSocket.OPEN) {
+      console.warn("[WS] Já conectado");
       return;
     }
 
-    const msg = JSON.parse(event.data);
+    socket = new WebSocket("wss://SEU-ENDPOINT.execute-api.us-east-1.amazonaws.com/dev");
 
-    // Ignora mensagens de ACK da Lambda
-    if (msg.ok === true && !msg.chamado) {
-      console.debug("[WS] ℹ️ ACK ignorado", msg);
+    socket.onopen = () => {
+      console.log("[WS] ✅ Conectado");
+    };
+
+    socket.onclose = () => {
+      console.warn("[WS] 🔌 Desconectado");
+    };
+
+    socket.onerror = (err) => {
+      console.error("[WS] ❌ Erro", err);
+    };
+
+    socket.onmessage = (event) => {
+      try {
+        if (!event.data) {
+          console.warn("[WS] ⚠️ Mensagem vazia ignorada", event);
+          return;
+        }
+
+        const msg: ChamadoMessage = JSON.parse(event.data);
+
+        // Ignora ACKs da Lambda (não têm chamado)
+        if ((msg as any).ok === true && !(msg as any).chamado) {
+          console.debug("[WS] ℹ️ ACK ignorado", msg);
+          return;
+        }
+
+        handleMessage(msg);
+      } catch (err) {
+        console.error("[WS] ❌ Erro ao parsear mensagem", err, event.data);
+      }
+    };
+  },
+
+  disconnect: () => {
+    if (socket) {
+      socket.close();
+      socket = null;
+    }
+  },
+
+  sendWS: (payload) => {
+    if (!socket || socket.readyState !== WebSocket.OPEN) {
+      console.warn("[WS] ❌ Não conectado, não foi possível enviar", payload);
       return;
     }
+    socket.send(JSON.stringify(payload));
+  },
+}));
 
-    handleMessage(msg);
-  } catch (err) {
-    console.error("[WS] ❌ Erro ao parsear mensagem", err, event.data);
+function handleMessage(msg: ChamadoMessage) {
+  const set = useChamadoStore.setState;
+
+  switch (msg.action) {
+    case "currentState":
+      set({
+        chamado: msg.chamado,
+        status: msg.status,
+        statusFinal: msg.statusFinal,
+        operador: msg.operador,
+        timers: msg.timers || {},
+      });
+      console.log("[WS] 📥 currentState recebido", msg);
+      break;
+
+    case "timerStarted":
+      set((state) => ({
+        timers: { ...state.timers, [msg.chamado]: msg },
+      }));
+      console.log("[WS] ⏱️ Timer iniciado", msg);
+      break;
+
+    case "operadorUpdated":
+      set({ operador: msg.operador });
+      console.log("[WS] 👷 Operador atualizado", msg);
+      break;
+
+    case "observacaoUpdated":
+      console.log("[WS] 📝 Observação atualizada", msg);
+      break;
+
+    case "statusFinalUpdated":
+      set({ statusFinal: msg.statusFinal });
+      console.log("[WS] ✅ Status final atualizado", msg);
+      break;
+
+    case "statusUpdated":
+      set({ status: msg.status });
+      console.log("[WS] 🔄 Status atualizado", msg);
+      break;
+
+    default:
+      console.warn("[WS] ⚠️ Mensagem recebida sem handler", msg);
   }
-};
-
-
-
-
-
-sendWS({
-  action: "update_status",
-  chamado: 101,
-  status: "confirmed",
-  primeiroAcionado: {
-    observacao: "Chamado confirmado pelo operador",
-  },
-  serverTime: Math.floor(Date.now() / 1000),
-});
-
-
-
-
-sendWS({
-  action: "update_status",
-  chamado: 101,
-  status: "escalating",
-  timer: "escalacao1",
-  escalacao1: {
-    timerStart: Math.floor(Date.now() / 1000),
-    timerEnd: Math.floor(Date.now() / 1000) + 200,
-    observacao: "Escalado para nível 1",
-  },
-  serverTime: Math.floor(Date.now() / 1000),
-});
+}
