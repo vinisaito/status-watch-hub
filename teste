@@ -15,24 +15,31 @@ interface ChamadoStore {
   chamados: Record<string, ChamadoState>;
   startConfirmation: (alertId: string) => void;
   confirmReceived: (alertId: string, obs?: string) => void;
-  startEscalation: (alertId: string, level: 1 | 2 | 3 | 4, obs?: string) => void;
+  startEscalation: (
+    alertId: string,
+    level: 1 | 2 | 3 | 4,
+    obs?: string
+  ) => void;
   completeChamado: (alertId: string, obs?: string) => void;
   tick: () => void;
 
-  // ✅ Aliases para compatibilidade
+  // ✅ Aliases (para compatibilidade com componentes existentes)
   initChamado: (alertId: string) => void;
   startChamado: (alertId: string) => void;
   confirmChamado: (alertId: string, obs?: string) => void;
-  escalateChamado: (alertId: string, level: 1 | 2 | 3 | 4, obs?: string) => void;
+  escalateChamado: (
+    alertId: string,
+    level: 1 | 2 | 3 | 4,
+    obs?: string
+  ) => void;
 }
 
-// Constante do tempo (5 min = 300s, ajuste se precisar)
+// Constante do tempo (5 min = 300s, ajuste conforme regra de negócio)
 const INITIAL_TIME = 300;
 
 export const useChamadoStore = create<ChamadoStore>((set, get) => ({
   chamados: {},
 
-  // Inicia o chamado
   startConfirmation: (alertId) => {
     set((state) => ({
       chamados: {
@@ -48,7 +55,6 @@ export const useChamadoStore = create<ChamadoStore>((set, get) => ({
     }));
   },
 
-  // Confirma recebimento
   confirmReceived: (alertId, obs) => {
     set((state) => {
       const chamado = state.chamados[alertId];
@@ -67,7 +73,6 @@ export const useChamadoStore = create<ChamadoStore>((set, get) => ({
     });
   },
 
-  // Escalação
   startEscalation: (alertId, level, obs) => {
     set((state) => {
       const chamado = state.chamados[alertId];
@@ -88,7 +93,6 @@ export const useChamadoStore = create<ChamadoStore>((set, get) => ({
     });
   },
 
-  // Finalização
   completeChamado: (alertId, obs) => {
     set((state) => {
       const chamado = state.chamados[alertId];
@@ -108,7 +112,6 @@ export const useChamadoStore = create<ChamadoStore>((set, get) => ({
     });
   },
 
-  // Tick do timer (decrementa 1s)
   tick: () => {
     set((state) => {
       const novos: Record<string, ChamadoState> = {};
@@ -132,11 +135,12 @@ export const useChamadoStore = create<ChamadoStore>((set, get) => ({
     });
   },
 
-  // ✅ Aliases (para compatibilidade com seu ConfirmationColumn)
+  // ✅ Aliases para compatibilidade
   initChamado: (alertId) => get().startConfirmation(alertId),
   startChamado: (alertId) => get().startConfirmation(alertId),
   confirmChamado: (alertId, obs) => get().confirmReceived(alertId, obs),
-  escalateChamado: (alertId, level, obs) => get().startEscalation(alertId, level, obs),
+  escalateChamado: (alertId, level, obs) =>
+    get().startEscalation(alertId, level, obs),
 }));
 
 // Intervalo global para atualizar timers
