@@ -8,6 +8,8 @@ export interface ChamadoState {
   timerActive: boolean;
   observations: string;
   isAttended: boolean;
+  // 👇 opcional: para guardar qualquer dado extra vindo do WS
+  rawWSData?: Record<string, any>;
 }
 
 interface ChamadoStore {
@@ -19,7 +21,7 @@ interface ChamadoStore {
   escalateChamado: (id: string, level: number) => void;
   completeChamado: (id: string, observations: string) => void;
   tick: () => void;
-  setFromWS: (id: string, data: Partial<ChamadoState>) => void;
+  setFromWS: (id: string, data: any) => void;
   reset: () => void;
 }
 
@@ -132,16 +134,39 @@ export const useChamadoStore = create<ChamadoStore>((set) => ({
       return { chamados: novos };
     }),
 
-  setFromWS: (id: string, data: Partial<ChamadoState>) =>
-    set((state) => ({
-      chamados: {
-        ...state.chamados,
-        [id]: {
-          ...state.chamados[id],
-          ...data,
+  setFromWS: (id: string, data: any) =>
+    set((state) => {
+      const prev = state.chamados[id] || {
+        status: "pending",
+        currentLevel: 0,
+        timeRemaining: 0,
+        timerActive: false,
+        observations: "",
+        isAttended: false,
+      };
+
+      return {
+        chamados: {
+          ...state.chamados,
+          [id]: {
+            ...prev,
+            // mapeia campos conhecidos
+            status: data.status ?? prev.status,
+            observations: data.observacao ?? prev.observations,
+            timeRemaining:
+              data.timerEnd && data.serverTime
+                ? Math.max(0, data.timerEnd - data.serverTime)
+                : prev.timeRemaining,
+            timerActive:
+              data.action === "timerStarted"
+                ? true
+                : prev.timerActive,
+            // guarda tudo também em rawWSData para debug/uso futuro
+            rawWSData: { ...prev.rawWSData, ...data },
+          },
         },
-      },
-    })),
+      };
+    }),
 
   reset: () => set({ chamados: {} }),
 }));
@@ -159,27 +184,33 @@ export const initWebSocket = () => {
   socket = new WebSocket(WS_URL);
 
   socket.onopen = () => {
-    console.log("[WS] Conectado ao servidor");
+    console.log("[WS] ✅ Conectado ao servidor");
   };
 
   socket.onmessage = (event) => {
     try {
       const data = JSON.parse(event.data);
-      const { id, ...rest } = data;
-      useChamadoStore.getState().setFromWS(id, rest);
+
+      if (!data.chamado) {
+        console.warn("[WS] ⚠️ Mensagem recebida sem 'chamado':", data);
+        return;
+      }
+
+      const chamadoId = String(data.chamado);
+      useChamadoStore.getState().setFromWS(chamadoId, data);
     } catch (err) {
-      console.error("[WS] Erro ao processar mensagem:", err);
+      console.error("[WS] ❌ Erro ao processar mensagem:", err);
     }
   };
 
   socket.onclose = () => {
-    console.log("[WS] Conexão fechada. Tentando reconectar em 3s...");
+    console.log("[WS] 🔌 Conexão fechada. Tentando reconectar em 3s...");
     socket = null;
     setTimeout(initWebSocket, 3000);
   };
 
   socket.onerror = (err) => {
-    console.error("[WS] Erro:", err);
+    console.error("[WS] 🚨 Erro no WebSocket:", err);
     socket?.close();
   };
 };
@@ -187,14 +218,14 @@ export const initWebSocket = () => {
 export const sendWS = (msg: any) => {
   if (socket && socket.readyState === WebSocket.OPEN) {
     socket.send(JSON.stringify(msg));
+  } else {
+    console.warn("[WS] ⚠️ Tentativa de enviar com socket fechado:", msg);
   }
 };
 
 // -------------------
 // Tick global
 // -------------------
-
-// roda o tick do store a cada 1s
 setInterval(() => {
   useChamadoStore.getState().tick();
 }, 1000);
