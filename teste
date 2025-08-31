@@ -1,64 +1,296 @@
-import React, { useState } from "react";
-import { useChamadoStore } from "../store/useChamadoStore";
+import { useEffect, useMemo, useState } from 'react';
+import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
+import { Label } from '@/components/ui/label';
+import { Textarea } from '@/components/ui/textarea';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Check, Clock, Play, CheckCircle, FastForward, RotateCcw, X } from 'lucide-react';
+import { AlertData, EscalationState, PendingStatusChange } from '@/types/ActionTable';
+import { useTimer } from '@/hooks/UseTimer';
+import { useChamadoStore } from '@/store/useChamadoStore';
 
-interface Props {
-  alertId: string;
+interface ConfirmationColumnProps {
+  alert: AlertData;
+  state?: EscalationState;
+  showConfirmation: boolean;
+  pendingChange?: PendingStatusChange;
 }
 
-const ConfirmationColumn: React.FC<Props> = ({ alertId }) => {
-  const {
-    chamados,
-    initChamado,
-    startChamado,
-    confirmChamado,
-    escalateChamado,
-    completeChamado,
-  } = useChamadoStore();
+export const ConfirmationColumn = ({
+  alert,
+  state,
+  showConfirmation,
+  pendingChange
+}: ConfirmationColumnProps) => {
+  const { formatTime } = useTimer();
 
-  const chamado = chamados[alertId];
-  const [obs, setObs] = useState("");
+  const { initChamado, startChamado, confirmChamado, escalateChamado } = useChamadoStore();
 
-  const handleStart = () => {
-    initChamado(alertId);
-  };
-
-  const handleConfirm = () => {
-    confirmChamado(alertId, obs);
-    setObs("");
-  };
-
-  const handleEscalate = (level: 1 | 2 | 3 | 4) => {
-    escalateChamado(alertId, level, obs);
-    setObs("");
-  };
-
-  const handleComplete = () => {
-    completeChamado(alertId, obs);
-    setObs("");
-  };
-
-  return (
-    <div style={{ border: "1px solid #ddd", padding: 10, margin: 10 }}>
-      <h3>Chamado {alertId}</h3>
-      <p>Status: {chamado?.status || "idle"}</p>
-      <p>Tempo restante: {chamado?.timeRemaining ?? "-"}</p>
-      <p>Nível atual: {chamado?.currentLevel ?? "-"}</p>
-
-      <textarea
-        placeholder="Observações"
-        value={obs}
-        onChange={(e) => setObs(e.target.value)}
-      />
-
-      <div style={{ marginTop: 10 }}>
-        <button onClick={handleStart}>Iniciar</button>
-        <button onClick={handleConfirm}>Confirmar</button>
-        <button onClick={() => handleEscalate(1)}>Escalar N1</button>
-        <button onClick={() => handleEscalate(2)}>Escalar N2</button>
-        <button onClick={handleComplete}>Concluir</button>
-      </div>
-    </div>
+  // --- Deriva chamadoId com segurança ---
+  const chamadoIdRaw = useMemo(
+    () => (alert as any)?.chamado ?? (alert as any)?.id ?? (alert as any)?.alertId,
+    [alert]
   );
-};
 
-export default ConfirmationColumn;
+  const chamadoNum = useMemo(() => {
+    const n = Number(String(chamadoIdRaw ?? '').trim());
+    return Number.isFinite(n) ? n : null;
+  }, [chamadoIdRaw]);
+
+  // pega estado inicial no mount (se houver ID válido)
+  useEffect(() => {
+    if (chamadoNum !== null) {
+      initChamado(chamadoNum);
+    }
+  }, [chamadoNum, initChamado]);
+
+  // estados locais para observações
+  const [observation, setObservation] = useState('');
+  const [pendingObs, setPendingObs] = useState('');
+  const [pendingStatus, setPendingStatus] = useState<string>('');
+
+  if (chamadoNum === null) {
+    return <div className="text-xs text-destructive">Chamado inválido</div>;
+  }
+
+  if (!state) {
+    return (
+      <div className="text-center">
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={() => startChamado(chamadoNum)}
+          className="h-8 px-3 text-xs"
+        >
+          <Play className="h-3 w-3 mr-1" />
+          Iniciar
+        </Button>
+      </div>
+    );
+  }
+
+  const levelNames = { 1: '1ª', 2: '2ª', 3: '3ª', 4: '4ª' } as const;
+
+  switch (state.status) {
+    case 'pending':
+      return (
+        <div className="text-center space-y-3">
+          <div className="flex items-center justify-center gap-2">
+            <Clock className="h-4 w-4 text-warning" />
+            <span
+              className="text-sm font-mono font-bold"
+              style={{ color: state.timeRemaining <= 60 ? '#ef4444' : '#f59e0b' }}
+            >
+              {formatTime(state.timeRemaining)}
+            </span>
+            {state.timerActive && (
+              <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
+            )}
+          </div>
+
+          <div className="space-y-2">
+            <div className="space-y-1">
+              <Label className="text-xs">
+                Observações <span className="text-destructive">*</span>
+              </Label>
+              <Textarea
+                placeholder="Observações são obrigatórias para confirmação"
+                value={observation}
+                onChange={(e) => setObservation(e.target.value)}
+                className="text-xs min-h-[60px] resize-none"
+                required
+              />
+              {!observation.trim() && (
+                <p className="text-xs text-destructive">Observações são obrigatórias</p>
+              )}
+            </div>
+
+            <div className="flex gap-1">
+              <Button
+                size="sm"
+                variant="default"
+                onClick={() => confirmChamado(chamadoNum, observation)}
+                disabled={!observation.trim()}
+                className="h-8 px-3 text-xs flex-1 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <Check className="h-3 w-3 mr-1" />
+                Confirmar
+              </Button>
+              <Button
+                size="sm"
+                variant="secondary"
+                onClick={() => escalateChamado(chamadoNum, 1)}
+                disabled={!observation.trim()}
+                className="h-8 px-3 text-xs flex-1 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <FastForward className="h-3 w-3 mr-1" />
+                Próxima Etapa
+              </Button>
+            </div>
+          </div>
+        </div>
+      );
+
+    case 'confirmed':
+      return (
+        <div className="text-center space-y-2">
+          <div className="flex gap-1 justify-center">
+            <Badge variant="default" className="bg-green-600 text-white">
+              <CheckCircle className="h-3 w-3 mr-1" />
+              Confirmado
+            </Badge>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => escalateChamado(chamadoNum, 1)}
+              className="h-6 px-2 text-xs"
+            >
+              <FastForward className="h-3 w-3 mr-1" />
+              Próxima
+            </Button>
+          </div>
+          {state.observations && (
+            <div className="text-xs text-muted-foreground p-2 bg-muted rounded text-left">
+              <strong>Observações:</strong>
+              <br />
+              {state.observations}
+            </div>
+          )}
+        </div>
+      );
+
+    case 'escalating':
+      return (
+        <div className="space-y-2">
+          {state.currentLevel > 0 && (
+            <div className="text-center">
+              <Badge variant="destructive" className="text-xs">
+                {levelNames[state.currentLevel as 1 | 2 | 3 | 4]} Escalação
+              </Badge>
+              {state.timerActive && (
+                <div className="flex items-center justify-center gap-1 mt-1">
+                  <Clock className="h-3 w-3 text-warning" />
+                  <span
+                    className="text-xs font-mono font-bold"
+                    style={{ color: state.timeRemaining <= 60 ? '#ef4444' : '#f59e0b' }}
+                  >
+                    {formatTime(state.timeRemaining)}
+                  </span>
+                  <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {!state.isAttended && (
+            <>
+              {showConfirmation ? (
+                <div className="space-y-2 p-2 border rounded bg-background">
+                  <div className="text-xs font-medium">
+                    Confirmar: {pendingStatus === 'attended' ? 'Atendida' : 'Não Atendida'}
+                  </div>
+
+                  <div className="space-y-1">
+                    <Label className="text-xs">
+                      Observações <span className="text-destructive">*</span>
+                    </Label>
+                    <Textarea
+                      placeholder="Observações obrigatórias..."
+                      value={pendingObs}
+                      onChange={(e) => setPendingObs(e.target.value)}
+                      className="text-xs min-h-[60px] resize-none"
+                      required
+                    />
+                    {!pendingObs.trim() && (
+                      <p className="text-xs text-destructive">Observações são obrigatórias</p>
+                    )}
+                  </div>
+
+                  <div className="flex gap-1">
+                    <Button
+                      size="sm"
+                      variant="default"
+                      onClick={() => confirmChamado(chamadoNum, pendingObs)}
+                      disabled={!pendingObs.trim()}
+                      className="h-6 px-2 text-xs flex-1"
+                    >
+                      <Check className="h-3 w-3 mr-1" />
+                      Confirmar
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => setPendingObs('')}
+                      className="h-6 px-2 text-xs flex-1"
+                    >
+                      <X className="h-3 w-3 mr-1" />
+                      Cancelar
+                    </Button>
+                  </div>
+                </div>
+              ) : (
+                <>
+                  <div className="flex gap-1">
+                    {state.currentLevel > 0 && (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => escalateChamado(chamadoNum, (state.currentLevel - 1) as 1 | 2 | 3 | 4)}
+                        className="h-6 px-2 text-xs flex-1"
+                      >
+                        <RotateCcw className="h-3 w-3 mr-1" />
+                        Voltar
+                      </Button>
+                    )}
+
+                    {state.currentLevel < 4 && (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => escalateChamado(chamadoNum, (state.currentLevel + 1) as 1 | 2 | 3 | 4)}
+                        className="h-6 px-2 text-xs flex-1"
+                      >
+                        Iniciar {levelNames[(state.currentLevel + 1) as 1 | 2 | 3 | 4]} Escalação
+                      </Button>
+                    )}
+                  </div>
+
+                  <Select value={pendingStatus} onValueChange={setPendingStatus}>
+                    <SelectTrigger className="h-6 text-xs">
+                      <SelectValue placeholder="Selecionar Status" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="attended">Atendida</SelectItem>
+                      <SelectItem value="not-attended">Não Atendida</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </>
+              )}
+            </>
+          )}
+        </div>
+      );
+
+    case 'completed':
+      return (
+        <div className="text-center space-y-2">
+          <div className="flex gap-1 justify-center">
+            <Badge variant="default" className="bg-green-600 text-white">
+              <CheckCircle className="h-3 w-3 mr-1" />
+              Finalizado
+            </Badge>
+          </div>
+          {state.observations && (
+            <div className="text-xs text-muted-foreground p-2 bg-muted rounded text-left">
+              <strong>Observações:</strong>
+              <br />
+              {state.observations}
+            </div>
+          )}
+        </div>
+      );
+
+    default:
+      return null;
+  }
+};
