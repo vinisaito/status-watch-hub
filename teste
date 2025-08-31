@@ -1,72 +1,68 @@
-// src/store/useChamadoStore.ts
-import { create } from "zustand";
-import { ws, WSMessage } from "../api/websocket";
+// src/api/websocket.ts
 
-export interface Chamado {
-  chamado: number;
-  status?: string;
-  operador?: string;
-  observacoes?: Record<string, string>;
-  timerStart?: number | null;
-  timerEnd?: number | null;
-  duration?: number | null;
+export interface WSMessage {
+  action: string;
+  [key: string]: any;
 }
 
-interface ChamadoState {
-  chamados: Record<number, Chamado>;
-  setChamado: (id: number, data: Partial<Chamado>) => void;
-  updateCampo: (id: number, campo: keyof Chamado, valor: any) => void;
-  init: (id: number, endpoint: string) => void;
-  sendUpdate: (id: number, campo: string, valor: any) => void;
-}
+type Listener = (msg: WSMessage) => void;
 
-export const useChamadoStore = create<ChamadoState>((set, get) => ({
-  chamados: {},
+class WebSocketService {
+  private socket: WebSocket | null = null;
+  private listeners: Listener[] = [];
+  private endpoint: string | null = null;
 
-  setChamado: (id, data) =>
-    set((state) => ({
-      chamados: { ...state.chamados, [id]: { ...state.chamados[id], ...data } },
-    })),
+  connect(endpoint: string) {
+    // reutiliza conexão aberta
+    if (this.socket && this.socket.readyState === WebSocket.OPEN) return;
 
-  updateCampo: (id, campo, valor) =>
-    set((state) => ({
-      chamados: {
-        ...state.chamados,
-        [id]: { ...state.chamados[id], [campo]: valor },
-      },
-    })),
+    this.endpoint = endpoint;
+    this.socket = new WebSocket(endpoint);
 
-  init: (id, endpoint) => {
-    ws.connect(endpoint);
-
-    ws.subscribe((msg: WSMessage) => {
-      if (msg.chamado !== id) return;
-
-      if (
-        ["currentState", "statusUpdated", "timerStarted", "operadorUpdated", "observacaoUpdated"].includes(
-          msg.action
-        )
-      ) {
-        get().setChamado(id, msg);
-      }
-    });
-
-    ws.send("getState", { chamado: id });
-  },
-
-  sendUpdate: (id, campo, valor) => {
-    const actionMap: Record<string, string> = {
-      status: "updateStatus",
-      operador: "updateOperador",
-      observacoes: "updateObservacao",
+    this.socket.onopen = () => {
+      console.log("[WS] conectado:", endpoint);
     };
 
-    const action = actionMap[campo];
-    if (!action) {
-      console.warn("[Store] Campo não mapeado para update:", campo);
+    this.socket.onmessage = (event: MessageEvent) => {
+      try {
+        const msg: WSMessage = JSON.parse(event.data);
+        this.listeners.forEach((cb) => cb(msg));
+      } catch (e) {
+        console.error("[WS] erro ao parsear mensagem:", e);
+      }
+    };
+
+    this.socket.onclose = () => {
+      console.warn("[WS] conexão fechada");
+      // reconexão simples
+      setTimeout(() => {
+        if (this.endpoint) this.connect(this.endpoint);
+      }, 3000);
+    };
+
+    this.socket.onerror = (err) => {
+      console.error("[WS] erro:", err);
+    };
+  }
+
+  subscribe(cb: Listener) {
+    this.listeners.push(cb);
+    return () => {
+      this.listeners = this.listeners.filter((l) => l !== cb);
+    };
+  }
+
+  send(action: string, payload: Record<string, any>) {
+    if (!this.socket || this.socket.readyState !== WebSocket.OPEN) {
+      console.warn("[WS] não conectado, não foi possível enviar:", action);
       return;
     }
+    this.socket.send(JSON.stringify({ action, ...payload }));
+  }
 
-    ws.send(action, { chamado: id, [campo]: valor });
-  },
-}));
+  isOpen() {
+    return this.socket?.readyState === WebSocket.OPEN;
+  }
+}
+
+export const ws = new WebSocketService();
