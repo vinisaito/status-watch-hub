@@ -1,284 +1,31 @@
-import json
-import boto3
-import os
-import decimal
-import uuid
-import sys
-from datetime import datetime
+socket.onmessage = (event) => {
+  if (!event.data) {
+    console.warn("[WS] ⚠️ Mensagem vazia ignorada");
+    return;
+  }
 
-# ---------- Config ----------
-dynamodb = boto3.resource("dynamodb", region_name="us-east-1")
-connections_table = dynamodb.Table(os.environ["CONNECTIONS_TABLE"])  # PK: connectionId
-chamados_table = dynamodb.Table(os.environ["CHAMADOS_TABLE"])        # PK: chamado (Number)
+  try {
+    const data = JSON.parse(event.data);
 
-DISABLE_APIGW_POST = os.environ.get("DISABLE_APIGW_POST", "0") == "1"
-
-# ---------- Utils ----------
-class DecimalEncoder(json.JSONEncoder):
-    def default(self, o):
-        if isinstance(o, decimal.Decimal):
-            return int(o) if o % 1 == 0 else float(o)
-        return super().default(o)
-
-def to_json(data):
-    return json.dumps(data, cls=DecimalEncoder)
-
-TRACE_ID = None
-def log(msg, **kwargs):
-    global TRACE_ID
-    if not TRACE_ID:
-        TRACE_ID = str(uuid.uuid4())[:8]
-    payload = {"trace": TRACE_ID, "msg": msg}
-    payload.update(kwargs)
-    print(json.dumps(payload, default=str))
-    sys.stdout.flush()
-
-def now_ts():
-    return int(datetime.utcnow().timestamp())
-
-def parse_body_safe(event):
-    """Faz o parse do body uma única vez e guarda em event['parsedBody']."""
-    if "parsedBody" in event:
-        return event["parsedBody"]
-
-    body_raw = event.get("body")
-    body = {}
-    if body_raw:
-        if isinstance(body_raw, str):
-            try:
-                body = json.loads(body_raw)
-            except Exception as e:
-                log("JSON parse error", error=str(e), bodyRaw=body_raw)
-                body = {}
-        elif isinstance(body_raw, dict):
-            body = body_raw
-        else:
-            try:
-                body = json.loads(body_raw.decode("utf-8"))
-            except Exception as e:
-                log("JSON parse error (bytes?)", error=str(e))
-                body = {}
-    event["parsedBody"] = body
-    return body
-
-def get_apigw_client(event):
-    rc = event["requestContext"]
-    endpoint_url = f"https://{rc['domainName']}/{rc['stage']}"
-    return boto3.client("apigatewaymanagementapi", endpoint_url=endpoint_url)
-
-def send_to_connection(apigw, connection_id, message: dict):
-    if DISABLE_APIGW_POST:
-        log("post_to_connection SKIPPED", connectionId=connection_id, action=message.get("action"))
-        return True
-    try:
-        apigw.post_to_connection(Data=to_json(message), ConnectionId=connection_id)
-        log("post_to_connection OK", connectionId=connection_id, action=message.get("action"))
-        return True
-    except apigw.exceptions.GoneException:
-        log("GoneException - removendo conexão", connectionId=connection_id)
-        try:
-            connections_table.delete_item(Key={"connectionId": connection_id})
-        except Exception as e:
-            log("erro ao remover conexão Gone", error=str(e))
-        return False
-    except Exception as e:
-        log("post_to_connection ERROR", connectionId=connection_id, error=str(e))
-        return False
-
-def broadcast(event, message):
-    if DISABLE_APIGW_POST:
-        log("broadcast SKIPPED", action=message.get("action"), chamado=message.get("chamado"))
-        return
-
-    apigw = get_apigw_client(event)
-    try:
-        scan = connections_table.scan()
-        connections = scan.get("Items", [])
-        log("broadcast scan OK", total=len(connections))
-    except Exception as e:
-        log("broadcast scan ERROR", error=str(e))
-        return
-
-    log("broadcast begin", total=len(connections), action=message.get("action"))
-    for conn in connections:
-        send_to_connection(apigw, conn["connectionId"], message)
-    log("broadcast end")
-
-# ---------- Handler ----------
-def lambda_handler(event, context):
-    global TRACE_ID
-    TRACE_ID = str(uuid.uuid4())[:8]
-
-    print("=== Lambda Iniciada ===", flush=True)
-    print(json.dumps(event, default=str), flush=True)
-
-    rc = event.get("requestContext")
-    if not isinstance(rc, dict):
-        log("invalid_event", eventKeys=list(event.keys()))
-        return {"statusCode": 400}
-
-    parse_body_safe(event)
-    return _dispatch(event)
-
-def _dispatch(event):
-    route = event["requestContext"]["routeKey"]
-    rc = event["requestContext"]
-    body = parse_body_safe(event)
-    log("invoke", routeKey=route, connectionId=rc.get("connectionId"), body=body)
-
-    try:
-        if route == "$connect":
-            return on_connect(event)
-        elif route == "$disconnect":
-            return on_disconnect(event)
-        elif route == "getState":
-            return get_state(event)
-        elif route == "startTimer":
-            return start_timer(event)
-        elif route == "updateOperador":
-            return update_operador(event)
-        elif route == "updateObservacao":
-            return update_observacao(event)
-        elif route == "updateStatusFinal":
-            return update_status_final(event)
-        elif route == "updateStatus":
-            return update_status(event)
-        elif route == "$default":
-            action = body.get("action")
-            log("$default received", action=action)
-            if action in ("getState", "startTimer", "updateOperador",
-                          "updateObservacao", "updateStatusFinal", "updateStatus"):
-                event2 = dict(event)
-                event2["requestContext"] = dict(event["requestContext"])
-                event2["requestContext"]["routeKey"] = action
-                return _dispatch(event2)
-            return {"statusCode": 200}
-        else:
-            log("rota inválida", route=route)
-            return {"statusCode": 400}
-    except Exception as e:
-        log("dispatch ERROR", error=str(e))
-        return {"statusCode": 500}
-
-# ---------- Rotas ----------
-def on_connect(event):
-    connection_id = event["requestContext"]["connectionId"]
-    connections_table.put_item(Item={"connectionId": connection_id, "connectedAt": now_ts()})
-    log("on_connect OK", connectionId=connection_id)
-    return {"statusCode": 200}
-
-def on_disconnect(event):
-    connection_id = event["requestContext"]["connectionId"]
-    try:
-        connections_table.delete_item(Key={"connectionId": connection_id})
-        log("on_disconnect OK", connectionId=connection_id)
-    except Exception as e:
-        log("on_disconnect ERROR", connectionId=connection_id, error=str(e))
-    return {"statusCode": 200}
-
-def start_timer(event):
-    body = parse_body_safe(event)
-    chamado = int(body["chamado"])
-    timer = body["timer"]
-
-    duration = 20*60 if timer == "primeiroAcionado" else 10*60
-    timer_start = now_ts()
-    timer_end = timer_start + duration
-
-    chamados_table.update_item(
-        Key={"chamado": chamado},
-        UpdateExpression=f"SET {timer} = :val",
-        ExpressionAttributeValues={
-            ":val": {
-                "timerStart": timer_start,
-                "timerEnd": timer_end,
-                "observacao": body.get("observacao", "")
-            }
-        }
-    )
-    resp = chamados_table.get_item(Key={"chamado": chamado})
-    item = resp.get("Item", {})
-
-    message = {
-        "action": "timerStarted",
-        "chamado": chamado,
-        "serverTime": now_ts(),
-        "duration": duration,
-        **item
+    if (!data || typeof data !== "object") {
+      console.warn("[WS] ⚠️ Payload não é um objeto:", event.data);
+      return;
     }
-    broadcast(event, message)
-    return {"statusCode": 200}
 
-def update_operador(event):
-    body = parse_body_safe(event)
-    chamado = int(body["chamado"])
-    operador = body["operador"]
+    if (!("chamado" in data)) {
+      console.warn("[WS] ⚠️ Mensagem recebida sem 'chamado':", data);
+      return;
+    }
 
-    chamados_table.update_item(
-        Key={"chamado": chamado},
-        UpdateExpression="SET operador = :o",
-        ExpressionAttributeValues={":o": operador},
-    )
-    message = {"action": "operadorUpdated", "chamado": chamado, "operador": operador}
-    broadcast(event, message)
-    return {"statusCode": 200}
+    // 👉 só aqui processa de fato
+    handleChamadoUpdate(data);
 
-def update_observacao(event):
-    body = parse_body_safe(event)
-    chamado = int(body["chamado"])
-    timer = body["timer"]
-    observacao = body["observacao"]
-
-    chamados_table.update_item(
-        Key={"chamado": chamado},
-        UpdateExpression=f"SET {timer}.observacao = :obs",
-        ExpressionAttributeValues={":obs": observacao},
-    )
-    message = {"action": "observacaoUpdated", "chamado": chamado, "timer": timer, "observacao": observacao}
-    broadcast(event, message)
-    return {"statusCode": 200}
-
-def update_status_final(event):
-    body = parse_body_safe(event)
-    chamado = int(body["chamado"])
-    status_final = body["statusFinal"]
-
-    chamados_table.update_item(
-        Key={"chamado": chamado},
-        UpdateExpression="SET statusFinal = :s",
-        ExpressionAttributeValues={":s": status_final},
-    )
-    message = {"action": "statusFinalUpdated", "chamado": chamado, "statusFinal": status_final}
-    broadcast(event, message)
-    return {"statusCode": 200}
-
-def update_status(event):
-    body = parse_body_safe(event)
-    chamado = int(body["chamado"])
-    status = str(body["status"])
-
-    chamados_table.update_item(
-        Key={"chamado": chamado},
-        UpdateExpression="SET #s = :s",
-        ExpressionAttributeNames={"#s": "status"},
-        ExpressionAttributeValues={":s": status},
-    )
-    message = {"action": "statusUpdated", "chamado": chamado, "status": status}
-    broadcast(event, message)
-    return {"statusCode": 200}
-
-def get_state(event):
-    body = parse_body_safe(event)
-    chamado = int(body["chamado"])
-    connection_id = event["requestContext"]["connectionId"]
-
-    resp = chamados_table.get_item(Key={"chamado": chamado})
-    item = resp.get("Item", {})
-
-    message = {"action": "currentState", "chamado": chamado, "serverTime": now_ts(), **item}
-
-    if not DISABLE_APIGW_POST:
-        apigw = get_apigw_client(event)
-        send_to_connection(apigw, connection_id, message)
-
-    return {"statusCode": 200}
+  } catch (err) {
+    console.error(
+      "[WS] ❌ Erro ao processar mensagem:",
+      err,
+      "RAW:",
+      event.data
+    );
+  }
+};
