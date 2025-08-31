@@ -7,3 +7,11 @@ error
 [[Prototype]]
 : 
 Object
+
+
+
+{
+    "trace": "4f03f7e6",
+    "msg": "dispatch ERROR",
+    "error": "'str' object has no attribute 'get'"
+}
