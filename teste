@@ -35,6 +35,13 @@ interface AlertData {
   chat: boolean;
 }
 
+interface ObservacaoData {
+  chamado: string;
+  observacao: string;
+  status: 'acionado' | 'finalizado' | 'pendente';
+  operador: string;
+}
+
 interface ActionTableProps {
   alertData: AlertData[];
   onUpdateAcknowledgment: (alertId: string, acknowledged: boolean) => void;
@@ -47,6 +54,7 @@ type SortDirection = 'asc' | 'desc' | null;
 export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: ActionTableProps) => {
   const [selectedIncident, setSelectedIncident] = useState<AlertData | null>(null);
   const [crisisDialogOpen, setCrisisDialogOpen] = useState(false);
+  const [chamadoModalOpen, setChamadoModalOpen] = useState(false);
   const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 5;
@@ -57,6 +65,265 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
 
   // Estado que guarda os numeros chamados já acionados (string)
   const [acionadosSet, setAcionadosSet] = useState<Set<string>>(new Set());
+
+  // Estados para observações e operadores
+  const [observacoes, setObservacoes] = useState<Map<string, ObservacaoData>>(new Map());
+  const [editingObservacao, setEditingObservacao] = useState<string | null>(null);
+  const [tempObservacao, setTempObservacao] = useState('');
+  const [tempOperador, setTempOperador] = useState('');
+
+  // Lista de operadores disponíveis
+  const operadores = [
+    'João Silva',
+    'Maria Santos', 
+    'Pedro Oliveira',
+    'Ana Costa',
+    'Carlos Ferreira',
+    'Lucia Mendes'
+  ];
+
+  // Função para salvar observação na API
+  const saveObservacaoToAPI = useCallback(async (data: ObservacaoData) => {
+    try {
+      const response = await fetch('https://f6ffk8e9fe.execute-api.us-east-1.amazonaws.com/prod/obs', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(data),
+      });
+
+      if (!response.ok) {
+        throw new Error(`Erro na API: ${response.status}`);
+      }
+
+      return await response.json();
+    } catch (error) {
+      console.error('Erro ao salvar observação:', error);
+      toast({
+        title: "Erro ao salvar observação",
+        description: "Não foi possível salvar na API. Tente novamente.",
+        variant: "destructive",
+      });
+      throw error;
+    }
+  }, []);
+
+  // Função para carregar observações da API
+  const loadObservacoesFromAPI = useCallback(async () => {
+    try {
+      const response = await fetch('https://f6ffk8e9fe.execute-api.us-east-1.amazonaws.com/prod/obs', {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      });
+
+      if (!response.ok) {
+        throw new Error(`Erro na API: ${response.status}`);
+      }
+
+      const data = await response.json();
+      const observacoesMap = new Map();
+      
+      if (Array.isArray(data)) {
+        data.forEach((obs: ObservacaoData) => {
+          observacoesMap.set(obs.chamado, obs);
+        });
+      }
+
+      setObservacoes(observacoesMap);
+    } catch (error) {
+      console.error('Erro ao carregar observações:', error);
+      // Não mostra toast para não poluir a UI em caso de API indisponível
+    }
+  }, []);
+
+  // Carregar observações ao montar o componente
+  useEffect(() => {
+    loadObservacoesFromAPI();
+  }, [loadObservacoesFromAPI]);
+
+  // Função para iniciar edição de observação
+  const handleEditObservacao = (chamado: string) => {
+    const existingObs = observacoes.get(chamado);
+    if (existingObs) {
+      setTempOperador(existingObs.operador);
+      setTempObservacao(existingObs.observacao);
+    } else {
+      setTempOperador('');
+      setTempObservacao('');
+    }
+    setEditingObservacao(chamado);
+  };
+
+  // Função para cancelar edição
+  const handleCancelEdit = () => {
+    setEditingObservacao(null);
+    setTempOperador('');
+    setTempObservacao('');
+  };
+
+  // Função para salvar observação
+  const handleSaveObservacao = async (chamado: string) => {
+    if (!tempOperador) {
+      toast({
+        title: "Operador obrigatório",
+        description: "Selecione um operador antes de preencher a observação.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    if (!tempObservacao.trim()) {
+      toast({
+        title: "Observação obrigatória",
+        description: "Preencha a observação antes de salvar.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    const newObservacao: ObservacaoData = {
+      chamado,
+      observacao: tempObservacao.trim(),
+      status: 'acionado', // Pode ser 'acionado' ou 'finalizado' conforme regra de negócio
+      operador: tempOperador,
+    };
+
+    try {
+      await saveObservacaoToAPI(newObservacao);
+      
+      setObservacoes(prev => new Map(prev.set(chamado, newObservacao)));
+      setEditingObservacao(null);
+      setTempOperador('');
+      setTempObservacao('');
+
+      toast({
+        title: "Observação salva",
+        description: "Observação e operador salvos com sucesso.",
+      });
+    } catch (error) {
+      // Error handling já está na função saveObservacaoToAPI
+    }
+  };
+
+  // Função para renderizar coluna de operador
+  const renderOperadorColumn = (alert: AlertData) => {
+    const observacao = observacoes.get(alert.chamado);
+    const isEditing = editingObservacao === alert.chamado;
+
+    if (isEditing) {
+      return (
+        <div className="space-y-2">
+          <Select value={tempOperador} onValueChange={setTempOperador}>
+            <SelectTrigger className="w-full">
+              <SelectValue placeholder="Selecione operador" />
+            </SelectTrigger>
+            <SelectContent className="bg-popover border-border">
+              {operadores.map((op) => (
+                <SelectItem key={op} value={op}>
+                  {op}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+      );
+    }
+
+    return (
+      <div className="text-sm">
+        {observacao?.operador || (
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => handleEditObservacao(alert.chamado)}
+            className="text-xs h-7"
+          >
+            Selecionar
+          </Button>
+        )}
+      </div>
+    );
+  };
+
+  // Função para renderizar coluna de confirmação/observação
+  const renderConfirmacaoColumn = (alert: AlertData) => {
+    const observacao = observacoes.get(alert.chamado);
+    const isEditing = editingObservacao === alert.chamado;
+
+    if (isEditing) {
+      return (
+        <div className="space-y-2">
+          <Textarea
+            placeholder={!tempOperador ? "Selecione um operador primeiro" : "Digite a observação..."}
+            value={tempObservacao}
+            onChange={(e) => setTempObservacao(e.target.value)}
+            disabled={!tempOperador}
+            className="min-h-[60px] text-xs"
+          />
+          <div className="flex gap-1">
+            <Button
+              variant="default"
+              size="sm"
+              onClick={() => handleSaveObservacao(alert.chamado)}
+              disabled={!tempOperador || !tempObservacao.trim()}
+              className="h-7 px-2 text-xs"
+            >
+              <Check className="h-3 w-3 mr-1" />
+              Salvar
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleCancelEdit}
+              className="h-7 px-2 text-xs"
+            >
+              <X className="h-3 w-3 mr-1" />
+              Cancelar
+            </Button>
+          </div>
+        </div>
+      );
+    }
+
+    if (observacao) {
+      const statusBadgeClass = observacao.status === 'acionado' 
+        ? 'bg-success text-success-foreground'
+        : 'bg-primary text-primary-foreground';
+
+      return (
+        <div className="space-y-2">
+          <Badge className={`${statusBadgeClass} text-xs`}>
+            {observacao.status === 'acionado' ? 'ACIONADO' : 'FINALIZADO'}
+          </Badge>
+          <div className="text-xs text-muted-foreground max-w-[150px] truncate">
+            {observacao.observacao}
+          </div>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => handleEditObservacao(alert.chamado)}
+            className="h-6 px-2 text-xs opacity-50 hover:opacity-100"
+          >
+            Editar
+          </Button>
+        </div>
+      );
+    }
+
+    return (
+      <Button
+        variant="outline"
+        size="sm"
+        onClick={() => handleEditObservacao(alert.chamado)}
+        className="text-xs h-7"
+      >
+        Adicionar
+      </Button>
+    );
+  };
 
   // Função para salvar dados na API Gateway
   const saveToAPI = useCallback(async (alertId: string, data: any) => {
@@ -89,30 +356,6 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
       throw error;
     }
   }, []);
-
-  // Timer para escalações
-
-
-
-  // Função para iniciar escalação - MODIFICADA para integrar com API
-
-
-  // Função para voltar escalação
-  
-  // Função para avançar escalação manualmente - MODIFICADA para integrar com API
-  
-  // Função para preparar mudança de status com confirmação
-
-  // Função para confirmar mudança de status - MODIFICADA para integrar com API
-
-  // Função para cancelar mudança de status
-  
-
-  // Função para marcar como atendido
-  
-
-  // Função para avançar para próxima escalação quando "Não Atendida"
-  
 
   // Função para formatar tempo
   const formatTime = (seconds: number) => {
@@ -309,7 +552,6 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
     fetchAcionados();
   }, []);
 
-
   const handleAcknowledgment = async (alert: AlertData) => {
     try {
       const response = await fetch(
@@ -467,7 +709,6 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
       : 'bg-warning text-warning-foreground';
   };
 
-  const [chamadoModalOpen, setChamadoModalOpen] = useState(false);
   const handleChamadoClick = (alert: AlertData) => {
     setSelectedIncident(alert);
     setChamadoModalOpen(true);
@@ -484,12 +725,10 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
   const getStatusText = (chat: boolean) => {
     return chat ? 'ACIONADO VIA CHAT' : 'NÃO ACIONADO VIA CHAT';
   };
+  
   const handlePageChange = (page: number) => {
     setCurrentPage(page);
   };
-
-  // Renderiza o componente de confirmação/escalaçã
-
 
   return (
     <TooltipProvider>
@@ -511,6 +750,8 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
               sortedAndPaginatedData.map((alert) => {
                 const isChat = acionadosSet.has(alert.chamado.toString());
                 const isExpanded = expandedRows.has(alert.id);
+                const observacao = observacoes.get(alert.chamado);
+                
                 return (
                   <Card key={alert.id} className="bg-secondary border-border w-full">
                     <CardContent className="p-3 sm:p-4">
@@ -557,6 +798,20 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
                           {formatDate(alert.abertura_chamado)}
                         </div>
 
+                        {/* Operador e Observação */}
+                        {observacao && (
+                          <div className="space-y-2 pt-2 border-t border-border/50">
+                            <div className="text-xs">
+                              <span className="font-medium">Operador:</span> {observacao.operador}
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <Badge className={observacao.status === 'acionado' ? 'bg-success text-success-foreground' : 'bg-primary text-primary-foreground'}>
+                                {observacao.status === 'acionado' ? 'ACIONADO' : 'FINALIZADO'}
+                              </Badge>
+                            </div>
+                          </div>
+                        )}
+
                         {/* Botões */}
                         <div className="flex items-center justify-between pt-3 gap-2">
                           <div className="flex items-center gap-2">
@@ -571,6 +826,15 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
                                 <span className="hidden sm:inline">Crise</span>
                               </Button>
                             )}
+                            
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => handleEditObservacao(alert.chamado)}
+                              className="h-7 px-2 text-xs"
+                            >
+                              {observacao ? 'Editar' : 'Obs'}
+                            </Button>
                           </div>
 
                           <Button
@@ -636,7 +900,7 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
           {/* Layout para Desktop */}
           <div className="hidden lg:block">
             <div className="w-full overflow-x-auto">
-              <div className="min-w-[1000px]">
+              <div className="min-w-[1200px]">
                 <Table>
                   <TableHeader>
                     <TableRow className="border-border hover:bg-accent">
@@ -710,21 +974,21 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
                           {getSortIcon('severidade_chamado')}
                         </Button>
                       </TableHead>
-
                       <TableHead className="text-muted-foreground min-w-[70px]">Chat</TableHead>
-                      <TableHead className="text-muted-foreground min-w-[140px]">Observação</TableHead>
+                      <TableHead className="text-muted-foreground min-w-[120px]">Operador</TableHead>
+                      <TableHead className="text-muted-foreground min-w-[160px]">Confirmação</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {loading ? (
                       <TableRow>
-                        <TableCell colSpan={10} className="text-center py-8">
+                        <TableCell colSpan={11} className="text-center py-8">
                           Carregando dados...
                         </TableCell>
                       </TableRow>
                     ) : sortedAndPaginatedData.length === 0 ? (
                       <TableRow>
-                        <TableCell colSpan={10} className="text-center py-8 text-muted-foreground">
+                        <TableCell colSpan={11} className="text-center py-8 text-muted-foreground">
                           Nenhum dado disponível
                         </TableCell>
                       </TableRow>
@@ -810,6 +1074,12 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
                                   <AlertTriangle className="h-3 w-3" />
                                 )}
                               </Button>
+                            </TableCell>
+                            <TableCell className="min-w-[120px]">
+                              {renderOperadorColumn(alert)}
+                            </TableCell>
+                            <TableCell className="min-w-[160px]">
+                              {renderConfirmacaoColumn(alert)}
                             </TableCell>
                           </TableRow>
                         );
