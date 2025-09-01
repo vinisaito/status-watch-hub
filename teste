@@ -1,71 +1,523 @@
-2025-09-01T13:08:10.466Z
-(QOUdMFCzIAMEthA=) WebSocket API [rsgjd6wsza] received message from client [Connection Id: QOUKQfzaoAMCIHA=].
+import json
+import boto3
+import os
+import decimal
+import uuid
+import sys
+from datetime import datetime
 
-(QOUdMFCzIAMEthA=) WebSocket API [rsgjd6wsza] received message from client [Connection Id: QOUKQfzaoAMCIHA=].
-2025-09-01T13:08:10.466Z
-(QOUdMFCzIAMEthA=) WebSocket API [rsgjd6wsza] received message from client [QOUKQfzaoAMCIHA=]. Message: [
-{
-    "requestContext": {
-        "routeKey": "updateObservacao",
-        "messageId": "QOUdMcmFoAMCIHA=",
-        "eventType": "MESSAGE",
-        "extendedRequestId": "QOUdMFCzIAMEthA=",
-        "requestTime": "01/Sep/2025:13:08:10 +0000",
-        "messageDirection": "IN",
-        "stage": "dev",
-        "connectedAt": 1756731969206,
-        "requestTimeEpoch": 1756732090463,
-        "identity": {
-            "sourceIp": "161.69.63.128"
-        },
-        "requestId": "QOUdMFCzIAMEthA=",
-        "domainName": "rsgjd6wsza.execute-api.us-east-1.amazonaws.com",
-        "connectionId": "QOUKQfzaoAMCIHA=",
-        "apiId": "rsgjd6wsza"
-    },
-    "body": "{\"action\":\"updateObservacao\",\"chamado\":3,\"level\":1,\"observacao\":\"teste via wscat\"}",
-    "isBase64Encoded": false
-}
-].
+# ===========================
+# Config
+# ===========================
+AWS_REGION = os.environ.get("AWS_REGION", "us-east-1")
+dynamodb = boto3.resource("dynamodb", region_name=AWS_REGION)
 
-(QOUdMFCzIAMEthA=) WebSocket API [rsgjd6wsza] received message from client [QOUKQfzaoAMCIHA=]. Message: [{"requestContext":{"routeKey":"updateObservacao","messageId":"QOUdMcmFoAMCIHA=","eventType":"MESSAGE","extendedRequestId":"QOUdMFCzIAMEthA=","requestTime":"01/Sep/2025:13:08:10 +0000","messageDirection":"IN","stage":"dev","connectedAt":1756731969206,"requestTimeEpoch":1756732090463,"identity":{"sourceIp":"161.69.63.128"},"requestId":"QOUdMFCzIAMEthA=","domainName":"rsgjd6wsza.execute-api.us-east-1.amazonaws.com","connectionId":"QOUKQfzaoAMCIHA=","apiId":"rsgjd6wsza"},"body":"{\"action\":\"updateObservacao\",\"chamado\":3,\"level\":1,\"observacao\":\"teste via wscat\"}","isBase64Encoded":false}].
-2025-09-01T13:08:10.466Z
-(QOUdMFCzIAMEthA=) Endpoint request URI: https://lambda.us-east-1.amazonaws.com/2015-03-31/functions/arn:aws:lambda:us-east-1:368696837445:function:PainelMonitoracao_Teste/invocations
+connections_table = dynamodb.Table(os.environ["CONNECTIONS_TABLE"])  # PK: connectionId (String)
+chamados_table     = dynamodb.Table(os.environ["CHAMADOS_TABLE"])    # PK: chamado (Number)
 
-(QOUdMFCzIAMEthA=) Endpoint request URI: https://lambda.us-east-1.amazonaws.com/2015-03-31/functions/arn:aws:lambda:us-east-1:368696837445:function:PainelMonitoracao_Teste/invocations
-2025-09-01T13:08:10.466Z
-(QOUdMFCzIAMEthA=) Endpoint request headers: {X-Amz-Date=20250901T130810Z, x-amzn-apigateway-api-id=rsgjd6wsza, Accept=application/json, User-Agent=AmazonAPIGateway_rsgjd6wsza, Host=lambda.us-east-1.amazonaws.com, X-Amz-Content-Sha256=3c9de7d8c1e355958777d48f15066f7f2b52218f22e1af10a6a9b3a35f6f157a, X-Amzn-Trace-Id=Root=1-68b59aba-e04ee790d726f9c9fb0f1b47, x-amzn-lambda-integration-tag=QOUdMFCzIAMEthA=, Authorization=*********************************************************************************************************************************************************************************************************************************************************************************************************************************************82d62f, X-Amz-Source-Arn=arn:aws:execute-api:us-east-1:368696837445:rsgjd6wsza/dev/updateObservacao, X-Amz-Security-Token=IQoJb3JpZ2luX2VjEK3//////////wEaCXVzLWVhc3QtMSJIMEYCIQDhILEubxCbdgIuOtm6443g4Gd2af0FBdtnnlxfcj8CHQIhAMNaMBlx9M9ofzXglZC6x/27x0ZawlZ7kXVrLitdmhVSKrIFCBUQABoMMzkyMjIwNTc [TRUNCATED]
+# Controles de debug/execução
+DISABLE_APIGW_POST  = os.environ.get("DISABLE_APIGW_POST", "0") == "1"  # não faz post_to_connection/broadcast
+VERBOSE_DDB_CHECK   = os.environ.get("VERBOSE_DDB_CHECK", "0") == "1"    # faz get depois do put pra validar
 
-(QOUdMFCzIAMEthA=) Endpoint request headers: {X-Amz-Date=20250901T130810Z, x-amzn-apigateway-api-id=rsgjd6wsza, Accept=application/json, User-Agent=AmazonAPIGateway_rsgjd6wsza, Host=lambda.us-east-1.amazonaws.com, X-Amz-Content-Sha256=3c9de7d8c1e355958777d48f15066f7f2b52218f22e1af10a6a9b3a35f6f157a, X-Amzn-Trace-Id=Root=1-68b59aba-e04ee790d726f9c9fb0f1b47, x-amzn-lambda-integration-tag=QOUdMFCzIAMEthA=, Authorization=*********************************************************************************************************************************************************************************************************************************************************************************************************************************************82d62f, X-Amz-Source-Arn=arn:aws:execute-api:us-east-1:368696837445:rsgjd6wsza/dev/updateObservacao, X-Amz-Security-Token=IQoJb3JpZ2luX2VjEK3//////////wEaCXVzLWVhc3QtMSJIMEYCIQDhILEubxCbdgIuOtm6443g4Gd2af0FBdtnnlxfcj8CHQIhAMNaMBlx9M9ofzXglZC6x/27x0ZawlZ7kXVrLitdmhVSKrIFCBUQABoMMzkyMjIwNTc [TRUNCATED]
-2025-09-01T13:08:10.466Z
-(QOUdMFCzIAMEthA=) Endpoint request body after transformations: 
-{
-    "requestContext": {
-        "routeKey": "updateObservacao",
-        "messageId": "QOUdMcmFoAMCIHA=",
-        "eventType": "MESSAGE",
-        "extendedRequestId": "QOUdMFCzIAMEthA=",
-        "requestTime": "01/Sep/2025:13:08:10 +0000",
-        "messageDirection": "IN",
-        "stage": "dev",
-        "connectedAt": 1756731969206,
-        "requestTimeEpoch": 1756732090463,
-        "identity": {
-            "sourceIp": "161.69.63.128"
-        },
-        "requestId": "QOUdMFCzIAMEthA=",
-        "domainName": "rsgjd6wsza.execute-api.us-east-1.amazonaws.com",
-        "connectionId": "QOUKQfzaoAMCIHA=",
-        "apiId": "rsgjd6wsza"
-    },
-    "body": "{\"action\":\"updateObservacao\",\"chamado\":3,\"level\":1,\"observacao\":\"teste via wscat\"}",
-    "isBase64Encoded": false
-}
+# ===========================
+# Utils / Infra
+# ===========================
+class DecimalEncoder(json.JSONEncoder):
+    def default(self, o):
+        if isinstance(o, decimal.Decimal):
+            return int(o) if o % 1 == 0 else float(o)
+        return super().default(o)
 
-(QOUdMFCzIAMEthA=) Endpoint request body after transformations: {"requestContext":{"routeKey":"updateObservacao","messageId":"QOUdMcmFoAMCIHA=","eventType":"MESSAGE","extendedRequestId":"QOUdMFCzIAMEthA=","requestTime":"01/Sep/2025:13:08:10 +0000","messageDirection":"IN","stage":"dev","connectedAt":1756731969206,"requestTimeEpoch":1756732090463,"identity":{"sourceIp":"161.69.63.128"},"requestId":"QOUdMFCzIAMEthA=","domainName":"rsgjd6wsza.execute-api.us-east-1.amazonaws.com","connectionId":"QOUKQfzaoAMCIHA=","apiId":"rsgjd6wsza"},"body":"{\"action\":\"updateObservacao\",\"chamado\":3,\"level\":1,\"observacao\":\"teste via wscat\"}","isBase64Encoded":false}
-2025-09-01T13:08:10.466Z
-(QOUdMFCzIAMEthA=) Sending request to https://lambda.us-east-1.amazonaws.com/2015-03-31/functions/arn:aws:lambda:us-east-1:368696837445:function:PainelMonitoracao_Teste/invocations
+def to_json(data):
+    return json.dumps(data, cls=DecimalEncoder, ensure_ascii=False)
 
-(QOUdMFCzIAMEthA=) Sending request to https://lambda.us-east-1.amazonaws.com/2015-03-31/functions/arn:aws:lambda:us-east-1:368696837445:function:PainelMonitoracao_Teste/invocations
-2025-09-01T13:08:10.488Z
-(QOUdMFCzIAMEthA=) Received response. Status: 200, Integration latency: 22 ms
+TRACE_ID = None
+def log(msg, **kwargs):
+    """Log estruturado com trace id e flush imediato."""
+    global TRACE_ID
+    if not TRACE_ID:
+        TRACE_ID = str(uuid.uuid4())[:8]
+    payload = {"trace": TRACE_ID, "msg": msg}
+    payload.update(kwargs)
+    print(json.dumps(payload, default=str))
+    sys.stdout.flush()
+
+def now_ts():
+    return int(datetime.utcnow().timestamp())
+
+def json_response(status: int, body_obj: dict):
+    """Garante sempre JSON no body HTTP (Gateway -> cliente)."""
+    return {
+        "statusCode": status,
+        "headers": {"Content-Type": "application/json"},
+        "body": to_json(body_obj),
+    }
+
+def parse_body_safe(event):
+    """
+    Faz o parse do body UMA vez e guarda em event['parsedBody'].
+    Aceita:
+      - dict
+      - bytes/bytearray  (utf-8 json)
+      - string JSON para dict
+      - string JSON para string (ex.: "\"getState\"" -> {"action": "getState"})
+      - string crua -> interpreta como {"action": "<string>"}
+    """
+    if "parsedBody" in event:
+        return event["parsedBody"]
+
+    raw = event.get("body")
+    body = {}
+    if raw is None:
+        body = {}
+    elif isinstance(raw, dict):
+        body = raw
+    elif isinstance(raw, (bytes, bytearray)):
+        try:
+            body = json.loads(raw.decode("utf-8"))
+        except Exception as e:
+            log("JSON parse error (bytes?)", error=str(e))
+            body = {}
+    elif isinstance(raw, str):
+        try:
+            parsed = json.loads(raw)
+            if isinstance(parsed, str):
+                body = {"action": parsed}
+            elif isinstance(parsed, dict):
+                body = parsed
+            else:
+                body = {}
+        except Exception:
+            body = {"action": raw.strip()}
+    else:
+        body = {}
+
+    event["parsedBody"] = body
+    return body
+
+def require_int(v, field="value"):
+    try:
+        return int(v)
+    except Exception:
+        raise ValueError(f"'{field}' deve ser inteiro. Recebido: {v!r}")
+
+def get_apigw_client(event):
+    rc = event["requestContext"]
+    endpoint_url = f"https://{rc['domainName']}/{rc['stage']}"
+    log("get_apigw_client", endpoint_url=endpoint_url)
+    return boto3.client("apigatewaymanagementapi", endpoint_url=endpoint_url)
+
+def send_to_connection(apigw, connection_id: str, message: dict):
+    """Envia JSON para UMA conexão. Remove conexões mortas."""
+    if DISABLE_APIGW_POST:
+        log("post_to_connection SKIPPED (DISABLE_APIGW_POST=1)",
+            connectionId=connection_id, action=message.get("action"))
+        return True
+    try:
+        apigw.post_to_connection(Data=to_json(message), ConnectionId=connection_id)
+        log("post_to_connection OK", connectionId=connection_id, action=message.get("action"))
+        return True
+    except apigw.exceptions.GoneException:
+        log("GoneException - removendo conexão", connectionId=connection_id)
+        try:
+            connections_table.delete_item(Key={"connectionId": connection_id})
+        except Exception as e:
+            log("erro ao remover conexão Gone", error=str(e))
+        return False
+    except Exception as e:
+        log("post_to_connection ERROR", connectionId=connection_id, error=str(e))
+        return False
+
+def broadcast(event, message: dict):
+    """Envia a mesma mensagem para TODAS as conexões ativas."""
+    if DISABLE_APIGW_POST:
+        log("broadcast SKIPPED (DISABLE_APIGW_POST=1)",
+            action=message.get("action"), chamado=message.get("chamado"), message=message)
+        return json_response(200, {"ok": True, "skipped": True})
+
+    apigw = get_apigw_client(event)
+    try:
+        scan = connections_table.scan()
+        conns = scan.get("Items", [])
+        log("broadcast scan OK", total=len(conns))
+    except Exception as e:
+        log("broadcast scan ERROR", error=str(e))
+        return json_response(500, {"error": "erro ao listar conexões"})
+
+    log("broadcast begin",
+        total=len(conns), action=message.get("action"), chamado=message.get("chamado"))
+    sent = 0
+    for c in conns:
+        if send_to_connection(apigw, c["connectionId"], message):
+            sent += 1
+    log("broadcast end", sent=sent, total=len(conns))
+    return json_response(200, {"ok": True, "sent": sent, "total": len(conns)})
+
+# ===========================
+# Persistência de Estado (DDB)
+# ===========================
+def ddb_get_item(chamado: int) -> dict:
+    try:
+        log("DDB get_item BEGIN", table=chamados_table.name, key={"chamado": chamado})
+        resp = chamados_table.get_item(Key={"chamado": chamado})
+        item = resp.get("Item", {})
+        log("DDB get_item END",
+            found=bool(item),
+            http=resp.get("ResponseMetadata", {}).get("HTTPStatusCode"),
+            reqId=resp.get("ResponseMetadata", {}).get("RequestId"))
+        return item or {}
+    except Exception as e:
+        log("DDB get_item ERROR", error=str(e), chamado=chamado)
+        return {}
+
+def ddb_put_item(item: dict) -> bool:
+    try:
+        log("DDB put_item BEGIN", table=chamados_table.name, item=item)
+        resp = chamados_table.put_item(Item=item)
+        log("DDB put_item END",
+            http=resp.get("ResponseMetadata", {}).get("HTTPStatusCode"),
+            reqId=resp.get("ResponseMetadata", {}).get("RequestId"))
+        if VERBOSE_DDB_CHECK:
+            check = chamados_table.get_item(Key={"chamado": item["chamado"]})
+            log("DDB put_item CHECK", found=bool(check.get("Item")), item=check.get("Item"))
+        return True
+    except Exception as e:
+        log("DDB put_item ERROR", error=str(e))
+        return False
+
+def ensure_initial_state(chamado: int) -> dict:
+    st = ddb_get_item(chamado)
+    if not st:
+        # estado inicial só na memória; persistimos quando realmente houver ação
+        st = {
+            "chamado": chamado,            # PK (Number)
+            "nivelAtual": 0,               # 0 = primeiro acionamento; 1..4 = escalas
+            "statusGeral": "pendente",     # pendente|em_andamento|concluido
+            "statusFinal": None,           # attended|not-attended|None
+            "operador": None,              # string
+            "niveis": {},                  # "0".."4" -> dados por nível
+            "ultimoUpdate": now_ts(),
+        }
+    return st
+
+def resolve_level_from_body(body: dict):
+    """
+    Aceita:
+      - body["nivel"] (int)
+      - body["timer"] em {"primeiroAcionado", "escalacao1",..,"escalacao4"}
+    Retorna int 0..4 ou None.
+    """
+    if "nivel" in body:
+        try:
+            return int(body["nivel"])
+        except Exception:
+            return None
+    t = body.get("timer")
+    if t == "primeiroAcionado":
+        return 0
+    if isinstance(t, str) and t.startswith("escalacao"):
+        try:
+            n = int(t.replace("escalacao", ""))
+            if 1 <= n <= 4:
+                return n
+        except Exception:
+            pass
+    return None
+
+def level_default_duration(nivel: int) -> int:
+    return 20 * 60 if nivel == 0 else 10 * 60
+
+# ===========================
+# Handler / Dispatch
+# ===========================
+def lambda_handler(event, context):
+    global TRACE_ID
+    TRACE_ID = str(uuid.uuid4())[:8]
+
+    print("=== Lambda Iniciada ===", flush=True)
+    print(json.dumps(event, default=str), flush=True)
+
+    rc = event.get("requestContext")
+    if not isinstance(rc, dict):
+        log("invalid_test_event_missing_requestContext", eventKeys=list(event.keys()))
+        # modo teste: aceita { route, body, connectionId? }
+        route = event.get("route")
+        if route:
+            log("direct_invoke_route_detected", route=route)
+            fake = {
+                "requestContext": {
+                    "routeKey": route,
+                    "connectionId": event.get("connectionId", "direct-invoke"),
+                    "domainName": event.get("domainName", "example.execute-api.amazonaws.com"),
+                    "stage": event.get("stage", "dev"),
+                },
+                "body": event.get("body"),
+            }
+            parse_body_safe(fake)
+            return _dispatch(fake)
+        return json_response(400, {"error": "Evento inválido: faltou requestContext"})
+
+    parse_body_safe(event)
+    return _dispatch(event)
+
+def _dispatch(event):
+    route = event["requestContext"]["routeKey"]
+    rc    = event["requestContext"]
+    body  = parse_body_safe(event)
+    log("invoke", routeKey=route, connectionId=rc.get("connectionId"), body=body)
+
+    try:
+        # Handshake
+        if route == "$connect":
+            return on_connect(event)
+        if route == "$disconnect":
+            return on_disconnect(event)
+
+        # Rotas explícitas
+        if route == "getState":
+            return get_state(event)
+        if route == "startTimer":
+            return start_timer(event)
+        if route == "updateObservacao":
+            return update_observacao(event)
+        if route == "updateOperador":
+            return update_operador(event)
+        if route == "updateStatusFinal":
+            return update_status_final(event)
+
+        # Roteamento por $default usando body.action
+        if route == "$default":
+            action = body.get("action")
+            log("$default received", action=action)
+
+            # Mapa (permite trabalhar só com $default se quiser)
+            known = {
+                "getState": "getState",
+                "startTimer": "startTimer",
+                "updateObservacao": "updateObservacao",
+                "updateOperador": "updateOperador",
+                "updateStatusFinal": "updateStatusFinal",
+            }
+            if action in known:
+                e2 = dict(event)
+                e2["requestContext"] = dict(event["requestContext"])
+                e2["requestContext"]["routeKey"] = known[action]
+                return _dispatch(e2)
+
+            # Se não reconhecido, retorna erro claro (evita confusão com "noop")
+            log("acao_desconhecida_no_default", action=action)
+            return json_response(400, {"error": "action inválida no $default", "action": action})
+
+        # Qualquer outra routeKey
+        log("rota inválida", route=route)
+        return json_response(400, {"error": "rota inválida", "routeKey": route})
+
+    except Exception as e:
+        log("dispatch ERROR", error=str(e))
+        return json_response(500, {"error": str(e)})
+
+# ===========================
+# Rotas WebSocket
+# ===========================
+def on_connect(event):
+    connection_id = event["requestContext"]["connectionId"]
+    try:
+        log("on_connect BEGIN", connectionId=connection_id, table=connections_table.name)
+        resp = connections_table.put_item(
+            Item={"connectionId": connection_id, "connectedAt": now_ts()}
+        )
+        log("on_connect END",
+            http=resp.get("ResponseMetadata", {}).get("HTTPStatusCode"),
+            reqId=resp.get("ResponseMetadata", {}).get("RequestId"))
+    except Exception as e:
+        log("on_connect ERROR", connectionId=connection_id, error=str(e))
+    return json_response(200, {"ok": True})
+
+def on_disconnect(event):
+    connection_id = event["requestContext"]["connectionId"]
+    try:
+        log("on_disconnect BEGIN", connectionId=connection_id, table=connections_table.name)
+        resp = connections_table.delete_item(Key={"connectionId": connection_id})
+        log("on_disconnect END",
+            http=resp.get("ResponseMetadata", {}).get("HTTPStatusCode"),
+            reqId=resp.get("ResponseMetadata", {}).get("RequestId"))
+    except Exception as e:
+        log("on_disconnect ERROR", connectionId=connection_id, error=str(e))
+    return json_response(200, {"ok": True})
+
+# ===========================
+# Ações de estado (negócio)
+# ===========================
+def start_timer(event):
+    """
+    Inicia (ou reinicia) o timer de um nível.
+    Body esperado:
+      - chamado: number (obrigatório)
+      - timer OU nivel:
+          timer: "primeiroAcionado" | "escalacao1".."escalacao4"
+          nivel: 0..4
+      - duracao: opcional (segundos). Default: 20min para 0; 10min para 1..4
+      - observacao: opcional
+    """
+    body = parse_body_safe(event)
+    chamado = require_int(body.get("chamado"), "chamado")
+    nivel = resolve_level_from_body(body)
+    if nivel is None:
+        return json_response(400, {"error": "nivel/timer inválido ou ausente"})
+
+    observacao = body.get("observacao", "")
+    duracao    = int(body.get("duracao", level_default_duration(nivel)))
+    ts_start   = now_ts()
+    ts_end     = ts_start + duracao
+
+    log("start_timer BEGIN", chamado=chamado, nivel=nivel, duracao=duracao)
+
+    st = ensure_initial_state(chamado)
+    st["niveis"][str(nivel)] = {
+        "status": "em_andamento",
+        "timerStart": ts_start,
+        "duracao": duracao,
+        "timerEnd": ts_end,
+        "observacao": observacao,
+    }
+    st["nivelAtual"]   = nivel
+    st["statusGeral"]  = "em_andamento"
+    st["ultimoUpdate"] = now_ts()
+
+    ok = ddb_put_item(st)
+    log("start_timer SAVE", ok=ok)
+
+    msg = {
+        "action": "timerStarted",
+        "chamado": chamado,
+        "serverTime": now_ts(),
+        **st
+    }
+    return broadcast(event, msg)
+
+def update_observacao(event):
+    """
+    Atualiza (ou cria) a observação de um nível.
+    Body:
+      - chamado: number
+      - timer OU nivel
+      - observacao: string
+    """
+    body = parse_body_safe(event)
+    chamado = require_int(body.get("chamado"), "chamado")
+    nivel = resolve_level_from_body(body)
+    if nivel is None:
+        return json_response(400, {"error": "nivel/timer inválido ou ausente"})
+    obs = (body.get("observacao") or "")
+
+    log("update_observacao BEGIN", chamado=chamado, nivel=nivel)
+
+    st = ensure_initial_state(chamado)
+    lv = st["niveis"].get(str(nivel))
+    if not lv:
+        lv = {
+            "status": "pendente",
+            "timerStart": None,
+            "duracao": None,
+            "timerEnd": None,
+            "observacao": obs,
+        }
+    else:
+        lv["observacao"] = obs
+
+    st["niveis"][str(nivel)] = lv
+    st["ultimoUpdate"] = now_ts()
+
+    ok = ddb_put_item(st)
+    log("update_observacao SAVE", ok=ok)
+
+    msg = {
+        "action": "observacaoUpdated",
+        "chamado": chamado,
+        "nivel": nivel,
+        "serverTime": now_ts(),
+        **st
+    }
+    return broadcast(event, msg)
+
+def update_operador(event):
+    """
+    Define/atualiza o operador do chamado.
+    Body:
+      - chamado: number
+      - operador: string
+    """
+    body = parse_body_safe(event)
+    chamado  = require_int(body.get("chamado"), "chamado")
+    operador = (body.get("operador") or "").strip()
+
+    log("update_operador BEGIN", chamado=chamado, operador=operador)
+
+    st = ensure_initial_state(chamado)
+    st["operador"] = operador
+    st["ultimoUpdate"] = now_ts()
+
+    ok = ddb_put_item(st)
+    log("update_operador SAVE", ok=ok)
+
+    msg = {
+        "action": "operadorUpdated",
+        "chamado": chamado,
+        "operador": operador,
+        "serverTime": now_ts(),
+        **st
+    }
+    return broadcast(event, msg)
+
+def update_status_final(event):
+    """
+    Altera o status final do chamado (atendimento global).
+    Body:
+      - chamado: number
+      - statusFinal: "attended" | "not-attended"
+    """
+    body = parse_body_safe(event)
+    chamado = require_int(body.get("chamado"), "chamado")
+    status_final = (body.get("statusFinal") or "").strip()
+    if status_final not in ("attended", "not-attended"):
+        return json_response(400, {"error": "statusFinal deve ser 'attended' ou 'not-attended'"})
+
+    log("update_status_final BEGIN", chamado=chamado, statusFinal=status_final)
+
+    st = ensure_initial_state(chamado)
+    st["statusFinal"]  = status_final
+    st["statusGeral"]  = "concluido" if status_final == "attended" else st.get("statusGeral", "pendente")
+    st["ultimoUpdate"] = now_ts()
+
+    ok = ddb_put_item(st)
+    log("update_status_final SAVE", ok=ok)
+
+    msg = {
+        "action": "statusFinalUpdated",
+        "chamado": chamado,
+        "serverTime": now_ts(),
+        **st
+    }
+    return broadcast(event, msg)
+
+def get_state(event):
+    """
+    Envia o estado atual **apenas** para a conexão solicitante (sem broadcast).
+    Body:
+      - chamado: number
+    """
+    body = parse_body_safe(event)
+    chamado = require_int(body.get("chamado"), "chamado")
+    connection_id = event["requestContext"]["connectionId"]
+
+    st = ensure_initial_state(chamado)
+    apigw = get_apigw_client(event)
+    msg = {
+        "action": "currentState",
+        "chamado": chamado,
+        "serverTime": now_ts(),
+        **st
+    }
+    log("get_state -> enviando", chamado=chamado, connectionId=connection_id)
+    send_to_connection(apigw, connection_id, msg)
+    return json_response(200, {"ok": True})
