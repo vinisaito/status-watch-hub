@@ -1,66 +1,89 @@
-import { create } from 'zustand';
+import json
+import boto3
+import os
+from datetime import datetime
+from boto3.dynamodb.conditions import Key
 
-interface ChamadoStore {
-  ws: WebSocket | null;
-  isConnected: boolean;
-  messages: any[];
-  initWebSocket: () => void;
-  sendWS: (data: any) => void;
+# Nome da tabela DynamoDB (configure no Lambda > Environment Variables)
+TABLE_NAME = os.environ.get("DYNAMODB_TABLE", "painelmonitoracao_obs")
+
+dynamodb = boto3.resource("dynamodb")
+table = dynamodb.Table(TABLE_NAME)
+
+def lambda_handler(event, context):
+    try:
+        # Log da requisição recebida
+        print("Evento recebido:", json.dumps(event))
+
+        # Se vier pelo API Gateway REST, o body vem como string
+        body = event.get("body")
+        if body:
+            body = json.loads(body)
+        else:
+            return {
+                "statusCode": 400,
+                "body": json.dumps({"error": "Body da requisição vazio"})
+            }
+
+        # Extrair campos
+        number = body.get("number")
+        observacao = body.get("observacao")
+        status = body.get("status")
+
+        if not number or not observacao or not status:
+            return {
+                "statusCode": 400,
+                "body": json.dumps({"error": "Campos obrigatórios: number, observacao, status"})
+            }
+
+        # Item a salvar
+        item = {
+            "number": str(number),  # Garantir que está em string
+            "observacao": observacao,
+            "status": status,
+            "createdAt": datetime.utcnow().isoformat()
+        }
+
+        # Salvar no DynamoDB
+        table.put_item(Item=item)
+
+        print("Item salvo com sucesso:", item)
+
+        return {
+            "statusCode": 200,
+            "body": json.dumps({"message": "Registro inserido com sucesso", "item": item})
+        }
+
+    except Exception as e:
+        print("Erro na lambda:", str(e))
+        return {
+            "statusCode": 500,
+            "body": json.dumps({"error": str(e)})
+        }
+
+
+
+
+
+
+
+
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": [
+        "dynamodb:PutItem",
+        "dynamodb:GetItem",
+        "dynamodb:UpdateItem",
+        "dynamodb:DeleteItem",
+        "dynamodb:Scan",
+        "dynamodb:Query"
+      ],
+      "Resource": "arn:aws:dynamodb:us-east-1:123456789012:table/painelmonitoracao_obs"
+    }
+  ]
 }
 
-const useChamadoStore = create<ChamadoStore>((set, get) => ({
-  ws: null,
-  isConnected: false,
-  messages: [],
 
-  initWebSocket: () => {
-    try {
-      const ws = new WebSocket("wss://SEU-ENDPOINT.execute-api.us-east-1.amazonaws.com/production");
-
-      ws.onopen = () => {
-        console.log("✅ WebSocket conectado");
-        set({ isConnected: true, ws });
-      };
-
-      ws.onmessage = (event) => {
-        console.log("📩 Mensagem recebida:", event.data);
-        try {
-          const parsed = JSON.parse(event.data);
-          set((state) => ({ messages: [...state.messages, parsed] }));
-        } catch (e) {
-          console.error("Erro ao parsear mensagem:", e);
-        }
-      };
-
-      ws.onerror = (error) => {
-        console.error("❌ Erro no WebSocket:", error);
-      };
-
-      ws.onclose = () => {
-        console.warn("⚠️ WebSocket desconectado");
-        set({ isConnected: false, ws: null });
-        // tenta reconectar em 5s
-        setTimeout(() => get().initWebSocket(), 5000);
-      };
-
-    } catch (err) {
-      console.error("Erro ao iniciar WebSocket:", err);
-    }
-  },
-
-  sendWS: (data: any) => {
-    const ws = get().ws;
-    if (ws && ws.readyState === WebSocket.OPEN) {
-      console.log("📤 Enviando:", data);
-      ws.send(JSON.stringify(data));
-    } else {
-      console.warn("❌ WebSocket não está conectado, não foi possível enviar:", data);
-    }
-  }
-}));
-
-// export extra (para usar fora de hooks, como no Dashboard.tsx)
-export const initWebSocket = () => useChamadoStore.getState().initWebSocket();
-export const sendWS = (data: any) => useChamadoStore.getState().sendWS(data);
-
-export default useChamadoStore;
