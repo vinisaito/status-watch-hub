@@ -1,3 +1,4 @@
 {
-  "body": "{\"number\": \"12345\", \"observacao\": \"Porta principal acionada\", \"status\": \"acionado\"}"
+  "statusCode": 500,
+  "body": "{\"error\": \"An error occurred (ResourceNotFoundException) when calling the PutItem operation: Requested resource not found\"}"
 }
