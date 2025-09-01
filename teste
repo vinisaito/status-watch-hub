@@ -1,4 +1,7 @@
 {
-  "statusCode": 500,
-  "body": "{\"error\": \"An error occurred (ResourceNotFoundException) when calling the PutItem operation: Requested resource not found\"}"
+  "body": "{\"number\": \"12345\", \"observacao\": \"Porta principal acionada\", \"status\": \"acionado\"}"
 }
+
+
+
+print("Usando tabela:", TABLE_NAME)
