@@ -1,1 +1,71 @@
-{"action":"updateObservacao","chamado":1,"level":1,"observacao":"teste via wscat"}
+2025-09-01T13:08:10.466Z
+(QOUdMFCzIAMEthA=) WebSocket API [rsgjd6wsza] received message from client [Connection Id: QOUKQfzaoAMCIHA=].
+
+(QOUdMFCzIAMEthA=) WebSocket API [rsgjd6wsza] received message from client [Connection Id: QOUKQfzaoAMCIHA=].
+2025-09-01T13:08:10.466Z
+(QOUdMFCzIAMEthA=) WebSocket API [rsgjd6wsza] received message from client [QOUKQfzaoAMCIHA=]. Message: [
+{
+    "requestContext": {
+        "routeKey": "updateObservacao",
+        "messageId": "QOUdMcmFoAMCIHA=",
+        "eventType": "MESSAGE",
+        "extendedRequestId": "QOUdMFCzIAMEthA=",
+        "requestTime": "01/Sep/2025:13:08:10 +0000",
+        "messageDirection": "IN",
+        "stage": "dev",
+        "connectedAt": 1756731969206,
+        "requestTimeEpoch": 1756732090463,
+        "identity": {
+            "sourceIp": "161.69.63.128"
+        },
+        "requestId": "QOUdMFCzIAMEthA=",
+        "domainName": "rsgjd6wsza.execute-api.us-east-1.amazonaws.com",
+        "connectionId": "QOUKQfzaoAMCIHA=",
+        "apiId": "rsgjd6wsza"
+    },
+    "body": "{\"action\":\"updateObservacao\",\"chamado\":3,\"level\":1,\"observacao\":\"teste via wscat\"}",
+    "isBase64Encoded": false
+}
+].
+
+(QOUdMFCzIAMEthA=) WebSocket API [rsgjd6wsza] received message from client [QOUKQfzaoAMCIHA=]. Message: [{"requestContext":{"routeKey":"updateObservacao","messageId":"QOUdMcmFoAMCIHA=","eventType":"MESSAGE","extendedRequestId":"QOUdMFCzIAMEthA=","requestTime":"01/Sep/2025:13:08:10 +0000","messageDirection":"IN","stage":"dev","connectedAt":1756731969206,"requestTimeEpoch":1756732090463,"identity":{"sourceIp":"161.69.63.128"},"requestId":"QOUdMFCzIAMEthA=","domainName":"rsgjd6wsza.execute-api.us-east-1.amazonaws.com","connectionId":"QOUKQfzaoAMCIHA=","apiId":"rsgjd6wsza"},"body":"{\"action\":\"updateObservacao\",\"chamado\":3,\"level\":1,\"observacao\":\"teste via wscat\"}","isBase64Encoded":false}].
+2025-09-01T13:08:10.466Z
+(QOUdMFCzIAMEthA=) Endpoint request URI: https://lambda.us-east-1.amazonaws.com/2015-03-31/functions/arn:aws:lambda:us-east-1:368696837445:function:PainelMonitoracao_Teste/invocations
+
+(QOUdMFCzIAMEthA=) Endpoint request URI: https://lambda.us-east-1.amazonaws.com/2015-03-31/functions/arn:aws:lambda:us-east-1:368696837445:function:PainelMonitoracao_Teste/invocations
+2025-09-01T13:08:10.466Z
+(QOUdMFCzIAMEthA=) Endpoint request headers: {X-Amz-Date=20250901T130810Z, x-amzn-apigateway-api-id=rsgjd6wsza, Accept=application/json, User-Agent=AmazonAPIGateway_rsgjd6wsza, Host=lambda.us-east-1.amazonaws.com, X-Amz-Content-Sha256=3c9de7d8c1e355958777d48f15066f7f2b52218f22e1af10a6a9b3a35f6f157a, X-Amzn-Trace-Id=Root=1-68b59aba-e04ee790d726f9c9fb0f1b47, x-amzn-lambda-integration-tag=QOUdMFCzIAMEthA=, Authorization=*********************************************************************************************************************************************************************************************************************************************************************************************************************************************82d62f, X-Amz-Source-Arn=arn:aws:execute-api:us-east-1:368696837445:rsgjd6wsza/dev/updateObservacao, X-Amz-Security-Token=IQoJb3JpZ2luX2VjEK3//////////wEaCXVzLWVhc3QtMSJIMEYCIQDhILEubxCbdgIuOtm6443g4Gd2af0FBdtnnlxfcj8CHQIhAMNaMBlx9M9ofzXglZC6x/27x0ZawlZ7kXVrLitdmhVSKrIFCBUQABoMMzkyMjIwNTc [TRUNCATED]
+
+(QOUdMFCzIAMEthA=) Endpoint request headers: {X-Amz-Date=20250901T130810Z, x-amzn-apigateway-api-id=rsgjd6wsza, Accept=application/json, User-Agent=AmazonAPIGateway_rsgjd6wsza, Host=lambda.us-east-1.amazonaws.com, X-Amz-Content-Sha256=3c9de7d8c1e355958777d48f15066f7f2b52218f22e1af10a6a9b3a35f6f157a, X-Amzn-Trace-Id=Root=1-68b59aba-e04ee790d726f9c9fb0f1b47, x-amzn-lambda-integration-tag=QOUdMFCzIAMEthA=, Authorization=*********************************************************************************************************************************************************************************************************************************************************************************************************************************************82d62f, X-Amz-Source-Arn=arn:aws:execute-api:us-east-1:368696837445:rsgjd6wsza/dev/updateObservacao, X-Amz-Security-Token=IQoJb3JpZ2luX2VjEK3//////////wEaCXVzLWVhc3QtMSJIMEYCIQDhILEubxCbdgIuOtm6443g4Gd2af0FBdtnnlxfcj8CHQIhAMNaMBlx9M9ofzXglZC6x/27x0ZawlZ7kXVrLitdmhVSKrIFCBUQABoMMzkyMjIwNTc [TRUNCATED]
+2025-09-01T13:08:10.466Z
+(QOUdMFCzIAMEthA=) Endpoint request body after transformations: 
+{
+    "requestContext": {
+        "routeKey": "updateObservacao",
+        "messageId": "QOUdMcmFoAMCIHA=",
+        "eventType": "MESSAGE",
+        "extendedRequestId": "QOUdMFCzIAMEthA=",
+        "requestTime": "01/Sep/2025:13:08:10 +0000",
+        "messageDirection": "IN",
+        "stage": "dev",
+        "connectedAt": 1756731969206,
+        "requestTimeEpoch": 1756732090463,
+        "identity": {
+            "sourceIp": "161.69.63.128"
+        },
+        "requestId": "QOUdMFCzIAMEthA=",
+        "domainName": "rsgjd6wsza.execute-api.us-east-1.amazonaws.com",
+        "connectionId": "QOUKQfzaoAMCIHA=",
+        "apiId": "rsgjd6wsza"
+    },
+    "body": "{\"action\":\"updateObservacao\",\"chamado\":3,\"level\":1,\"observacao\":\"teste via wscat\"}",
+    "isBase64Encoded": false
+}
+
+(QOUdMFCzIAMEthA=) Endpoint request body after transformations: {"requestContext":{"routeKey":"updateObservacao","messageId":"QOUdMcmFoAMCIHA=","eventType":"MESSAGE","extendedRequestId":"QOUdMFCzIAMEthA=","requestTime":"01/Sep/2025:13:08:10 +0000","messageDirection":"IN","stage":"dev","connectedAt":1756731969206,"requestTimeEpoch":1756732090463,"identity":{"sourceIp":"161.69.63.128"},"requestId":"QOUdMFCzIAMEthA=","domainName":"rsgjd6wsza.execute-api.us-east-1.amazonaws.com","connectionId":"QOUKQfzaoAMCIHA=","apiId":"rsgjd6wsza"},"body":"{\"action\":\"updateObservacao\",\"chamado\":3,\"level\":1,\"observacao\":\"teste via wscat\"}","isBase64Encoded":false}
+2025-09-01T13:08:10.466Z
+(QOUdMFCzIAMEthA=) Sending request to https://lambda.us-east-1.amazonaws.com/2015-03-31/functions/arn:aws:lambda:us-east-1:368696837445:function:PainelMonitoracao_Teste/invocations
+
+(QOUdMFCzIAMEthA=) Sending request to https://lambda.us-east-1.amazonaws.com/2015-03-31/functions/arn:aws:lambda:us-east-1:368696837445:function:PainelMonitoracao_Teste/invocations
+2025-09-01T13:08:10.488Z
+(QOUdMFCzIAMEthA=) Received response. Status: 200, Integration latency: 22 ms
