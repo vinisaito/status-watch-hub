@@ -1,23 +1,34 @@
-2025-09-01T10:47:31.010Z
-{
-    "trace": "3401b896",
-    "msg": "invoke",
-    "routeKey": "$default",
-    "connectionId": "test-123",
-    "body": {
-        "action": "update",
-        "chamado": 1,
-        "level": 1,
-        "status": "pending",
-        "observations": "teste lambda"
-    }
-}
+elif action == "update":
+    logger.info(json.dumps({
+        "trace": trace,
+        "msg": "update called",
+        "body": body
+    }))
 
+    chamado_id = body.get("chamado")
+    logger.info(json.dumps({"trace": trace, "msg": "got chamado_id", "chamado": chamado_id}))
 
-{"trace": "3401b896", "msg": "invoke", "routeKey": "$default", "connectionId": "test-123", "body": {"action": "update", "chamado": 1, "level": 1, "status": "pending", "observations": "teste lambda"}}
-2025-09-01T10:47:31.010Z
-{
-    "trace": "3401b896",
-    "msg": "$default received",
-    "action": "update"
-}
+    if not chamado_id:
+        logger.error(json.dumps({"trace": trace, "msg": "missing chamado_id"}))
+        return {"statusCode": 400, "body": json.dumps({"error": "chamado required"})}
+
+    try:
+        table.update_item(
+            Key={"chamado": int(chamado_id)},
+            UpdateExpression="SET #lvl = :lvl, #st = :st, #obs = :obs, updatedAt = :now",
+            ExpressionAttributeNames={
+                "#lvl": "level",
+                "#st": "status",
+                "#obs": "observations"
+            },
+            ExpressionAttributeValues={
+                ":lvl": body.get("level", 0),
+                ":st": body.get("status", "pending"),
+                ":obs": body.get("observations", ""),
+                ":now": datetime.utcnow().isoformat()
+            }
+        )
+        logger.info(json.dumps({"trace": trace, "msg": "update success"}))
+    except Exception as e:
+        logger.error(json.dumps({"trace": trace, "msg": "dynamo update error", "error": str(e)}))
+        raise
