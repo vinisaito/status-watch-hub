@@ -1,6 +1,9 @@
-Access to fetch at 'https://f6ffk8e9fe.execute-api.us-east-1.amazonaws.com/prod/obs' from origin 'http://localhost:8080' has been blocked by CORS policy: No 'Access-Control-Allow-Origin' header is present on the requested resource.
-ActionTable.tsx:113 
- 
- POST https://f6ffk8e9fe.execute-api.us-east-1.amazonaws.com/prod/obs net::ERR_FAILED 200 (OK)
-(anônimo)	@	ActionTable.tsx:113
-handleSaveObservacao	@	ActionTable.tsx:196
+return {
+    "statusCode": 200,
+    "headers": {
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Headers": "Content-Type",
+        "Access-Control-Allow-Methods": "OPTIONS,POST"
+    },
+    "body": json.dumps({"message": "Registro inserido com sucesso", "item": item})
+}
