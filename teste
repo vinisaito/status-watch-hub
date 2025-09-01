@@ -1,6 +1,10 @@
 // src/store/useChamadoStore.ts
 import { create } from "zustand";
 
+// -------------------
+// Tipagens
+// -------------------
+
 export interface ChamadoState {
   status: "pending" | "confirmed" | "escalating" | "completed";
   currentLevel: number;
@@ -22,6 +26,10 @@ interface ChamadoStore {
   setFromWS: (id: string, data: Partial<ChamadoState>) => void;
   reset: () => void;
 }
+
+// -------------------
+// Zustand Store
+// -------------------
 
 export const useChamadoStore = create<ChamadoStore>((set) => ({
   chamados: {},
@@ -234,7 +242,9 @@ function mapServerToStore(p: ServerPayload): Partial<ChamadoState> {
   };
 }
 
-// ====== WebSocket Init ======
+// -------------------
+// WebSocket Init
+// -------------------
 
 export const initWebSocket = () => {
   if (socket) return;
@@ -243,6 +253,10 @@ export const initWebSocket = () => {
 
   socket.onopen = () => {
     console.log("[WS] Conectado ao servidor");
+
+    // Requisita estado de todos os chamados já abertos no store
+    const ids = Object.keys(useChamadoStore.getState().chamados);
+    ids.forEach((id) => wsGetState(Number(id)));
   };
 
   socket.onmessage = (event) => {
@@ -272,7 +286,6 @@ export const initWebSocket = () => {
       const id = String(msg.chamado);
       const mapped = mapServerToStore(msg as ServerPayload);
       useChamadoStore.getState().setFromWS(id, mapped);
-
     } catch (err) {
       console.error("[WS] ❌ Erro ao processar mensagem:", err, "RAW:", event.data);
     }
@@ -290,12 +303,40 @@ export const initWebSocket = () => {
   };
 };
 
+// -------------------
+// WS Send
+// -------------------
+
 export const sendWS = (msg: any) => {
   if (socket && socket.readyState === WebSocket.OPEN) {
     socket.send(JSON.stringify(msg));
   } else {
     console.warn("[WS] ❌ Não foi possível enviar, socket não conectado:", msg);
   }
+};
+
+// -------------------
+// Ações WS Helpers
+// -------------------
+
+export const wsGetState = (chamado: number) => {
+  sendWS({ action: "getstate", chamado });
+};
+
+export const wsStartTimer = (chamado: number, duration: number = 1200) => {
+  sendWS({ action: "startimer", chamado, duration });
+};
+
+export const wsUpdateObservacao = (chamado: number, observacao: string) => {
+  sendWS({ action: "updateobservacao", chamado, observacao });
+};
+
+export const wsUpdateOperador = (chamado: number, operador: string) => {
+  sendWS({ action: "updateoperador", chamado, operador });
+};
+
+export const wsUpdateStatusFinal = (chamado: number, statusFinal: string) => {
+  sendWS({ action: "updatestatusfinal", chamado, statusFinal });
 };
 
 // -------------------
