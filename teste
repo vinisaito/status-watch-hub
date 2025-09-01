@@ -1,1 +1,133 @@
-{"error": "Object of type Decimal is not JSON serializable"}
+import json
+import boto3
+import os
+from datetime import datetime
+from decimal import Decimal
+
+# Nome da tabela
+TABLE_NAME = os.environ.get("DYNAMODB_TABLE", "painelmonitoracao_obs")
+
+dynamodb = boto3.resource("dynamodb", region_name="us-east-1")
+table = dynamodb.Table(TABLE_NAME)
+
+# Cabeçalhos de CORS
+CORS_HEADERS = {
+    "Access-Control-Allow-Origin": "*",
+    "Access-Control-Allow-Methods": "OPTIONS,GET,POST",
+    "Access-Control-Allow-Headers": "Content-Type"
+}
+
+# --- Função auxiliar para converter Decimal em int/float ---
+def convert_decimal(obj):
+    if isinstance(obj, list):
+        return [convert_decimal(i) for i in obj]
+    elif isinstance(obj, dict):
+        return {k: convert_decimal(v) for k, v in obj.items()}
+    elif isinstance(obj, Decimal):
+        # Se não tiver casas decimais, converte pra int, senão float
+        return int(obj) if obj % 1 == 0 else float(obj)
+    return obj
+
+def lambda_handler(event, context):
+    try:
+        print("Evento recebido:", json.dumps(event))
+        print("Usando tabela:", TABLE_NAME)
+
+        method = event.get("httpMethod", "")
+
+        # --- Pré-flight do CORS ---
+        if method == "OPTIONS":
+            return {
+                "statusCode": 200,
+                "headers": CORS_HEADERS,
+                "body": json.dumps({"message": "OK"})
+            }
+
+        # --- GET: buscar registros ---
+        if method == "GET":
+            params = event.get("queryStringParameters") or {}
+            chamado = params.get("chamado") if params else None
+
+            if chamado:
+                response = table.get_item(Key={"chamado": Decimal(str(chamado))})
+                item = response.get("Item")
+                item = convert_decimal(item) if item else {}
+                return {
+                    "statusCode": 200,
+                    "headers": CORS_HEADERS,
+                    "body": json.dumps(item)
+                }
+            else:
+                response = table.scan()
+                items = response.get("Items", [])
+                items = convert_decimal(items)
+                return {
+                    "statusCode": 200,
+                    "headers": CORS_HEADERS,
+                    "body": json.dumps(items)
+                }
+
+        # --- POST: inserir novo registro ---
+        elif method == "POST":
+            body = event.get("body")
+            if not body:
+                return {
+                    "statusCode": 400,
+                    "headers": CORS_HEADERS,
+                    "body": json.dumps({"error": "Body da requisição vazio"})
+                }
+
+            body = json.loads(body)
+
+            chamado = body.get("chamado")
+            observacao = body.get("observacao")
+            status = body.get("status")
+            operador = body.get("operador")
+
+            if chamado is None or not observacao or not status or not operador:
+                return {
+                    "statusCode": 400,
+                    "headers": CORS_HEADERS,
+                    "body": json.dumps({
+                        "error": "Campos obrigatórios: chamado (number), observacao, status, operador"
+                    })
+                }
+
+            item = {
+                "chamado": Decimal(str(chamado)),
+                "observacao": observacao,
+                "status": status,
+                "operador": operador,
+                "createdAt": datetime.utcnow().isoformat()
+            }
+
+            print("Salvando item:", item)
+            table.put_item(Item=item)
+
+            # Converte antes de devolver
+            item_return = convert_decimal(item)
+
+            return {
+                "statusCode": 200,
+                "headers": CORS_HEADERS,
+                "body": json.dumps({
+                    "message": "Registro inserido com sucesso",
+                    "item": item_return
+                })
+            }
+
+        # --- Outros métodos não suportados ---
+        else:
+            return {
+                "statusCode": 405,
+                "headers": CORS_HEADERS,
+                "body": json.dumps({"error": f"Método {method} não suportado"})
+            }
+
+    except Exception as e:
+        print("Erro na lambda:", str(e))
+        return {
+            "statusCode": 500,
+            "headers": CORS_HEADERS,
+            "body": json.dumps({"error": str(e)})
+        }
