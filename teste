@@ -1,1 +1,1017 @@
-https://f6ffk8e9fe.execute-api.us-east-1.amazonaws.com/prod/obs
+import { useState, useEffect, useMemo, useCallback } from 'react';
+import { Check, AlertTriangle, ExternalLink, Zap, Group, Calendar, Info, XCircle, Flame, ChevronLeft, ChevronRight, ArrowUpDown, ArrowUp, ArrowDown, Clock, Play, CheckCircle, X, RotateCcw, FastForward } from 'lucide-react';
+import { Card, CardContent, CardHeader } from '@/components/ui/card';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { toast } from '@/hooks/use-toast';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import { Textarea } from '@/components/ui/textarea';
+import { Label } from '@/components/ui/label';
+
+interface AlertData {
+  id: string;
+  chamado: string;
+  tipo_chamado: string;
+  grupo_chamado: string;
+  status_chamado: string;
+  abertura_chamado: string;
+  resumo_chamado: string;
+  severidade_chamado: string;
+  acionado: string;
+  chat: boolean;
+}
+
+interface ActionTableProps {
+  alertData: AlertData[];
+  onUpdateAcknowledgment: (alertId: string, acknowledged: boolean) => void;
+  loading: boolean;
+}
+
+type SortField = 'chamado' | 'tipo_chamado' | 'grupo_chamado' | 'status_chamado' | 'abertura_chamado' | 'resumo_chamado' | 'severidade_chamado' | 'acionado';
+type SortDirection = 'asc' | 'desc' | null;
+
+export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: ActionTableProps) => {
+  const [selectedIncident, setSelectedIncident] = useState<AlertData | null>(null);
+  const [crisisDialogOpen, setCrisisDialogOpen] = useState(false);
+  const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 5;
+
+  // Estados para ordenação
+  const [sortField, setSortField] = useState<SortField>('chamado');
+  const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
+
+  // Estado que guarda os numeros chamados já acionados (string)
+  const [acionadosSet, setAcionadosSet] = useState<Set<string>>(new Set());
+
+  // Função para salvar dados na API Gateway
+  const saveToAPI = useCallback(async (alertId: string, data: any) => {
+    try {
+      const response = await fetch('https://f6ffk8e9fe.execute-api.us-east-1.amazonaws.com/prod/acompanhamento', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          chamado: parseInt(alertId),
+          ...data,
+          ttl: Math.floor(Date.now() / 1000) + (7 * 24 * 60 * 60), // 7 dias TTL
+          alertOpenTime: new Date().toISOString(),
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`Erro na API: ${response.status}`);
+      }
+
+      return await response.json();
+    } catch (error) {
+      console.error('Erro ao salvar na API:', error);
+      toast({
+        title: "Erro ao salvar dados",
+        description: "Não foi possível salvar na API. Tente novamente.",
+        variant: "destructive",
+      });
+      throw error;
+    }
+  }, []);
+
+  // Timer para escalações
+
+
+
+  // Função para iniciar escalação - MODIFICADA para integrar com API
+
+
+  // Função para voltar escalação
+  
+  // Função para avançar escalação manualmente - MODIFICADA para integrar com API
+  
+  // Função para preparar mudança de status com confirmação
+
+  // Função para confirmar mudança de status - MODIFICADA para integrar com API
+
+  // Função para cancelar mudança de status
+  
+
+  // Função para marcar como atendido
+  
+
+  // Função para avançar para próxima escalação quando "Não Atendida"
+  
+
+  // Função para formatar tempo
+  const formatTime = (seconds: number) => {
+    const minutes = Math.floor(seconds / 60);
+    const remainingSeconds = seconds % 60;
+    return `${minutes.toString().padStart(2, '0')}:${remainingSeconds.toString().padStart(2, '0')}`;
+  };
+
+  // Função para lidar com clique no cabeçalho da coluna
+  const handleSort = (field: SortField) => {
+    if (sortField === field) {
+      // Se já está ordenando por este campo, alterna a direção
+      if (sortDirection === 'asc') {
+        setSortDirection('desc');
+      } else if (sortDirection === 'desc') {
+        setSortDirection(null);
+        setSortField('chamado'); // volta para o padrão
+      } else {
+        setSortDirection('asc');
+      }
+    } else {
+      // Se é um campo diferente, começa com ascendente
+      setSortField(field);
+      setSortDirection('asc');
+    }
+  };
+
+  // Função para obter o ícone de ordenação
+  const getSortIcon = (field: SortField) => {
+    if (sortField !== field) {
+      return <ArrowUpDown className="h-4 w-4 ml-1 opacity-50" />;
+    }
+    if (sortDirection === 'asc') {
+      return <ArrowUp className="h-4 w-4 ml-1" />;
+    }
+    if (sortDirection === 'desc') {
+      return <ArrowDown className="h-4 w-4 ml-1" />;
+    }
+    return <ArrowUpDown className="h-4 w-4 ml-1 opacity-50" />;
+  };
+
+  // Função para formatar data de forma segura
+  const formatDate = (dateString: string) => {
+    if (!dateString || dateString === '' || dateString === 'null' || dateString === 'undefined') {
+      return '-';
+    }
+
+    try {
+      let date: Date;
+      const cleanString = String(dateString).trim();
+
+      // Caso 1: Timestamp em milissegundos
+      if (/^\d{13}$/.test(cleanString)) {
+        date = new Date(parseInt(cleanString));
+      }
+      // Caso 2: Timestamp em segundos  
+      else if (/^\d{10}$/.test(cleanString)) {
+        date = new Date(parseInt(cleanString) * 1000);
+      }
+      // Caso 3: Formato brasileiro dd/mm/yyyy ou dd/mm/yyyy hh:mm:ss
+      else if (/^\d{2}\/\d{2}\/\d{4}/.test(cleanString)) {
+        const parts = cleanString.split(' ');
+        const datePart = parts[0];
+        const timePart = parts[1] || '00:00:00';
+
+        const [day, month, year] = datePart.split('/');
+        const [hour, minute, second] = timePart.split(':');
+
+        date = new Date(
+          parseInt(year),
+          parseInt(month) - 1, // mês é 0-indexed
+          parseInt(day),
+          parseInt(hour || '0'),
+          parseInt(minute || '0'),
+          parseInt(second || '0')
+        );
+      }
+      // Caso 4: ISO string ou outros formatos padrão
+      else {
+        date = new Date(cleanString);
+      }
+
+      // Verifica se a data é válida
+      if (isNaN(date.getTime())) {
+        return cleanString; // Retorna o valor original
+      }
+
+      // Verifica se a data é muito antiga ou muito futura (validação básica)
+      const year = date.getFullYear();
+      if (year < 1900 || year > 2100) {
+        return cleanString;
+      }
+
+      return date.toLocaleString('pt-BR', {
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+      });
+    } catch (error) {
+      return String(dateString); // Garante que retorna string
+    }
+  };
+
+  // Função para formatar o status "Acionado"
+  const formatAcionadoStatus = (acionado: string) => {
+    if (!acionado) return { text: '-', isOk: false };
+
+    const upperAcionado = acionado.toUpperCase();
+    if (upperAcionado === 'OK') {
+      return { text: 'ACIONADO', isOk: true };
+    } else if (upperAcionado === 'NOK') {
+      return { text: 'NÃO ACIONADO', isOk: false };
+    }
+
+    return { text: acionado, isOk: false };
+  };
+
+  // Dados ordenados e paginados
+  const { sortedAndPaginatedData, totalPages } = useMemo(() => {
+    let sortedData = [...alertData];
+
+    // Aplica ordenação se houver campo e direção definidos
+    if (sortField && sortDirection) {
+      sortedData.sort((a, b) => {
+        let aValue: any = a[sortField];
+        let bValue: any = b[sortField];
+
+        // Tratamento especial para diferentes tipos de dados
+        if (sortField === 'chamado') {
+          aValue = parseInt(a.chamado) || 0;
+          bValue = parseInt(b.chamado) || 0;
+        } else if (sortField === 'abertura_chamado') {
+          aValue = new Date(a.abertura_chamado).getTime() || 0;
+          bValue = new Date(b.abertura_chamado).getTime() || 0;
+        } else {
+          // Para strings, converte para minúsculo para ordenação case-insensitive
+          aValue = String(aValue).toLowerCase();
+          bValue = String(bValue).toLowerCase();
+        }
+
+        if (aValue < bValue) {
+          return sortDirection === 'asc' ? -1 : 1;
+        }
+        if (aValue > bValue) {
+          return sortDirection === 'asc' ? 1 : -1;
+        }
+        return 0;
+      });
+    } else {
+      // Ordenação padrão por chamado decrescente
+      sortedData.sort((a, b) => {
+        const chamadoA = parseInt(a.chamado) || 0;
+        const chamadoB = parseInt(b.chamado) || 0;
+        return chamadoB - chamadoA;
+      });
+    }
+
+    // Calcula paginação
+    const startIndex = (currentPage - 1) * itemsPerPage;
+    const endIndex = startIndex + itemsPerPage;
+    const paginatedData = sortedData.slice(startIndex, endIndex);
+    const totalPages = Math.ceil(sortedData.length / itemsPerPage);
+
+    return {
+      sortedAndPaginatedData: paginatedData,
+      totalPages
+    };
+  }, [alertData, currentPage, itemsPerPage, sortField, sortDirection]);
+
+  // Reset página quando dados mudam
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [alertData]);
+
+  // Busca os incidentes acionados no DynamoDB via API
+  useEffect(() => {
+    const fetchAcionados = async () => {
+      try {
+        const res = await fetch('https://f6ffk8e9fe.execute-api.us-east-1.amazonaws.com/prod/chatacionados');
+        if (!res.ok) throw new Error(`Erro ao buscar acionados: ${res.status}`);
+        const data: { chamado: string }[] = await res.json();
+        setAcionadosSet(new Set(data.map(item => item.chamado.toString())));
+      } catch (error) {
+        toast({
+          title: 'Erro ao buscar acionados',
+          description: 'Não foi possível carregar os incidentes acionados',
+          variant: 'destructive',
+        });
+      }
+    };
+    fetchAcionados();
+  }, []);
+
+
+  const handleAcknowledgment = async (alert: AlertData) => {
+    try {
+      const response = await fetch(
+        "https://f6ffk8e9fe.execute-api.us-east-1.amazonaws.com/prod/webhook"
+      );
+      const data = await response.json();
+
+      // Procura o grupo correspondente
+      const grupoEntry = data.grupos.find(
+        (g: any) => g.grupo_chamado === alert.grupo_chamado
+      );
+
+      if (!grupoEntry || !grupoEntry.webhooks.length) {
+        toast({
+          title: "Webhook não configurado",
+          description: `Configure o webhook para o Grupo: ${alert.grupo_chamado}`,
+          variant: "destructive",
+        });
+        return;
+      }
+
+      // Pega o primeiro webhook ativo
+      const activeWebhook = grupoEntry.webhooks.find((w: any) => w.ativo);
+      if (!activeWebhook) {
+        toast({
+          title: "Nenhum webhook ativo",
+          description: `O grupo ${alert.grupo_chamado} não possui webhooks ativos`,
+          variant: "destructive",
+        });
+        return;
+      }
+
+      const webhookUrl = activeWebhook.url;
+
+      // Enviar mensagem para Google Chat
+      const message = {
+        cards: [
+          {
+            header: {
+              title: "<b>🚨 O CIOPs precisa da sua atenção! <b>"
+            },
+            sections: [
+              {
+                widgets: [
+                  {
+                    textParagraph: {
+                      text: `É necessário confirmação de recebimento e ciência pelo grupo responsável.`
+                    }
+                  }
+                ]
+              },
+              {
+                widgets: [
+                  {
+                    textParagraph: {
+                      text:
+                        "<b>Detalhes do Evento:</b><br><br>" +
+                        "<b>📌 Chamado: </b>" + alert.chamado + "<br><br>" +
+                        "<b>⚠️ Severidade: </b>" + alert.severidade_chamado + "<br><br>" +
+                        "<b>📰 Título: </b>" + alert.resumo_chamado + "<br><br>" +
+                        "<b>📅 Abertura: </b>" + alert.abertura_chamado + "<br><br>" +
+                        "<b>👥 Grupo: </b>" + alert.grupo_chamado
+                    }
+                  }
+                ],
+              },
+              {
+                widgets: [
+                  {
+                    textParagraph: {
+                      text: `<b>⚠️ Atenção: </b> Na ausência de confirmação, o CIOPs dará início ao processo de escalonamento, conforme procedimento padrão.`
+                    }
+                  }
+                ]
+              },
+              {
+                widgets: [
+                  {
+                    buttons: [
+                      {
+                        textButton: {
+                          text: "✅ Confirmar Recebimento",
+                          onClick: {
+                            action: {
+                              actionMethodName: "confirmarAlerta",
+                              parameters: [
+                                { key: "chamado", value: alert.chamado },
+                                { key: "grupo", value: alert.grupo_chamado }
+                              ]
+                            }
+                          }
+                        }
+                      }
+                    ]
+                  }
+                ]
+              }
+            ],
+          },
+        ],
+      };
+
+      await fetch(webhookUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(message),
+      });
+
+      // Marca como acionado no DynamoDB
+      const res = await fetch(
+        "https://f6ffk8e9fe.execute-api.us-east-1.amazonaws.com/prod/chatacionados",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ chamado: alert.chamado.toString() }),
+        }
+      );
+
+      if (!res.ok) {
+        const errorData = await res.json();
+        throw new Error(errorData.message || "Erro ao marcar como acionado");
+      }
+
+      setAcionadosSet(prev => new Set([...prev, alert.chamado.toString()]));
+      onUpdateAcknowledgment(alert.id, true);
+
+      toast({
+        title: "Alerta acionado com sucesso",
+        description: `Mensagem enviada para o Grupo: ${alert.grupo_chamado}`,
+      });
+
+    } catch (error: any) {
+      toast({
+        title: "Erro ao acionar alerta",
+        description: error.message || "Não foi possível concluir o acionamento",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const truncateText = (text: string, maxLength: number) => {
+    return text.length > maxLength ? text.substring(0, maxLength) + '...' : text;
+  };
+
+  const handleIncidentClick = (alert: AlertData) => {
+    if (alert.tipo_chamado.toLowerCase().includes('incidente')) {
+      setSelectedIncident(alert);
+      setCrisisDialogOpen(true);
+    }
+  };
+
+  const getSeverityColor = (severity: string) => {
+    return severity.includes('4')
+      ? 'bg-destructive text-destructive-foreground'
+      : 'bg-warning text-warning-foreground';
+  };
+
+  const [chamadoModalOpen, setChamadoModalOpen] = useState(false);
+  const handleChamadoClick = (alert: AlertData) => {
+    setSelectedIncident(alert);
+    setChamadoModalOpen(true);
+  };
+
+  const getStatusBadgeClass = (chat: boolean) =>
+    chat
+      ? 'bg-success/90 text-white border-success/50 shadow-md'
+      : 'bg-destructive/90 text-white border-destructive/50 shadow-md';
+
+  const getStatusIcon = (chat: boolean) =>
+    chat ? <Check className="h-4 w-4" /> : <XCircle className="h-4 w-4" />;
+
+  const getStatusText = (chat: boolean) => {
+    return chat ? 'ACIONADO VIA CHAT' : 'NÃO ACIONADO VIA CHAT';
+  };
+  const handlePageChange = (page: number) => {
+    setCurrentPage(page);
+  };
+
+  // Renderiza o componente de confirmação/escalaçã
+
+
+  return (
+    <TooltipProvider>
+      <Card className="bg-card border-border">
+        <CardHeader />
+        <CardContent>
+          {/* Layout para Mobile (oculto em desktop) */}
+          <div className="block lg:hidden space-y-4">
+            {loading ? (
+              <div className="text-center py-8">
+                <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary mb-4"></div>
+                <p>Carregando dados...</p>
+              </div>
+            ) : sortedAndPaginatedData.length === 0 ? (
+              <div className="text-center py-8 text-muted-foreground">
+                Nenhum dado disponível
+              </div>
+            ) : (
+              sortedAndPaginatedData.map((alert) => {
+                const isChat = acionadosSet.has(alert.chamado.toString());
+                const isExpanded = expandedRows.has(alert.id);
+                return (
+                  <Card key={alert.id} className="bg-secondary border-border w-full">
+                    <CardContent className="p-3 sm:p-4">
+                      {/* Linha 1 - chamado, severidade_chamado e classificação */}
+                      <div className="flex items-center justify-between mb-3 gap-2 flex-wrap">
+                        <div className="flex items-center gap-1 sm:gap-2 flex-wrap">
+                          <Badge variant="outline" className="text-xs">
+                            <Button
+                              variant="link"
+                              size="sm"
+                              className="text-xs p-0 hover:underline"
+                              onClick={() => handleChamadoClick(alert)}
+                            >
+                              {alert.chamado}
+                            </Button>
+                          </Badge>
+                          <Badge variant="outline" className="text-xs max-w-[100px] truncate">
+                            {alert.tipo_chamado}
+                          </Badge>
+                          <Badge className={`${getSeverityColor(alert.severidade_chamado)} text-xs`}>
+                            {alert.severidade_chamado}
+                          </Badge>
+                        </div>
+                      </div>
+
+                      <div className="space-y-2">
+                        {/* Título */}
+                        <div className="w-full">
+                          <p className="text-sm font-medium break-words">
+                            {truncateText(alert.resumo_chamado, isExpanded ? 200 : 60)}
+                          </p>
+                        </div>
+
+                        {/* Linha 2 - grupo_chamado e status */}
+                        <div className="flex items-center justify-between text-xs text-muted-foreground gap-2">
+                          <span className="text-sm font-semibold text-foreground truncate flex-1">
+                            {alert.grupo_chamado}
+                          </span>
+                          <span className="truncate">{alert.status_chamado}</span>
+                        </div>
+
+                        {/* Linha 3 - abertura_chamado */}
+                        <div className="text-xs text-muted-foreground">
+                          {formatDate(alert.abertura_chamado)}
+                        </div>
+
+                        {/* Botões */}
+                        <div className="flex items-center justify-between pt-3 gap-2">
+                          <div className="flex items-center gap-2">
+                            {alert.tipo_chamado.toLowerCase().includes('incidente') && (
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => handleIncidentClick(alert)}
+                                className="h-7 px-2 text-xs"
+                              >
+                                <ExternalLink className="h-3 w-3 mr-1" />
+                                <span className="hidden sm:inline">Crise</span>
+                              </Button>
+                            )}
+                          </div>
+
+                          <Button
+                            variant={isChat ? 'default' : 'outline'}
+                            size="sm"
+                            onClick={() => !isChat && handleAcknowledgment(alert)}
+                            disabled={isChat}
+                            className={`h-7 px-2 sm:px-3 text-xs flex-shrink-0 ${isChat
+                              ? 'bg-success text-success-foreground hover:bg-success/90'
+                              : 'border-border hover:bg-accent'
+                              }`}
+                          >
+                            {isChat ? (
+                              <>
+                                <Check className="h-3 w-3 mr-1" />
+                                <span className="hidden sm:inline">Acionado</span>
+                              </>
+                            ) : (
+                              <>
+                                <AlertTriangle className="h-3 w-3 mr-1" />
+                                <span className="hidden sm:inline">Acionar</span>
+                              </>
+                            )}
+                          </Button>
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+                );
+              })
+            )}
+
+            {/* Paginação Mobile */}
+            {!loading && sortedAndPaginatedData.length > 0 && totalPages > 1 && (
+              <div className="flex items-center justify-between mt-4 px-2">
+                <div className="text-sm text-muted-foreground">
+                  Página {currentPage} de {totalPages}
+                </div>
+                <div className="flex items-center gap-1">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => handlePageChange(currentPage - 1)}
+                    disabled={currentPage === 1}
+                    className="h-8 w-8 p-0"
+                  >
+                    <ChevronLeft className="h-4 w-4" />
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => handlePageChange(currentPage + 1)}
+                    disabled={currentPage === totalPages}
+                    className="h-8 w-8 p-0"
+                  >
+                    <ChevronRight className="h-4 w-4" />
+                  </Button>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Layout para Desktop */}
+          <div className="hidden lg:block">
+            <div className="w-full overflow-x-auto">
+              <div className="min-w-[1000px]">
+                <Table>
+                  <TableHeader>
+                    <TableRow className="border-border hover:bg-accent">
+                      <TableHead className="text-muted-foreground min-w-[80px]">
+                        <Button
+                          variant="ghost"
+                          className="h-auto p-0 font-medium text-muted-foreground hover:text-foreground text-xs"
+                          onClick={() => handleSort('chamado')}
+                        >
+                          Chamado
+                          {getSortIcon('chamado')}
+                        </Button>
+                      </TableHead>
+                      <TableHead className="text-muted-foreground min-w-[100px]">
+                        <Button
+                          variant="ghost"
+                          className="h-auto p-0 font-medium text-muted-foreground hover:text-foreground text-xs"
+                          onClick={() => handleSort('tipo_chamado')}
+                        >
+                          Classificação
+                          {getSortIcon('tipo_chamado')}
+                        </Button>
+                      </TableHead>
+                      <TableHead className="text-muted-foreground min-w-[90px]">
+                        <Button
+                          variant="ghost"
+                          className="h-auto p-0 font-medium text-muted-foreground hover:text-foreground text-xs"
+                          onClick={() => handleSort('grupo_chamado')}
+                        >
+                          Grupo
+                          {getSortIcon('grupo_chamado')}
+                        </Button>
+                      </TableHead>
+                      <TableHead className="text-muted-foreground min-w-[80px]">
+                        <Button
+                          variant="ghost"
+                          className="h-auto p-0 font-medium text-muted-foreground hover:text-foreground text-xs"
+                          onClick={() => handleSort('status_chamado')}
+                        >
+                          Status
+                          {getSortIcon('status_chamado')}
+                        </Button>
+                      </TableHead>
+                      <TableHead className="text-muted-foreground min-w-[100px]">
+                        <Button
+                          variant="ghost"
+                          className="h-auto p-0 font-medium text-muted-foreground hover:text-foreground text-xs"
+                          onClick={() => handleSort('abertura_chamado')}
+                        >
+                          Abertura
+                          {getSortIcon('abertura_chamado')}
+                        </Button>
+                      </TableHead>
+                      <TableHead className="text-muted-foreground min-w-[150px] max-w-[200px]">
+                        <Button
+                          variant="ghost"
+                          className="h-auto p-0 font-medium text-muted-foreground hover:text-foreground text-xs"
+                          onClick={() => handleSort('resumo_chamado')}
+                        >
+                          Título
+                          {getSortIcon('resumo_chamado')}
+                        </Button>
+                      </TableHead>
+                      <TableHead className="text-muted-foreground min-w-[90px]">
+                        <Button
+                          variant="ghost"
+                          className="h-auto p-0 font-medium text-muted-foreground hover:text-foreground text-xs"
+                          onClick={() => handleSort('severidade_chamado')}
+                        >
+                          Severidade
+                          {getSortIcon('severidade_chamado')}
+                        </Button>
+                      </TableHead>
+
+                      <TableHead className="text-muted-foreground min-w-[70px]">Chat</TableHead>
+                      <TableHead className="text-muted-foreground min-w-[140px]">Observação</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {loading ? (
+                      <TableRow>
+                        <TableCell colSpan={10} className="text-center py-8">
+                          Carregando dados...
+                        </TableCell>
+                      </TableRow>
+                    ) : sortedAndPaginatedData.length === 0 ? (
+                      <TableRow>
+                        <TableCell colSpan={10} className="text-center py-8 text-muted-foreground">
+                          Nenhum dado disponível
+                        </TableCell>
+                      </TableRow>
+                    ) : (
+                      sortedAndPaginatedData.map((alert) => {
+                        const isChat = acionadosSet.has(alert.chamado.toString());
+                        return (
+                          <TableRow
+                            key={alert.id}
+                            className="border-border hover:bg-accent transition-colors"
+                          >
+                            <TableCell className="font-medium">
+                              <Button
+                                variant="link"
+                                size="sm"
+                                className="p-0 text-foreground hover:underline text-xs"
+                                onClick={() => handleChamadoClick(alert)}
+                              >
+                                {alert.chamado}
+                              </Button>
+                            </TableCell>
+                            <TableCell>
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <span className="truncate block max-w-[80px] text-xs">
+                                    {alert.tipo_chamado}
+                                  </span>
+                                </TooltipTrigger>
+                                <TooltipContent>
+                                  <p className="max-w-xs">{alert.tipo_chamado}</p>
+                                </TooltipContent>
+                              </Tooltip>
+                            </TableCell>
+                            <TableCell className="text-xs">{alert.grupo_chamado}</TableCell>
+                            <TableCell className="text-xs">{alert.status_chamado}</TableCell>
+                            <TableCell className="text-xs">
+                              {formatDate(alert.abertura_chamado)}
+                            </TableCell>
+                            <TableCell>
+                              <div className="flex items-center gap-2">
+                                <Tooltip>
+                                  <TooltipTrigger asChild>
+                                    <span className="truncate block max-w-[120px] text-xs">
+                                      {alert.resumo_chamado}
+                                    </span>
+                                  </TooltipTrigger>
+                                  <TooltipContent>
+                                    <p className="max-w-md">{alert.resumo_chamado}</p>
+                                  </TooltipContent>
+                                </Tooltip>
+                                {alert.tipo_chamado.toLowerCase().includes('incidente') && (
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={() => handleIncidentClick(alert)}
+                                    className="p-1 h-auto hover:bg-accent flex-shrink-0"
+                                    title="Iniciar processo de crise"
+                                  >
+                                    <ExternalLink className="h-3 w-3" />
+                                  </Button>
+                                )}
+                              </div>
+                            </TableCell>
+                            <TableCell>
+                              <Badge className={`${getSeverityColor(alert.severidade_chamado)} text-xs`}>
+                                {alert.severidade_chamado}
+                              </Badge>
+                            </TableCell>
+                            <TableCell>
+                              <Button
+                                variant={isChat ? "default" : "outline"}
+                                size="sm"
+                                onClick={() => !isChat && handleAcknowledgment(alert)}
+                                disabled={isChat}
+                                className={`${isChat
+                                  ? 'bg-success text-success-foreground hover:bg-success/90'
+                                  : 'border-border hover:bg-accent'
+                                  } h-7 w-7 p-0`}
+                              >
+                                {isChat ? (
+                                  <Check className="h-3 w-3" />
+                                ) : (
+                                  <AlertTriangle className="h-3 w-3" />
+                                )}
+                              </Button>
+                            </TableCell>
+                          </TableRow>
+                        );
+                      })
+                    )}
+                  </TableBody>
+                </Table>
+              </div>
+            </div>
+
+            {/* Paginação Desktop */}
+            {!loading && sortedAndPaginatedData.length > 0 && totalPages > 1 && (
+              <div className="flex items-center justify-between mt-4 pt-4 border-t border-border">
+                <div className="text-sm text-muted-foreground">
+                  Mostrando {((currentPage - 1) * itemsPerPage) + 1} a {Math.min(currentPage * itemsPerPage, alertData.length)} de {alertData.length} registros
+                </div>
+                <div className="flex items-center gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => handlePageChange(currentPage - 1)}
+                    disabled={currentPage === 1}
+                    className="h-8 px-3"
+                  >
+                    <ChevronLeft className="h-4 w-4 mr-1" />
+                    Anterior
+                  </Button>
+
+                  <div className="flex items-center gap-1">
+                    {[...Array(Math.min(totalPages, 5))].map((_, index) => {
+                      let page;
+                      if (totalPages <= 5) {
+                        page = index + 1;
+                      } else if (currentPage <= 3) {
+                        page = index + 1;
+                      } else if (currentPage >= totalPages - 2) {
+                        page = totalPages - 4 + index;
+                      } else {
+                        page = currentPage - 2 + index;
+                      }
+
+                      return (
+                        <Button
+                          key={page}
+                          variant={currentPage === page ? "default" : "outline"}
+                          size="sm"
+                          onClick={() => handlePageChange(page)}
+                          className="h-8 w-8 p-0"
+                        >
+                          {page}
+                        </Button>
+                      );
+                    })}
+                  </div>
+
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => handlePageChange(currentPage + 1)}
+                    disabled={currentPage === totalPages}
+                    className="h-8 px-3"
+                  >
+                    Próximo
+                    <ChevronRight className="h-4 w-4 ml-1" />
+                  </Button>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Dialog do Modal de Chamado */}
+          <Dialog open={chamadoModalOpen} onOpenChange={setChamadoModalOpen}>
+            <DialogContent className="max-w-3xl max-h-[80vh] border-border shadow-2xl overflow-y-auto">
+              <DialogHeader className="pb-6 border-b border-border">
+                <DialogTitle className="text-left">
+                  {/* Header com design melhorado */}
+                  <div className="relative overflow-hidden rounded-2xl p-6 mb-4 bg-gradient-to-r from-primary to-primary/80">
+                    {/* Número do chamado e título */}
+                    <div className="relative z-10 flex items-start gap-4">
+                      <div className="p-3 rounded-xl bg-white/20 backdrop-blur-sm border border-white/30 shadow-lg">
+                        {selectedIncident?.tipo_chamado === "Solicitação" ? (
+                          <Zap className="h-6 w-6 text-white drop-shadow-sm" />
+                        ) : selectedIncident?.tipo_chamado === "Incidente" ? (
+                          <AlertTriangle className="h-6 w-6 text-white drop-shadow-sm" />
+                        ) : (
+                          <Zap className="h-6 w-6 text-white drop-shadow-sm" />
+                        )}
+                      </div>
+
+                      <div className="flex-1">
+                        <div className="flex items-center gap-3 mb-2">
+                          <span className="text-2xl font-bold text-white drop-shadow-sm">
+                            {selectedIncident?.chamado}
+                          </span>
+                          <div className="h-1 flex-1 bg-white/20 rounded-full">
+                            <div className="h-full w-3/4 bg-white/40 rounded-full"></div>
+                          </div>
+                        </div>
+
+                        <h2 className="text-lg font-medium text-white/95 leading-relaxed drop-shadow-sm">
+                          {selectedIncident?.resumo_chamado}
+                        </h2>
+                      </div>
+                    </div>
+
+                    {/* Status badges */}
+                    {selectedIncident && (
+                      <div className="relative z-10 flex flex-wrap items-center gap-3 mt-6">
+                        <div className="animate-fade-in">
+                          <div className={`${getStatusBadgeClass(selectedIncident.chat)} flex items-center gap-2 px-4 py-2 rounded-xl 
+                              backdrop-blur-sm border border-white/20 shadow-lg`}>
+                            {getStatusIcon(selectedIncident.chat)}
+                            <span className="font-medium text-sm">
+                              {getStatusText(selectedIncident.chat)}
+                            </span>
+                          </div>
+                        </div>
+
+                        <div className="animate-fade-in">
+                          <div className="bg-white/20 text-white flex items-center gap-2 px-4 py-2 rounded-xl 
+                              backdrop-blur-sm border border-white/30 shadow-lg">
+                            <span className="font-medium text-sm">{selectedIncident.tipo_chamado}</span>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </DialogTitle>
+              </DialogHeader>
+
+              {/* Conteúdo principal */}
+              {selectedIncident && (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mt-6">
+                  <div className="space-y-4">
+                    {/* Card Grupo */}
+                    <div className="group relative overflow-hidden rounded-xl bg-card border border-border p-5 
+                        shadow-lg hover:shadow-xl transition-all duration-300 hover:-translate-y-1">
+                      <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-primary to-blue-500"></div>
+                      <div className="flex items-start gap-4">
+                        <div className="p-2 rounded-lg bg-primary/10 group-hover:bg-primary/20 transition-colors duration-300">
+                          <Group className="h-5 w-5 text-primary" />
+                        </div>
+                        <div className="flex-1">
+                          <p className="text-sm text-muted-foreground font-medium mb-1">Grupo</p>
+                          <p className="font-bold text-foreground text-lg">{selectedIncident.grupo_chamado}</p>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Card Abertura */}
+                    <div className="group relative overflow-hidden rounded-xl bg-card border border-border p-5 
+                        shadow-lg hover:shadow-xl transition-all duration-300 hover:-translate-y-1">
+                      <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-green-500 to-emerald-500"></div>
+                      <div className="flex items-start gap-4">
+                        <div className="p-2 rounded-lg bg-green-500/10 group-hover:bg-green-500/20 transition-colors duration-300">
+                          <Calendar className="h-5 w-5 text-green-600" />
+                        </div>
+                        <div className="flex-1">
+                          <p className="text-sm text-muted-foreground font-medium mb-1">Data de Abertura</p>
+                          <p className="font-bold text-foreground text-lg">{formatDate(selectedIncident.abertura_chamado)}</p>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="space-y-4">
+                    {/* Card Status */}
+                    <div className="group relative overflow-hidden rounded-xl bg-card border border-border p-5 
+                        shadow-lg hover:shadow-xl transition-all duration-300 hover:-translate-y-1">
+                      <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-blue-500 to-cyan-500"></div>
+                      <div className="flex items-start gap-4">
+                        <div className="p-2 rounded-lg bg-blue-500/10 group-hover:bg-blue-500/20 transition-colors duration-300">
+                          <Info className="h-5 w-5 text-blue-600" />
+                        </div>
+                        <div className="flex-1">
+                          <p className="text-sm text-muted-foreground font-medium mb-1">Status</p>
+                          <p className="font-bold text-foreground text-lg">{selectedIncident.status_chamado}</p>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Card Severidade */}
+                    <div className="group relative overflow-hidden rounded-xl bg-card border border-border p-5 
+                        shadow-lg hover:shadow-xl transition-all duration-300 hover:-translate-y-1">
+                      <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-red-500 to-orange-500"></div>
+                      <div className="flex items-start gap-4">
+                        <div className="p-2 rounded-lg bg-red-500/10 group-hover:bg-red-500/20 transition-colors duration-300">
+                          <Flame className="h-5 w-5 text-red-600" />
+                        </div>
+                        <div className="flex-1">
+                          <p className="text-sm text-muted-foreground font-medium mb-1">Severidade</p>
+                          <p className="font-bold text-foreground text-lg">{selectedIncident.severidade_chamado}</p>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </DialogContent>
+          </Dialog>
+        </CardContent>
+      </Card>
+    </TooltipProvider>
+  );
+};
