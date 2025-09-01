@@ -1,8 +1,8 @@
 {
-  "errorMessage": "'requestContext'",
-  "errorType": "KeyError",
-  "requestId": "ada41f6f-1d7a-4499-8791-3ccdfa9b5835",
-  "stackTrace": [
-    "  File \"/var/task/lambda_function.py\", line 111, in lambda_handler\n    log(trace, \"invoke\", routeKey=event[\"requestContext\"][\"routeKey\"], connectionId=event[\"requestContext\"][\"connectionId\"], body=event.get(\"body\"))\n"
-  ]
+  "requestContext": {
+    "routeKey": "updateObservacao",
+    "connectionId": "abc123",
+    "eventType": "MESSAGE"
+  },
+  "body": "{\"action\":\"updateObservacao\",\"chamado\":3,\"level\":1,\"observacao\":\"teste\"}"
 }
