@@ -1,4 +1,66 @@
-{
-  "statusCode": 500,
-  "body": "{\"error\": \"An error occurred (ValidationException) when calling the PutItem operation: One or more parameter values were invalid: Type mismatch for key chamado expected: N actual: S\"}"
-}
+import json
+import boto3
+import os
+from datetime import datetime
+from decimal import Decimal
+
+# Nome da tabela
+TABLE_NAME = os.environ.get("DYNAMODB_TABLE", "painelmonitoracao_obs")
+
+dynamodb = boto3.resource("dynamodb", region_name="us-east-1")
+table = dynamodb.Table(TABLE_NAME)
+
+def lambda_handler(event, context):
+    try:
+        print("Evento recebido:", json.dumps(event))
+        print("Usando tabela:", TABLE_NAME)
+
+        body = event.get("body")
+        if body:
+            body = json.loads(body)
+        else:
+            return {
+                "statusCode": 400,
+                "body": json.dumps({"error": "Body da requisição vazio"})
+            }
+
+        chamado = body.get("chamado")   # chave primária (número)
+        observacao = body.get("observacao")
+        status = body.get("status")
+
+        if chamado is None or not observacao or not status:
+            return {
+                "statusCode": 400,
+                "body": json.dumps({
+                    "error": "Campos obrigatórios: chamado (number), observacao, status"
+                })
+            }
+
+        # Garantir que chamado é Number no DynamoDB
+        item = {
+            "chamado": Decimal(str(chamado)),  # DynamoDB espera N
+            "observacao": observacao,
+            "status": status,
+            "createdAt": datetime.utcnow().isoformat()
+        }
+
+        print("Tentando salvar item:", item)
+        table.put_item(Item=item)
+        print("Item salvo com sucesso")
+
+        return {
+            "statusCode": 200,
+            "body": json.dumps({"message": "Registro inserido com sucesso", "item": {
+                "chamado": int(chamado),  # retorna como int pro cliente
+                "observacao": observacao,
+                "status": status,
+                "createdAt": item["createdAt"]
+            }})
+        }
+
+    except Exception as e:
+        print("Erro na lambda:", str(e))
+        return {
+            "statusCode": 500,
+            "body": json.dumps({"error": str(e)})
+        }
