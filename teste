@@ -1,155 +1,307 @@
-import json
-import boto3
-import os
-import uuid
-from datetime import datetime, timezone
-from decimal import Decimal
+// src/store/useChamadoStore.ts
+import { create } from "zustand";
 
-# ---------- Config ----------
-dynamodb = boto3.resource("dynamodb")
-table = dynamodb.Table(os.environ["DDB_TABLE"])  # Tabela principal (chamados)
-conn_table = dynamodb.Table(os.environ["CONNECTIONS_TABLE"])  # Tabela de conexões
-apigw = boto3.client(
-    "apigatewaymanagementapi",
-    endpoint_url=f"https://{os.environ['WS_API_ID']}.execute-api.{os.environ['AWS_REGION']}.amazonaws.com/{os.environ['WS_STAGE']}"
-)
+export interface ChamadoState {
+  status: "pending" | "confirmed" | "escalating" | "completed";
+  currentLevel: number;
+  timeRemaining: number;
+  timerActive: boolean;
+  observations: string;
+  isAttended: boolean;
+}
 
-# ---------- Helpers ----------
-class DecimalEncoder(json.JSONEncoder):
-    def default(self, o):
-        if isinstance(o, Decimal):
-            if o % 1 == 0:
-                return int(o)
-            return float(o)
-        return super(DecimalEncoder, self).default(o)
+interface ChamadoStore {
+  chamados: Record<string, ChamadoState>;
+  initChamado: (id: string) => void;
+  startChamado: (id: string, duration?: number) => void;
+  updateChamado: (id: string, data: Partial<ChamadoState>) => void;
+  confirmChamado: (id: string, observations: string) => void;
+  escalateChamado: (id: string, level: number) => void;
+  completeChamado: (id: string, observations: string) => void;
+  tick: () => void;
+  setFromWS: (id: string, data: Partial<ChamadoState>) => void;
+  reset: () => void;
+}
 
-def log(trace, msg, **kwargs):
-    print(json.dumps({"trace": trace, "msg": msg, **kwargs}, cls=DecimalEncoder, default=str))
+export const useChamadoStore = create<ChamadoStore>((set) => ({
+  chamados: {},
 
-def send_to_connection(conn_id, data):
-    """Envia mensagem para uma conexão específica"""
-    try:
-        apigw.post_to_connection(
-            ConnectionId=conn_id,
-            Data=json.dumps(data, cls=DecimalEncoder).encode("utf-8")
-        )
-    except apigw.exceptions.GoneException:
-        # Conexão morta -> remover
-        conn_table.delete_item(Key={"connectionId": conn_id})
-        log("broadcast", "Conexão removida (GoneException)", connectionId=conn_id)
+  initChamado: (id: string) =>
+    set((state) => {
+      if (state.chamados[id]) return state;
+      return {
+        chamados: {
+          ...state.chamados,
+          [id]: {
+            status: "pending",
+            currentLevel: 0,
+            timeRemaining: 300,
+            timerActive: true,
+            observations: "",
+            isAttended: false,
+          },
+        },
+      };
+    }),
 
-def broadcast(data):
-    """Envia mensagem para todos conectados"""
-    conns = conn_table.scan().get("Items", [])
-    for c in conns:
-        send_to_connection(c["connectionId"], data)
+  startChamado: (id: string, duration: number = 300) =>
+    set((state) => ({
+      chamados: {
+        ...state.chamados,
+        [id]: {
+          status: "pending",
+          currentLevel: 0,
+          timeRemaining: duration,
+          timerActive: true,
+          observations: "",
+          isAttended: false,
+        },
+      },
+    })),
 
-def update_chamado(trace, chamado, update):
-    """Atualiza DynamoDB no chamado"""
-    log(trace, "Atualizando chamado", chamado=chamado, update=update)
-    resp = table.update_item(
-        Key={"chamado": chamado},
-        UpdateExpression="SET " + ", ".join(f"#{k} = :{k}" for k in update.keys()),
-        ExpressionAttributeNames={f"#{k}": k for k in update.keys()},
-        ExpressionAttributeValues={f":{k}": v for k, v in update.items()},
-        ReturnValues="ALL_NEW"
-    )
-    log(trace, "Chamado atualizado", new_state=resp.get("Attributes"))
-    return resp.get("Attributes")
+  updateChamado: (id: string, data: Partial<ChamadoState>) =>
+    set((state) => ({
+      chamados: {
+        ...state.chamados,
+        [id]: {
+          ...state.chamados[id],
+          ...data,
+        },
+      },
+    })),
 
-# ---------- Handlers ----------
-def handle_connect(event, trace):
-    conn_id = event["requestContext"]["connectionId"]
-    conn_table.put_item(Item={"connectionId": conn_id, "connectedAt": datetime.now(timezone.utc).isoformat()})
-    log(trace, "Novo cliente conectado", connectionId=conn_id)
-    return {"statusCode": 200}
+  confirmChamado: (id: string, observations: string) =>
+    set((state) => ({
+      chamados: {
+        ...state.chamados,
+        [id]: {
+          ...state.chamados[id],
+          status: "confirmed",
+          timerActive: false,
+          observations,
+        },
+      },
+    })),
 
-def handle_disconnect(event, trace):
-    conn_id = event["requestContext"]["connectionId"]
-    conn_table.delete_item(Key={"connectionId": conn_id})
-    log(trace, "Cliente desconectado", connectionId=conn_id)
-    return {"statusCode": 200}
+  escalateChamado: (id: string, level: number) =>
+    set((state) => ({
+      chamados: {
+        ...state.chamados,
+        [id]: {
+          ...state.chamados[id],
+          status: "escalating",
+          currentLevel: level,
+          timerActive: true,
+          timeRemaining: 300,
+        },
+      },
+    })),
 
-def handle_start_timer(event, trace, body):
-    chamado = int(body["chamado"])
-    level = int(body["level"])
-    duration = int(body.get("duration", 1200))  # padrão 20min
-    now = datetime.now(timezone.utc).isoformat()
+  completeChamado: (id: string, observations: string) =>
+    set((state) => ({
+      chamados: {
+        ...state.chamados,
+        [id]: {
+          ...state.chamados[id],
+          status: "completed",
+          timerActive: false,
+          observations,
+        },
+      },
+    })),
 
-    update = {
-        f"level{level}_timerStart": now,
-        f"level{level}_duration": duration,
-        f"level{level}_status": "running"
+  tick: () =>
+    set((state) => {
+      const novos: Record<string, ChamadoState> = {};
+      for (const [id, chamado] of Object.entries(state.chamados)) {
+        if (chamado.timerActive && chamado.timeRemaining > 0) {
+          novos[id] = {
+            ...chamado,
+            timeRemaining: chamado.timeRemaining - 1,
+          };
+        } else if (chamado.timerActive && chamado.timeRemaining <= 0) {
+          novos[id] = {
+            ...chamado,
+            timerActive: false,
+            timeRemaining: 0,
+          };
+        } else {
+          novos[id] = chamado;
+        }
+      }
+      return { chamados: novos };
+    }),
+
+  setFromWS: (id: string, data: Partial<ChamadoState>) =>
+    set((state) => ({
+      chamados: {
+        ...state.chamados,
+        [id]: {
+          ...state.chamados[id],
+          ...data,
+        },
+      },
+    })),
+
+  reset: () => set({ chamados: {} }),
+}));
+
+// -------------------
+// WebSocket integração
+// -------------------
+
+const WS_URL = "wss://rsgjd6wsza.execute-api.us-east-1.amazonaws.com/dev";
+let socket: WebSocket | null = null;
+
+// ====== Helpers de mapeamento ======
+
+type ServerTimer = { timerStart?: number; timerEnd?: number; observacao?: string };
+type ServerPayload = {
+  action?: string;
+  chamado?: number;
+  serverTime?: number;
+  duration?: number;
+  status?: string;
+  statusFinal?: string;
+  operador?: string;
+  primeiroAcionado?: ServerTimer;
+  escalacao1?: ServerTimer;
+  escalacao2?: ServerTimer;
+  escalacao3?: ServerTimer;
+  escalacao4?: ServerTimer;
+  timer?: string;
+  [k: string]: any;
+};
+
+function secondsRemaining(timer: ServerTimer | undefined, serverTime?: number) {
+  if (!timer || typeof timer.timerEnd !== "number" || typeof serverTime !== "number") return undefined;
+  return Math.max(0, Math.floor(timer.timerEnd - serverTime));
+}
+
+function pickActiveTimer(p: ServerPayload): { name: string; obj?: ServerTimer; level: number } {
+  const timers: Array<{ name: string; obj?: ServerTimer; level: number }> = [
+    { name: "escalacao4", obj: p.escalacao4, level: 4 },
+    { name: "escalacao3", obj: p.escalacao3, level: 3 },
+    { name: "escalacao2", obj: p.escalacao2, level: 2 },
+    { name: "escalacao1", obj: p.escalacao1, level: 1 },
+    { name: "primeiroAcionado", obj: p.primeiroAcionado, level: 0 },
+  ];
+
+  if (p.timer) {
+    const found = timers.find((t) => t.name === p.timer);
+    if (found) return found;
+  }
+
+  let best = timers[4];
+  let bestEnd = best.obj?.timerEnd ?? 0;
+  for (const t of timers) {
+    const end = t.obj?.timerEnd ?? 0;
+    if (end > bestEnd) {
+      best = t;
+      bestEnd = end;
     }
-    state = update_chamado(trace, chamado, update)
-    broadcast({"event": "startTimer", "chamado": chamado, "level": level, "state": state})
-    return {"statusCode": 200, "body": json.dumps({"msg": "Timer iniciado"}, cls=DecimalEncoder)}
+  }
+  return best;
+}
 
-def handle_update_observacao(event, trace, body):
-    chamado = int(body["chamado"])
-    level = int(body["level"])
-    obs = body["observacao"]
-    update = {f"level{level}_observacao": obs}
-    state = update_chamado(trace, chamado, update)
-    broadcast({"event": "updateObservacao", "chamado": chamado, "level": level, "state": state})
-    return {"statusCode": 200, "body": json.dumps({"msg": "Observação atualizada"}, cls=DecimalEncoder)}
+function deriveStatus(
+  p: ServerPayload,
+  active: boolean,
+  level: number
+): "pending" | "confirmed" | "escalating" | "completed" {
+  if (p.statusFinal) return "completed";
+  if (p.status === "confirmed") return "confirmed";
+  if (active) return level > 0 ? "escalating" : "pending";
+  return "pending";
+}
 
-def handle_update_operador(event, trace, body):
-    chamado = int(body["chamado"])
-    operador = body["operador"]
-    update = {"operador": operador}
-    state = update_chamado(trace, chamado, update)
-    broadcast({"event": "updateOperador", "chamado": chamado, "state": state})
-    return {"statusCode": 200, "body": json.dumps({"msg": "Operador atualizado"}, cls=DecimalEncoder)}
+function mapServerToStore(p: ServerPayload): Partial<ChamadoState> {
+  const chosen = pickActiveTimer(p);
+  const remaining = secondsRemaining(chosen.obj, p.serverTime);
+  const timerActive = typeof remaining === "number" ? remaining > 0 : false;
 
-def handle_update_status_final(event, trace, body):
-    chamado = int(body["chamado"])
-    status = body["status"]
-    update = {"statusFinal": status}
-    state = update_chamado(trace, chamado, update)
-    broadcast({"event": "updateStatusFinal", "chamado": chamado, "state": state})
-    return {"statusCode": 200, "body": json.dumps({"msg": "Status final atualizado"}, cls=DecimalEncoder)}
+  const status = deriveStatus(p, timerActive, chosen.level);
+  const observations = chosen.obj?.observacao ?? "";
+  const isAttended = p.status === "attended";
 
-def handle_get_state(event, trace, body):
-    chamado = int(body["chamado"])
-    resp = table.get_item(Key={"chamado": chamado})
-    state = resp.get("Item", {})
-    log(trace, "Estado retornado", chamado=chamado, state=state)
-    return {"statusCode": 200, "body": json.dumps(state, cls=DecimalEncoder)}
+  return {
+    status,
+    currentLevel: chosen.level,
+    timeRemaining: typeof remaining === "number" ? remaining : 0,
+    timerActive,
+    observations,
+    isAttended,
+  };
+}
 
-# ---------- Main ----------
-def lambda_handler(event, context):
-    trace = str(uuid.uuid4())[:8]
+// ====== WebSocket Init ======
 
-    # Segurança: alguns invokes (ex. test console) podem não ter requestContext
-    req_ctx = event.get("requestContext", {})
-    route = req_ctx.get("routeKey", "UNKNOWN")
-    conn_id = req_ctx.get("connectionId", "N/A")
+export const initWebSocket = () => {
+  if (socket) return;
 
-    log(trace, "invoke", routeKey=route, connectionId=conn_id, body=event.get("body"))
+  socket = new WebSocket(WS_URL);
 
-    try:
-        if route == "$connect":
-            return handle_connect(event, trace)
-        elif route == "$disconnect":
-            return handle_disconnect(event, trace)
-        else:
-            # Mensagens normais -> parse body
-            body = json.loads(event.get("body") or "{}")
+  socket.onopen = () => {
+    console.log("[WS] Conectado ao servidor");
+  };
 
-            if route == "startTimer":
-                return handle_start_timer(event, trace, body)
-            elif route == "updateObservacao":
-                return handle_update_observacao(event, trace, body)
-            elif route == "updateOperador":
-                return handle_update_operador(event, trace, body)
-            elif route == "updateStatusFinal":
-                return handle_update_status_final(event, trace, body)
-            elif route == "getState":
-                return handle_get_state(event, trace, body)
-            else:
-                log(trace, "Rota inválida", route=route)
-                return {"statusCode": 400, "body": json.dumps({"error": "Invalid route"}, cls=DecimalEncoder)}
-    except Exception as e:
-        log(trace, "Erro na execução", error=str(e))
-        return {"statusCode": 500, "body": json.dumps({"error": str(e)}, cls=DecimalEncoder)}
+  socket.onmessage = (event) => {
+    try {
+      if (!event.data || (typeof event.data === "string" && event.data.trim() === "")) {
+        console.warn("[WS] ⚠️ Mensagem vazia ignorada");
+        return;
+      }
+
+      let msg: any;
+      if (typeof event.data === "string") {
+        msg = JSON.parse(event.data);
+      } else {
+        console.warn("[WS] ⚠️ Mensagem não-textual ignorada:", event.data);
+        return;
+      }
+
+      if (msg && msg.ok && !msg.action && !msg.chamado) {
+        return; // ignora ACK
+      }
+
+      if (typeof msg.chamado !== "number") {
+        console.warn("[WS] ⚠️ Mensagem recebida sem 'chamado' numérico:", msg);
+        return;
+      }
+
+      const id = String(msg.chamado);
+      const mapped = mapServerToStore(msg as ServerPayload);
+      useChamadoStore.getState().setFromWS(id, mapped);
+
+    } catch (err) {
+      console.error("[WS] ❌ Erro ao processar mensagem:", err, "RAW:", event.data);
+    }
+  };
+
+  socket.onclose = () => {
+    console.log("[WS] Conexão fechada. Tentando reconectar em 3s...");
+    socket = null;
+    setTimeout(initWebSocket, 3000);
+  };
+
+  socket.onerror = (err) => {
+    console.error("[WS] Erro:", err);
+    socket?.close();
+  };
+};
+
+export const sendWS = (msg: any) => {
+  if (socket && socket.readyState === WebSocket.OPEN) {
+    socket.send(JSON.stringify(msg));
+  } else {
+    console.warn("[WS] ❌ Não foi possível enviar, socket não conectado:", msg);
+  }
+};
+
+// -------------------
+// Tick global
+// -------------------
+
+setInterval(() => {
+  useChamadoStore.getState().tick();
+}, 1000);
