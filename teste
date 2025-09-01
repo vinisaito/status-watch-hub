@@ -10,6 +10,13 @@ TABLE_NAME = os.environ.get("DYNAMODB_TABLE", "painelmonitoracao_obs")
 dynamodb = boto3.resource("dynamodb", region_name="us-east-1")
 table = dynamodb.Table(TABLE_NAME)
 
+# 🔹 Headers de CORS (sempre incluídos nas respostas)
+CORS_HEADERS = {
+    "Access-Control-Allow-Origin": "*",
+    "Access-Control-Allow-Headers": "Content-Type",
+    "Access-Control-Allow-Methods": "OPTIONS,POST"
+}
+
 def lambda_handler(event, context):
     try:
         print("Evento recebido:", json.dumps(event))
@@ -21,6 +28,7 @@ def lambda_handler(event, context):
         else:
             return {
                 "statusCode": 400,
+                "headers": CORS_HEADERS,
                 "body": json.dumps({"error": "Body da requisição vazio"})
             }
 
@@ -32,6 +40,7 @@ def lambda_handler(event, context):
         if chamado is None or not observacao or not status or not operador:
             return {
                 "statusCode": 400,
+                "headers": CORS_HEADERS,
                 "body": json.dumps({
                     "error": "Campos obrigatórios: chamado (number), observacao, status, operador"
                 })
@@ -52,6 +61,7 @@ def lambda_handler(event, context):
 
         return {
             "statusCode": 200,
+            "headers": CORS_HEADERS,
             "body": json.dumps({
                 "message": "Registro inserido com sucesso",
                 "item": {
@@ -68,5 +78,6 @@ def lambda_handler(event, context):
         print("Erro na lambda:", str(e))
         return {
             "statusCode": 500,
+            "headers": CORS_HEADERS,
             "body": json.dumps({"error": str(e)})
         }
