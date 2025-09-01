@@ -1,38 +1,218 @@
-export interface AlertData {
-  id: string;
-  chamado: string;
-  tipo_chamado: string;
-  grupo_chamado: string;
-  status_chamado: string;
-  abertura_chamado: string;
-  resumo_chamado: string;
-  severidade_chamado: string;
-  chat: boolean;
-}
+import { create } from "zustand";
 
-export interface EscalationState {
-  status: 'pending' | 'confirmed' | 'escalating' | 'completed';
-  currentLevel: 0 | 1 | 2 | 3 | 4;
+// -------------------
+// Tipos
+// -------------------
+export interface ChamadoState {
+  status: "pending" | "confirmed" | "escalating" | "completed";
+  currentLevel: number;
   timeRemaining: number;
   timerActive: boolean;
+  observations: string;
   isAttended: boolean;
-  observations: string;
-  pendingStatus?: string;
-  pendingObservations?: string;
-  startedAt?: string;
-  durationMinutes?: number;
 }
 
-export interface ActionTableProps {
-  alertData: AlertData[];
-  onUpdateAcknowledgment: (alertId: string, acknowledged: boolean) => void;
-  loading: boolean;
+interface ChamadoStore {
+  chamados: Record<string, ChamadoState>;
+  initChamado: (id: string) => void;
+  startChamado: (id: string, duration?: number) => void;
+  updateChamado: (id: string, data: Partial<ChamadoState>) => void;
+  confirmChamado: (id: string, observations: string) => void;
+  escalateChamado: (id: string, level: number) => void;
+  completeChamado: (id: string, observations: string) => void;
+  tick: () => void;
+  setFromWS: (id: string, data: Partial<ChamadoState>) => void;
+  reset: () => void;
 }
 
-export type SortField = 'chamado' | 'tipo_chamado' | 'grupo_chamado' | 'status_chamado' | 'abertura_chamado' | 'resumo_chamado' | 'severidade_chamado';
-export type SortDirection = 'asc' | 'desc' | null;
+export const useChamadoStore = create<ChamadoStore>((set) => ({
+  chamados: {},
 
-export interface PendingStatusChange {
-  status: string;
-  observations: string;
-}
+  initChamado: (id: string) =>
+    set((state) => {
+      if (state.chamados[id]) return state;
+      return {
+        chamados: {
+          ...state.chamados,
+          [id]: {
+            status: "pending",
+            currentLevel: 0,
+            timeRemaining: 300,
+            timerActive: true,
+            observations: "",
+            isAttended: false,
+          },
+        },
+      };
+    }),
+
+  startChamado: (id: string, duration: number = 300) =>
+    set((state) => ({
+      chamados: {
+        ...state.chamados,
+        [id]: {
+          status: "pending",
+          currentLevel: 0,
+          timeRemaining: duration,
+          timerActive: true,
+          observations: "",
+          isAttended: false,
+        },
+      },
+    })),
+
+  updateChamado: (id: string, data: Partial<ChamadoState>) =>
+    set((state) => {
+      if (!state.chamados[id]) return state; // evita erro se não existir
+      return {
+        chamados: {
+          ...state.chamados,
+          [id]: {
+            ...state.chamados[id],
+            ...data,
+          },
+        },
+      };
+    }),
+
+  confirmChamado: (id: string, observations: string) =>
+    set((state) => {
+      if (!state.chamados[id]) return state;
+      return {
+        chamados: {
+          ...state.chamados,
+          [id]: {
+            ...state.chamados[id],
+            status: "confirmed",
+            timerActive: false,
+            observations,
+          },
+        },
+      };
+    }),
+
+  escalateChamado: (id: string, level: number) =>
+    set((state) => {
+      if (!state.chamados[id]) return state;
+      return {
+        chamados: {
+          ...state.chamados,
+          [id]: {
+            ...state.chamados[id],
+            status: "escalating",
+            currentLevel: level,
+            timerActive: true,
+            timeRemaining: 300,
+          },
+        },
+      };
+    }),
+
+  completeChamado: (id: string, observations: string) =>
+    set((state) => {
+      if (!state.chamados[id]) return state;
+      return {
+        chamados: {
+          ...state.chamados,
+          [id]: {
+            ...state.chamados[id],
+            status: "completed",
+            timerActive: false,
+            observations,
+          },
+        },
+      };
+    }),
+
+  tick: () =>
+    set((state) => {
+      const novos: Record<string, ChamadoState> = {};
+      for (const [id, chamado] of Object.entries(state.chamados)) {
+        if (chamado.timerActive && chamado.timeRemaining > 0) {
+          novos[id] = {
+            ...chamado,
+            timeRemaining: chamado.timeRemaining - 1,
+          };
+        } else if (chamado.timerActive && chamado.timeRemaining <= 0) {
+          novos[id] = {
+            ...chamado,
+            timerActive: false,
+            timeRemaining: 0,
+          };
+        } else {
+          novos[id] = chamado;
+        }
+      }
+      return { chamados: novos };
+    }),
+
+  setFromWS: (id: string, data: Partial<ChamadoState>) =>
+    set((state) => {
+      if (!state.chamados[id]) return state;
+      return {
+        chamados: {
+          ...state.chamados,
+          [id]: {
+            ...state.chamados[id],
+            ...data,
+          },
+        },
+      };
+    }),
+
+  reset: () => set({ chamados: {} }),
+}));
+
+// -------------------
+// WebSocket
+// -------------------
+
+const WS_URL = "wss://SEU-ENDPOINT.execute-api.us-east-1.amazonaws.com/dev"; // troque aqui
+let socket: WebSocket | null = null;
+
+export const initWebSocket = () => {
+  if (socket) return;
+  socket = new WebSocket(WS_URL);
+
+  socket.onopen = () => console.log("[WS] Conectado");
+  socket.onclose = () => {
+    console.log("[WS] Fechado, tentando reconectar...");
+    socket = null;
+    setTimeout(initWebSocket, 3000);
+  };
+  socket.onerror = (err) => {
+    console.error("[WS] Erro:", err);
+    socket?.close();
+  };
+  socket.onmessage = (event) => {
+    try {
+      const msg = JSON.parse(event.data);
+      if (!msg.chamado) return;
+
+      const id = String(msg.chamado);
+      useChamadoStore.getState().setFromWS(id, {
+        status: msg.status,
+        currentLevel: msg.level ?? 0,
+        timeRemaining: msg.remaining ?? 0,
+        timerActive: msg.remaining > 0,
+        observations: msg.observacao ?? "",
+        isAttended: msg.status === "attended",
+      });
+    } catch (e) {
+      console.error("[WS] Erro parse:", e);
+    }
+  };
+};
+
+export const sendWS = (msg: any) => {
+  if (socket && socket.readyState === WebSocket.OPEN) {
+    socket.send(JSON.stringify(msg));
+  } else {
+    console.warn("[WS] Socket não conectado");
+  }
+};
+
+// Tick global
+setInterval(() => {
+  useChamadoStore.getState().tick();
+}, 1000);
