@@ -1,523 +1,140 @@
 import json
 import boto3
 import os
-import decimal
 import uuid
-import sys
-from datetime import datetime
+from datetime import datetime, timezone
+from decimal import Decimal
 
-# ===========================
-# Config
-# ===========================
-AWS_REGION = os.environ.get("AWS_REGION", "us-east-1")
-dynamodb = boto3.resource("dynamodb", region_name=AWS_REGION)
+# ---------- Config ----------
+dynamodb = boto3.resource("dynamodb")
+table = dynamodb.Table(os.environ["DDB_TABLE"])  # Tabela principal (chamados)
+conn_table = dynamodb.Table(os.environ["CONNECTIONS_TABLE"])  # Tabela de conexões
+apigw = boto3.client("apigatewaymanagementapi",
+    endpoint_url=f"https://{os.environ['WS_API_ID']}.execute-api.{os.environ['AWS_REGION']}.amazonaws.com/{os.environ['WS_STAGE']}"
+)
 
-connections_table = dynamodb.Table(os.environ["CONNECTIONS_TABLE"])  # PK: connectionId (String)
-chamados_table     = dynamodb.Table(os.environ["CHAMADOS_TABLE"])    # PK: chamado (Number)
+# ---------- Helpers ----------
+def log(trace, msg, **kwargs):
+    print(json.dumps({"trace": trace, "msg": msg, **kwargs}, default=str))
 
-# Controles de debug/execução
-DISABLE_APIGW_POST  = os.environ.get("DISABLE_APIGW_POST", "0") == "1"  # não faz post_to_connection/broadcast
-VERBOSE_DDB_CHECK   = os.environ.get("VERBOSE_DDB_CHECK", "0") == "1"    # faz get depois do put pra validar
-
-# ===========================
-# Utils / Infra
-# ===========================
-class DecimalEncoder(json.JSONEncoder):
-    def default(self, o):
-        if isinstance(o, decimal.Decimal):
-            return int(o) if o % 1 == 0 else float(o)
-        return super().default(o)
-
-def to_json(data):
-    return json.dumps(data, cls=DecimalEncoder, ensure_ascii=False)
-
-TRACE_ID = None
-def log(msg, **kwargs):
-    """Log estruturado com trace id e flush imediato."""
-    global TRACE_ID
-    if not TRACE_ID:
-        TRACE_ID = str(uuid.uuid4())[:8]
-    payload = {"trace": TRACE_ID, "msg": msg}
-    payload.update(kwargs)
-    print(json.dumps(payload, default=str))
-    sys.stdout.flush()
-
-def now_ts():
-    return int(datetime.utcnow().timestamp())
-
-def json_response(status: int, body_obj: dict):
-    """Garante sempre JSON no body HTTP (Gateway -> cliente)."""
-    return {
-        "statusCode": status,
-        "headers": {"Content-Type": "application/json"},
-        "body": to_json(body_obj),
-    }
-
-def parse_body_safe(event):
-    """
-    Faz o parse do body UMA vez e guarda em event['parsedBody'].
-    Aceita:
-      - dict
-      - bytes/bytearray  (utf-8 json)
-      - string JSON para dict
-      - string JSON para string (ex.: "\"getState\"" -> {"action": "getState"})
-      - string crua -> interpreta como {"action": "<string>"}
-    """
-    if "parsedBody" in event:
-        return event["parsedBody"]
-
-    raw = event.get("body")
-    body = {}
-    if raw is None:
-        body = {}
-    elif isinstance(raw, dict):
-        body = raw
-    elif isinstance(raw, (bytes, bytearray)):
-        try:
-            body = json.loads(raw.decode("utf-8"))
-        except Exception as e:
-            log("JSON parse error (bytes?)", error=str(e))
-            body = {}
-    elif isinstance(raw, str):
-        try:
-            parsed = json.loads(raw)
-            if isinstance(parsed, str):
-                body = {"action": parsed}
-            elif isinstance(parsed, dict):
-                body = parsed
-            else:
-                body = {}
-        except Exception:
-            body = {"action": raw.strip()}
-    else:
-        body = {}
-
-    event["parsedBody"] = body
-    return body
-
-def require_int(v, field="value"):
+def send_to_connection(conn_id, data):
+    """Envia mensagem para uma conexão específica"""
     try:
-        return int(v)
-    except Exception:
-        raise ValueError(f"'{field}' deve ser inteiro. Recebido: {v!r}")
-
-def get_apigw_client(event):
-    rc = event["requestContext"]
-    endpoint_url = f"https://{rc['domainName']}/{rc['stage']}"
-    log("get_apigw_client", endpoint_url=endpoint_url)
-    return boto3.client("apigatewaymanagementapi", endpoint_url=endpoint_url)
-
-def send_to_connection(apigw, connection_id: str, message: dict):
-    """Envia JSON para UMA conexão. Remove conexões mortas."""
-    if DISABLE_APIGW_POST:
-        log("post_to_connection SKIPPED (DISABLE_APIGW_POST=1)",
-            connectionId=connection_id, action=message.get("action"))
-        return True
-    try:
-        apigw.post_to_connection(Data=to_json(message), ConnectionId=connection_id)
-        log("post_to_connection OK", connectionId=connection_id, action=message.get("action"))
-        return True
+        apigw.post_to_connection(ConnectionId=conn_id, Data=json.dumps(data).encode("utf-8"))
     except apigw.exceptions.GoneException:
-        log("GoneException - removendo conexão", connectionId=connection_id)
-        try:
-            connections_table.delete_item(Key={"connectionId": connection_id})
-        except Exception as e:
-            log("erro ao remover conexão Gone", error=str(e))
-        return False
-    except Exception as e:
-        log("post_to_connection ERROR", connectionId=connection_id, error=str(e))
-        return False
+        # Conexão morta -> remover
+        conn_table.delete_item(Key={"connectionId": conn_id})
+        log("broadcast", "Conexão removida (GoneException)", connectionId=conn_id)
 
-def broadcast(event, message: dict):
-    """Envia a mesma mensagem para TODAS as conexões ativas."""
-    if DISABLE_APIGW_POST:
-        log("broadcast SKIPPED (DISABLE_APIGW_POST=1)",
-            action=message.get("action"), chamado=message.get("chamado"), message=message)
-        return json_response(200, {"ok": True, "skipped": True})
-
-    apigw = get_apigw_client(event)
-    try:
-        scan = connections_table.scan()
-        conns = scan.get("Items", [])
-        log("broadcast scan OK", total=len(conns))
-    except Exception as e:
-        log("broadcast scan ERROR", error=str(e))
-        return json_response(500, {"error": "erro ao listar conexões"})
-
-    log("broadcast begin",
-        total=len(conns), action=message.get("action"), chamado=message.get("chamado"))
-    sent = 0
+def broadcast(data):
+    """Envia mensagem para todos conectados"""
+    conns = conn_table.scan().get("Items", [])
     for c in conns:
-        if send_to_connection(apigw, c["connectionId"], message):
-            sent += 1
-    log("broadcast end", sent=sent, total=len(conns))
-    return json_response(200, {"ok": True, "sent": sent, "total": len(conns)})
+        send_to_connection(c["connectionId"], data)
 
-# ===========================
-# Persistência de Estado (DDB)
-# ===========================
-def ddb_get_item(chamado: int) -> dict:
-    try:
-        log("DDB get_item BEGIN", table=chamados_table.name, key={"chamado": chamado})
-        resp = chamados_table.get_item(Key={"chamado": chamado})
-        item = resp.get("Item", {})
-        log("DDB get_item END",
-            found=bool(item),
-            http=resp.get("ResponseMetadata", {}).get("HTTPStatusCode"),
-            reqId=resp.get("ResponseMetadata", {}).get("RequestId"))
-        return item or {}
-    except Exception as e:
-        log("DDB get_item ERROR", error=str(e), chamado=chamado)
-        return {}
+def update_chamado(trace, chamado, update):
+    """Atualiza DynamoDB no chamado"""
+    log(trace, "Atualizando chamado", chamado=chamado, update=update)
+    resp = table.update_item(
+        Key={"chamado": chamado},
+        UpdateExpression="SET " + ", ".join(f"#{k} = :{k}" for k in update.keys()),
+        ExpressionAttributeNames={f"#{k}": k for k in update.keys()},
+        ExpressionAttributeValues={f":{k}": v for k, v in update.items()},
+        ReturnValues="ALL_NEW"
+    )
+    log(trace, "Chamado atualizado", new_state=resp.get("Attributes"))
+    return resp.get("Attributes")
 
-def ddb_put_item(item: dict) -> bool:
-    try:
-        log("DDB put_item BEGIN", table=chamados_table.name, item=item)
-        resp = chamados_table.put_item(Item=item)
-        log("DDB put_item END",
-            http=resp.get("ResponseMetadata", {}).get("HTTPStatusCode"),
-            reqId=resp.get("ResponseMetadata", {}).get("RequestId"))
-        if VERBOSE_DDB_CHECK:
-            check = chamados_table.get_item(Key={"chamado": item["chamado"]})
-            log("DDB put_item CHECK", found=bool(check.get("Item")), item=check.get("Item"))
-        return True
-    except Exception as e:
-        log("DDB put_item ERROR", error=str(e))
-        return False
+# ---------- Handlers ----------
+def handle_connect(event, trace):
+    conn_id = event["requestContext"]["connectionId"]
+    conn_table.put_item(Item={"connectionId": conn_id, "connectedAt": datetime.now(timezone.utc).isoformat()})
+    log(trace, "Novo cliente conectado", connectionId=conn_id)
+    return {"statusCode": 200}
 
-def ensure_initial_state(chamado: int) -> dict:
-    st = ddb_get_item(chamado)
-    if not st:
-        # estado inicial só na memória; persistimos quando realmente houver ação
-        st = {
-            "chamado": chamado,            # PK (Number)
-            "nivelAtual": 0,               # 0 = primeiro acionamento; 1..4 = escalas
-            "statusGeral": "pendente",     # pendente|em_andamento|concluido
-            "statusFinal": None,           # attended|not-attended|None
-            "operador": None,              # string
-            "niveis": {},                  # "0".."4" -> dados por nível
-            "ultimoUpdate": now_ts(),
-        }
-    return st
+def handle_disconnect(event, trace):
+    conn_id = event["requestContext"]["connectionId"]
+    conn_table.delete_item(Key={"connectionId": conn_id})
+    log(trace, "Cliente desconectado", connectionId=conn_id)
+    return {"statusCode": 200}
 
-def resolve_level_from_body(body: dict):
-    """
-    Aceita:
-      - body["nivel"] (int)
-      - body["timer"] em {"primeiroAcionado", "escalacao1",..,"escalacao4"}
-    Retorna int 0..4 ou None.
-    """
-    if "nivel" in body:
-        try:
-            return int(body["nivel"])
-        except Exception:
-            return None
-    t = body.get("timer")
-    if t == "primeiroAcionado":
-        return 0
-    if isinstance(t, str) and t.startswith("escalacao"):
-        try:
-            n = int(t.replace("escalacao", ""))
-            if 1 <= n <= 4:
-                return n
-        except Exception:
-            pass
-    return None
+def handle_start_timer(event, trace, body):
+    chamado = int(body["chamado"])
+    level = int(body["level"])
+    duration = int(body.get("duration", 1200))  # padrão 20min
+    now = datetime.now(timezone.utc).isoformat()
 
-def level_default_duration(nivel: int) -> int:
-    return 20 * 60 if nivel == 0 else 10 * 60
+    update = {
+        f"level{level}_timerStart": now,
+        f"level{level}_duration": duration,
+        f"level{level}_status": "running"
+    }
+    state = update_chamado(trace, chamado, update)
+    broadcast({"event": "startTimer", "chamado": chamado, "level": level, "state": state})
+    return {"statusCode": 200, "body": "Timer iniciado"}
 
-# ===========================
-# Handler / Dispatch
-# ===========================
+def handle_update_observacao(event, trace, body):
+    chamado = int(body["chamado"])
+    level = int(body["level"])
+    obs = body["observacao"]
+    update = {f"level{level}_observacao": obs}
+    state = update_chamado(trace, chamado, update)
+    broadcast({"event": "updateObservacao", "chamado": chamado, "level": level, "state": state})
+    return {"statusCode": 200, "body": "Observação atualizada"}
+
+def handle_update_operador(event, trace, body):
+    chamado = int(body["chamado"])
+    operador = body["operador"]
+    update = {"operador": operador}
+    state = update_chamado(trace, chamado, update)
+    broadcast({"event": "updateOperador", "chamado": chamado, "state": state})
+    return {"statusCode": 200, "body": "Operador atualizado"}
+
+def handle_update_status_final(event, trace, body):
+    chamado = int(body["chamado"])
+    status = body["status"]
+    update = {"statusFinal": status}
+    state = update_chamado(trace, chamado, update)
+    broadcast({"event": "updateStatusFinal", "chamado": chamado, "state": state})
+    return {"statusCode": 200, "body": "Status final atualizado"}
+
+def handle_get_state(event, trace, body):
+    chamado = int(body["chamado"])
+    resp = table.get_item(Key={"chamado": chamado})
+    state = resp.get("Item", {})
+    log(trace, "Estado retornado", chamado=chamado, state=state)
+    return {"statusCode": 200, "body": json.dumps(state)}
+
+# ---------- Main ----------
 def lambda_handler(event, context):
-    global TRACE_ID
-    TRACE_ID = str(uuid.uuid4())[:8]
+    trace = str(uuid.uuid4())[:8]
+    log(trace, "invoke", routeKey=event["requestContext"]["routeKey"], connectionId=event["requestContext"]["connectionId"], body=event.get("body"))
 
-    print("=== Lambda Iniciada ===", flush=True)
-    print(json.dumps(event, default=str), flush=True)
-
-    rc = event.get("requestContext")
-    if not isinstance(rc, dict):
-        log("invalid_test_event_missing_requestContext", eventKeys=list(event.keys()))
-        # modo teste: aceita { route, body, connectionId? }
-        route = event.get("route")
-        if route:
-            log("direct_invoke_route_detected", route=route)
-            fake = {
-                "requestContext": {
-                    "routeKey": route,
-                    "connectionId": event.get("connectionId", "direct-invoke"),
-                    "domainName": event.get("domainName", "example.execute-api.amazonaws.com"),
-                    "stage": event.get("stage", "dev"),
-                },
-                "body": event.get("body"),
-            }
-            parse_body_safe(fake)
-            return _dispatch(fake)
-        return json_response(400, {"error": "Evento inválido: faltou requestContext"})
-
-    parse_body_safe(event)
-    return _dispatch(event)
-
-def _dispatch(event):
     route = event["requestContext"]["routeKey"]
-    rc    = event["requestContext"]
-    body  = parse_body_safe(event)
-    log("invoke", routeKey=route, connectionId=rc.get("connectionId"), body=body)
 
+    # Roteamento
     try:
-        # Handshake
         if route == "$connect":
-            return on_connect(event)
-        if route == "$disconnect":
-            return on_disconnect(event)
+            return handle_connect(event, trace)
+        elif route == "$disconnect":
+            return handle_disconnect(event, trace)
+        else:
+            # Mensagens normais -> parse body
+            body = json.loads(event.get("body") or "{}")
 
-        # Rotas explícitas
-        if route == "getState":
-            return get_state(event)
-        if route == "startTimer":
-            return start_timer(event)
-        if route == "updateObservacao":
-            return update_observacao(event)
-        if route == "updateOperador":
-            return update_operador(event)
-        if route == "updateStatusFinal":
-            return update_status_final(event)
-
-        # Roteamento por $default usando body.action
-        if route == "$default":
-            action = body.get("action")
-            log("$default received", action=action)
-
-            # Mapa (permite trabalhar só com $default se quiser)
-            known = {
-                "getState": "getState",
-                "startTimer": "startTimer",
-                "updateObservacao": "updateObservacao",
-                "updateOperador": "updateOperador",
-                "updateStatusFinal": "updateStatusFinal",
-            }
-            if action in known:
-                e2 = dict(event)
-                e2["requestContext"] = dict(event["requestContext"])
-                e2["requestContext"]["routeKey"] = known[action]
-                return _dispatch(e2)
-
-            # Se não reconhecido, retorna erro claro (evita confusão com "noop")
-            log("acao_desconhecida_no_default", action=action)
-            return json_response(400, {"error": "action inválida no $default", "action": action})
-
-        # Qualquer outra routeKey
-        log("rota inválida", route=route)
-        return json_response(400, {"error": "rota inválida", "routeKey": route})
-
+            if route == "startTimer":
+                return handle_start_timer(event, trace, body)
+            elif route == "updateObservacao":
+                return handle_update_observacao(event, trace, body)
+            elif route == "updateOperador":
+                return handle_update_operador(event, trace, body)
+            elif route == "updateStatusFinal":
+                return handle_update_status_final(event, trace, body)
+            elif route == "getState":
+                return handle_get_state(event, trace, body)
+            else:
+                log(trace, "Rota inválida", route=route)
+                return {"statusCode": 400, "body": "Invalid route"}
     except Exception as e:
-        log("dispatch ERROR", error=str(e))
-        return json_response(500, {"error": str(e)})
-
-# ===========================
-# Rotas WebSocket
-# ===========================
-def on_connect(event):
-    connection_id = event["requestContext"]["connectionId"]
-    try:
-        log("on_connect BEGIN", connectionId=connection_id, table=connections_table.name)
-        resp = connections_table.put_item(
-            Item={"connectionId": connection_id, "connectedAt": now_ts()}
-        )
-        log("on_connect END",
-            http=resp.get("ResponseMetadata", {}).get("HTTPStatusCode"),
-            reqId=resp.get("ResponseMetadata", {}).get("RequestId"))
-    except Exception as e:
-        log("on_connect ERROR", connectionId=connection_id, error=str(e))
-    return json_response(200, {"ok": True})
-
-def on_disconnect(event):
-    connection_id = event["requestContext"]["connectionId"]
-    try:
-        log("on_disconnect BEGIN", connectionId=connection_id, table=connections_table.name)
-        resp = connections_table.delete_item(Key={"connectionId": connection_id})
-        log("on_disconnect END",
-            http=resp.get("ResponseMetadata", {}).get("HTTPStatusCode"),
-            reqId=resp.get("ResponseMetadata", {}).get("RequestId"))
-    except Exception as e:
-        log("on_disconnect ERROR", connectionId=connection_id, error=str(e))
-    return json_response(200, {"ok": True})
-
-# ===========================
-# Ações de estado (negócio)
-# ===========================
-def start_timer(event):
-    """
-    Inicia (ou reinicia) o timer de um nível.
-    Body esperado:
-      - chamado: number (obrigatório)
-      - timer OU nivel:
-          timer: "primeiroAcionado" | "escalacao1".."escalacao4"
-          nivel: 0..4
-      - duracao: opcional (segundos). Default: 20min para 0; 10min para 1..4
-      - observacao: opcional
-    """
-    body = parse_body_safe(event)
-    chamado = require_int(body.get("chamado"), "chamado")
-    nivel = resolve_level_from_body(body)
-    if nivel is None:
-        return json_response(400, {"error": "nivel/timer inválido ou ausente"})
-
-    observacao = body.get("observacao", "")
-    duracao    = int(body.get("duracao", level_default_duration(nivel)))
-    ts_start   = now_ts()
-    ts_end     = ts_start + duracao
-
-    log("start_timer BEGIN", chamado=chamado, nivel=nivel, duracao=duracao)
-
-    st = ensure_initial_state(chamado)
-    st["niveis"][str(nivel)] = {
-        "status": "em_andamento",
-        "timerStart": ts_start,
-        "duracao": duracao,
-        "timerEnd": ts_end,
-        "observacao": observacao,
-    }
-    st["nivelAtual"]   = nivel
-    st["statusGeral"]  = "em_andamento"
-    st["ultimoUpdate"] = now_ts()
-
-    ok = ddb_put_item(st)
-    log("start_timer SAVE", ok=ok)
-
-    msg = {
-        "action": "timerStarted",
-        "chamado": chamado,
-        "serverTime": now_ts(),
-        **st
-    }
-    return broadcast(event, msg)
-
-def update_observacao(event):
-    """
-    Atualiza (ou cria) a observação de um nível.
-    Body:
-      - chamado: number
-      - timer OU nivel
-      - observacao: string
-    """
-    body = parse_body_safe(event)
-    chamado = require_int(body.get("chamado"), "chamado")
-    nivel = resolve_level_from_body(body)
-    if nivel is None:
-        return json_response(400, {"error": "nivel/timer inválido ou ausente"})
-    obs = (body.get("observacao") or "")
-
-    log("update_observacao BEGIN", chamado=chamado, nivel=nivel)
-
-    st = ensure_initial_state(chamado)
-    lv = st["niveis"].get(str(nivel))
-    if not lv:
-        lv = {
-            "status": "pendente",
-            "timerStart": None,
-            "duracao": None,
-            "timerEnd": None,
-            "observacao": obs,
-        }
-    else:
-        lv["observacao"] = obs
-
-    st["niveis"][str(nivel)] = lv
-    st["ultimoUpdate"] = now_ts()
-
-    ok = ddb_put_item(st)
-    log("update_observacao SAVE", ok=ok)
-
-    msg = {
-        "action": "observacaoUpdated",
-        "chamado": chamado,
-        "nivel": nivel,
-        "serverTime": now_ts(),
-        **st
-    }
-    return broadcast(event, msg)
-
-def update_operador(event):
-    """
-    Define/atualiza o operador do chamado.
-    Body:
-      - chamado: number
-      - operador: string
-    """
-    body = parse_body_safe(event)
-    chamado  = require_int(body.get("chamado"), "chamado")
-    operador = (body.get("operador") or "").strip()
-
-    log("update_operador BEGIN", chamado=chamado, operador=operador)
-
-    st = ensure_initial_state(chamado)
-    st["operador"] = operador
-    st["ultimoUpdate"] = now_ts()
-
-    ok = ddb_put_item(st)
-    log("update_operador SAVE", ok=ok)
-
-    msg = {
-        "action": "operadorUpdated",
-        "chamado": chamado,
-        "operador": operador,
-        "serverTime": now_ts(),
-        **st
-    }
-    return broadcast(event, msg)
-
-def update_status_final(event):
-    """
-    Altera o status final do chamado (atendimento global).
-    Body:
-      - chamado: number
-      - statusFinal: "attended" | "not-attended"
-    """
-    body = parse_body_safe(event)
-    chamado = require_int(body.get("chamado"), "chamado")
-    status_final = (body.get("statusFinal") or "").strip()
-    if status_final not in ("attended", "not-attended"):
-        return json_response(400, {"error": "statusFinal deve ser 'attended' ou 'not-attended'"})
-
-    log("update_status_final BEGIN", chamado=chamado, statusFinal=status_final)
-
-    st = ensure_initial_state(chamado)
-    st["statusFinal"]  = status_final
-    st["statusGeral"]  = "concluido" if status_final == "attended" else st.get("statusGeral", "pendente")
-    st["ultimoUpdate"] = now_ts()
-
-    ok = ddb_put_item(st)
-    log("update_status_final SAVE", ok=ok)
-
-    msg = {
-        "action": "statusFinalUpdated",
-        "chamado": chamado,
-        "serverTime": now_ts(),
-        **st
-    }
-    return broadcast(event, msg)
-
-def get_state(event):
-    """
-    Envia o estado atual **apenas** para a conexão solicitante (sem broadcast).
-    Body:
-      - chamado: number
-    """
-    body = parse_body_safe(event)
-    chamado = require_int(body.get("chamado"), "chamado")
-    connection_id = event["requestContext"]["connectionId"]
-
-    st = ensure_initial_state(chamado)
-    apigw = get_apigw_client(event)
-    msg = {
-        "action": "currentState",
-        "chamado": chamado,
-        "serverTime": now_ts(),
-        **st
-    }
-    log("get_state -> enviando", chamado=chamado, connectionId=connection_id)
-    send_to_connection(apigw, connection_id, msg)
-    return json_response(200, {"ok": True})
+        log(trace, "Erro na execução", error=str(e))
+        return {"statusCode": 500, "body": f"Erro: {str(e)}"}
