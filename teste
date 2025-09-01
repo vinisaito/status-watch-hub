@@ -1,300 +1,106 @@
-import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
-import { Label } from '@/components/ui/label';
-import { Textarea } from '@/components/ui/textarea';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Check, Clock, Play, CheckCircle, FastForward, RotateCcw, X } from 'lucide-react';
-import { AlertData, PendingStatusChange } from '@/types/ActionTable';
-import { useTimer } from '@/hooks/UseTimer';
-import { useChamadoStore } from '@/store/useChamadoStore';
+import { create } from "zustand";
 
-interface ConfirmationColumnProps {
-  alert: AlertData;
-  currentObservation: string;
-  showConfirmation: boolean;
-  pendingChange?: PendingStatusChange;
-  onStartConfirmation: (alertId: string) => void;
-  onConfirmReceived: (alertId: string) => void;
-  onStartEscalation: (alertId: string, level: 1 | 2 | 3 | 4) => void;
-  onObservationChange: (alertId: string, value: string) => void;
-  onPendingObservationChange: (alertId: string, value: string) => void;
-  onPrepareStatusChange: (alertId: string, status: string) => void;
-  onConfirmStatusChange: (alertId: string) => void;
-  onCancelStatusChange: (alertId: string) => void;
-  onGoBack: (alertId: string) => void;
+export interface EscalationState {
+  status: "pending" | "confirmed" | "escalating" | "completed";
+  currentLevel: 0 | 1 | 2 | 3 | 4;
+  timeRemaining: number;
+  timerActive: boolean;
+  isAttended: boolean;
+  observations: string;
+  pendingStatus?: string;
+  pendingObservations?: string;
+  startedAt?: string;
+  durationMinutes?: number;
 }
 
-export const ConfirmationColumn = ({
-  alert,
-  currentObservation,
-  showConfirmation,
-  pendingChange,
-  onStartConfirmation,
-  onConfirmReceived,
-  onStartEscalation,
-  onObservationChange,
-  onPendingObservationChange,
-  onPrepareStatusChange,
-  onConfirmStatusChange,
-  onCancelStatusChange,
-  onGoBack,
-}: ConfirmationColumnProps) => {
-  const { formatTime } = useTimer();
+interface ChamadoStore {
+  chamados: Record<string, EscalationState>;
+  socket: WebSocket | null;
+  initWebSocket: () => void;
+  initChamado: (chamado: string) => void;
+  updateChamado: (chamado: string, updates: Partial<EscalationState>) => void;
+}
 
-  const state = useChamadoStore((s) => s.chamados[alert.chamado]);
+export const useChamadoStore = create<ChamadoStore>((set, get) => ({
+  chamados: {},
+  socket: null,
 
-  if (!state) {
-    return (
-      <div className="text-center">
-        <Button
-          size="sm"
-          variant="outline"
-          onClick={() => {
-            useChamadoStore.getState().initChamado(alert.chamado);
-            onStartConfirmation(alert.chamado);
-          }}
-          className="h-8 px-3 text-xs"
-        >
-          <Play className="h-3 w-3 mr-1" />
-          Iniciar
-        </Button>
-      </div>
-    );
-  }
+  initWebSocket: () => {
+    const { socket } = get();
+    if (socket) return;
 
-  const levelNames = { 1: '1ª', 2: '2ª', 3: '3ª', 4: '4ª' };
+    // 🔗 coloque aqui o endpoint gerado pelo API Gateway (wss://...)
+    const ws = new WebSocket("wss://SEU-ENDPOINT.execute-api.us-east-1.amazonaws.com/production");
 
-  switch (state.status) {
-    case 'pending':
-      return (
-        <div className="text-center space-y-3">
-          <div className="flex items-center justify-center gap-2">
-            <Clock className="h-4 w-4 text-warning" />
-            <span
-              className="text-sm font-mono font-bold"
-              style={{ color: state.timeRemaining <= 60 ? '#ef4444' : '#f59e0b' }}
-            >
-              {formatTime(state.timeRemaining)}
-            </span>
-            {state.timerActive && (
-              <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
-            )}
-          </div>
+    ws.onopen = () => {
+      console.log("✅ WebSocket conectado");
+    };
 
-          <div className="space-y-2">
-            <div className="space-y-1">
-              <Label className="text-xs">
-                Observações <span className="text-destructive">*</span>
-              </Label>
-              <Textarea
-                placeholder="Observações são obrigatórias para confirmação"
-                value={currentObservation}
-                onChange={(e) => onObservationChange(alert.chamado, e.target.value)}
-                className="text-xs min-h-[60px] resize-none"
-                required
-              />
-              {!currentObservation.trim() && (
-                <p className="text-xs text-destructive">Observações são obrigatórias</p>
-              )}
-            </div>
+    ws.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data);
+        if (data.type === "update") {
+          set((state) => ({
+            chamados: {
+              ...state.chamados,
+              [data.chamado]: {
+                ...state.chamados[data.chamado],
+                ...data.payload,
+              },
+            },
+          }));
+        }
+      } catch (err) {
+        console.error("Erro ao parsear mensagem WS:", err);
+      }
+    };
 
-            <div className="flex gap-1">
-              <Button
-                size="sm"
-                variant="default"
-                onClick={() => onConfirmReceived(alert.chamado)}
-                disabled={!currentObservation.trim()}
-                className="h-8 px-3 text-xs flex-1 disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                <Check className="h-3 w-3 mr-1" />
-                Confirmar
-              </Button>
-              <Button
-                size="sm"
-                variant="secondary"
-                onClick={() => onStartEscalation(alert.chamado, 1)}
-                disabled={!currentObservation.trim()}
-                className="h-8 px-3 text-xs flex-1 disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                <FastForward className="h-3 w-3 mr-1" />
-                Próxima Etapa
-              </Button>
-            </div>
-          </div>
-        </div>
+    ws.onclose = () => {
+      console.log("❌ WebSocket desconectado");
+      set({ socket: null });
+      setTimeout(() => get().initWebSocket(), 2000); // tenta reconectar
+    };
+
+    set({ socket: ws });
+  },
+
+  initChamado: (chamado) => {
+    set((state) => ({
+      chamados: {
+        ...state.chamados,
+        [chamado]: {
+          status: "pending",
+          currentLevel: 0,
+          timeRemaining: 20 * 60, // 20 minutos
+          timerActive: true,
+          isAttended: false,
+          observations: "",
+        },
+      },
+    }));
+    get().sendUpdate(chamado);
+  },
+
+  updateChamado: (chamado, updates) => {
+    set((state) => ({
+      chamados: {
+        ...state.chamados,
+        [chamado]: { ...state.chamados[chamado], ...updates },
+      },
+    }));
+    get().sendUpdate(chamado);
+  },
+
+  sendUpdate: (chamado) => {
+    const { socket, chamados } = get();
+    if (socket && socket.readyState === WebSocket.OPEN) {
+      socket.send(
+        JSON.stringify({
+          action: "sendMessage",
+          chamado,
+          payload: chamados[chamado],
+        })
       );
-
-    case 'confirmed':
-      return (
-        <div className="text-center space-y-2">
-          <div className="flex gap-1 justify-center">
-            <Badge variant="default" className="bg-green-600 text-white">
-              <CheckCircle className="h-3 w-3 mr-1" />
-              Confirmado
-            </Badge>
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => onStartEscalation(alert.chamado, 1)}
-              className="h-6 px-2 text-xs"
-            >
-              <FastForward className="h-3 w-3 mr-1" />
-              Próxima
-            </Button>
-          </div>
-          {state.observations && (
-            <div className="text-xs text-muted-foreground p-2 bg-muted rounded text-left">
-              <strong>Observações:</strong>
-              <br />
-              {state.observations}
-            </div>
-          )}
-        </div>
-      );
-
-    case 'escalating':
-      return (
-        <div className="space-y-2">
-          {state.currentLevel > 0 && (
-            <div className="text-center">
-              <Badge variant="destructive" className="text-xs">
-                {levelNames[state.currentLevel as keyof typeof levelNames]} Escalação
-              </Badge>
-              {state.timerActive && (
-                <div className="flex items-center justify-center gap-1 mt-1">
-                  <Clock className="h-3 w-3 text-warning" />
-                  <span
-                    className="text-xs font-mono font-bold"
-                    style={{ color: state.timeRemaining <= 60 ? '#ef4444' : '#f59e0b' }}
-                  >
-                    {formatTime(state.timeRemaining)}
-                  </span>
-                  <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
-                </div>
-              )}
-            </div>
-          )}
-
-          {!state.isAttended && (
-            <>
-              {showConfirmation ? (
-                <div className="space-y-2 p-2 border rounded bg-background">
-                  <div className="text-xs font-medium">
-                    Confirmar: {pendingChange?.status === 'attended' ? 'Atendida' : 'Não Atendida'}
-                  </div>
-
-                  <div className="space-y-1">
-                    <Label className="text-xs">
-                      Observações <span className="text-destructive">*</span>
-                    </Label>
-                    <Textarea
-                      placeholder="Observações obrigatórias..."
-                      value={pendingChange?.observations || ''}
-                      onChange={(e) =>
-                        onPendingObservationChange(alert.chamado, e.target.value)
-                      }
-                      className="text-xs min-h-[60px] resize-none"
-                      required
-                    />
-                    {!pendingChange?.observations?.trim() && (
-                      <p className="text-xs text-destructive">Observações são obrigatórias</p>
-                    )}
-                  </div>
-
-                  <div className="flex gap-1">
-                    <Button
-                      size="sm"
-                      variant="default"
-                      onClick={() => onConfirmStatusChange(alert.chamado)}
-                      disabled={!pendingChange?.observations?.trim()}
-                      className="h-6 px-2 text-xs flex-1"
-                    >
-                      <Check className="h-3 w-3 mr-1" />
-                      Confirmar
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => onCancelStatusChange(alert.chamado)}
-                      className="h-6 px-2 text-xs flex-1"
-                    >
-                      <X className="h-3 w-3 mr-1" />
-                      Cancelar
-                    </Button>
-                  </div>
-                </div>
-              ) : (
-                <>
-                  <div className="flex gap-1">
-                    {state.currentLevel > 0 && (
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => onGoBack(alert.chamado)}
-                        className="h-6 px-2 text-xs flex-1"
-                      >
-                        <RotateCcw className="h-3 w-3 mr-1" />
-                        Voltar
-                      </Button>
-                    )}
-
-                    {state.currentLevel < 4 && (
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() =>
-                          onStartEscalation(
-                            alert.chamado,
-                            (state.currentLevel + 1) as 1 | 2 | 3 | 4
-                          )
-                        }
-                        className="h-6 px-2 text-xs flex-1"
-                      >
-                        Iniciar{' '}
-                        {levelNames[(state.currentLevel + 1) as keyof typeof levelNames]} Escalação
-                      </Button>
-                    )}
-                  </div>
-
-                  <Select
-                    value=""
-                    onValueChange={(value) => onPrepareStatusChange(alert.chamado, value)}
-                  >
-                    <SelectTrigger className="h-6 text-xs">
-                      <SelectValue placeholder="Selecionar Status" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="attended">Atendida</SelectItem>
-                      <SelectItem value="not-attended">Não Atendida</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </>
-              )}
-            </>
-          )}
-        </div>
-      );
-
-    case 'completed':
-      return (
-        <div className="text-center space-y-2">
-          <div className="flex gap-1 justify-center">
-            <Badge variant="default" className="bg-green-600 text-white">
-              <CheckCircle className="h-3 w-3 mr-1" />
-              Finalizado
-            </Badge>
-          </div>
-          {state.observations && (
-            <div className="text-xs text-muted-foreground p-2 bg-muted rounded text-left">
-              <strong>Observações:</strong>
-              <br />
-              {state.observations}
-            </div>
-          )}
-        </div>
-      );
-
-    default:
-      return null;
-  }
-};
+    }
+  },
+}));
