@@ -150,20 +150,46 @@ def broadcast(event, message):
 # ---------- Persistência do estado do Chamado ----------
 def load_state(chamado:int) -> dict:
     try:
-        resp = chamados_table.get_item(Key={"chamado": chamado})
+        resp = chamados_table.get_item(Key={"chamado": chamado}, ConsistentRead=True)
         item = resp.get("Item", {})
+        log("DDB get_item OK", chamado=chamado, found=bool(item))
         return item or {}
     except Exception as e:
         log("DDB get_item ERROR", error=str(e), chamado=chamado)
         return {}
 
-def save_state(state:dict):
+def save_state(state:dict) -> bool:
+    """
+    Salva o estado completo do chamado (put_item).
+    Retorna True/False e loga todos os detalhes necessários.
+    """
     try:
-        chamados_table.put_item(Item=item)
-        logger.info(f"[UPDATE] Chamado {chamado_id} salvo no DynamoDB: {item}")
+        if "chamado" not in state:
+            log("save_state ERROR - missing 'chamado'", stateKeys=list(state.keys()))
+            return False
+        # Garante Number no Dynamo
+        state["chamado"] = int(state["chamado"])
+    except Exception as e:
+        log("save_state cast chamado->int ERROR", error=str(e), value=state.get("chamado"))
+        return False
+
+    # Pequeno resumo para log sem vazar tudo
+    preview = {
+        "chamado": state.get("chamado"),
+        "nivelAtual": state.get("nivelAtual"),
+        "statusGeral": state.get("statusGeral"),
+        "statusFinal": state.get("statusFinal"),
+        "niveisKeys": list((state.get("niveis") or {}).keys()),
+        "ultimoUpdate": state.get("ultimoUpdate"),
+    }
+    log("DDB put_item BEGIN", preview=preview)
+
+    try:
+        resp = chamados_table.put_item(Item=state)
+        log("DDB put_item OK", httpStatus=resp.get("ResponseMetadata", {}).get("HTTPStatusCode"), preview=preview)
         return True
     except Exception as e:
-        logger.error(f"[DynamoDB] Erro ao salvar chamado {chamado_id}: {e}")
+        log("DDB put_item ERROR", error=str(e), preview=preview)
         return False
 
 def ensure_initial_state(chamado:int) -> dict:
@@ -177,6 +203,9 @@ def ensure_initial_state(chamado:int) -> dict:
             "niveis": {},                  # "0".. "4" -> dados do nível
             "ultimoUpdate": now_ts()
         }
+        log("ensure_initial_state NEW (not yet saved)", chamado=chamado)
+    else:
+        log("ensure_initial_state LOADED", chamado=chamado, nivelAtual=st.get("nivelAtual"), statusGeral=st.get("statusGeral"))
     return st
 
 def resolve_level(body:dict):
@@ -187,7 +216,10 @@ def resolve_level(body:dict):
     Retorna int 0..4
     """
     if "nivel" in body:
-        return int(body["nivel"])
+        try:
+            return int(body["nivel"])
+        except Exception:
+            return None
     timer = body.get("timer")
     if timer == "primeiroAcionado":
         return 0
@@ -284,15 +316,18 @@ def _dispatch(event):
 # ---------- Rotas WebSocket ----------
 def on_connect(event):
     connection_id = event["requestContext"]["connectionId"]
-    resp = connections_table.put_item(Item={"connectionId": connection_id, "connectedAt": now_ts()})
-    log("on_connect OK", connectionId=connection_id, resp=resp)
+    try:
+        resp = connections_table.put_item(Item={"connectionId": connection_id, "connectedAt": now_ts()})
+        log("on_connect OK", connectionId=connection_id, httpStatus=resp.get("ResponseMetadata", {}).get("HTTPStatusCode"))
+    except Exception as e:
+        log("on_connect ERROR", connectionId=connection_id, error=str(e))
     return json_response(200, {"ok": True})
 
 def on_disconnect(event):
     connection_id = event["requestContext"]["connectionId"]
     try:
         resp = connections_table.delete_item(Key={"connectionId": connection_id})
-        log("on_disconnect OK", connectionId=connection_id, resp=resp)
+        log("on_disconnect OK", connectionId=connection_id, httpStatus=resp.get("ResponseMetadata", {}).get("HTTPStatusCode"))
     except Exception as e:
         log("on_disconnect ERROR", connectionId=connection_id, error=str(e))
     return json_response(200, {"ok": True})
@@ -310,6 +345,8 @@ def start_level(event):
     timer_start = now_ts()
     timer_end = timer_start + duracao
 
+    log("start_level BEGIN", chamado=chamado, nivel=nivel, duracao=duracao, observacao=observacao)
+
     st = ensure_initial_state(chamado)
     st["niveis"][str(nivel)] = {
         "status": "em_andamento",
@@ -322,7 +359,10 @@ def start_level(event):
     st["statusGeral"] = "em_andamento"
     st["ultimoUpdate"] = now_ts()
 
-    save_state(st)
+    ok = save_state(st)
+    if not ok:
+        log("start_level SAVE FAILED", chamado=chamado, nivel=nivel)
+        return json_response(500, {"error": "falha ao salvar estado"})
 
     message = {
         "action": "levelStarted",
@@ -330,6 +370,7 @@ def start_level(event):
         "serverTime": now_ts(),
         **st
     }
+    log("start_level BROADCAST", chamado=chamado, nivel=nivel)
     return broadcast(event, message)
 
 def advance_level(event):
@@ -344,6 +385,8 @@ def advance_level(event):
     if not observacao:
         return json_response(400, {"error": "observacao obrigatória para avançar"})
 
+    log("advance_level BEGIN", chamado=chamado, novoNivel=nivel, observacaoLen=len(observacao))
+
     st = ensure_initial_state(chamado)
 
     # Conclui o nível anterior (se existir)
@@ -353,6 +396,8 @@ def advance_level(event):
         prev_level = st["niveis"].get(prev_key)
         if prev_level:
             prev_level["status"] = "concluido"
+            st["niveis"][prev_key] = prev_level
+            log("advance_level PREV CLOSED", prev=prev, prevStatus=prev_level["status"])
 
     # Inicia o novo nível
     duracao = int(body.get("duracao", level_duration_seconds(nivel)))
@@ -370,7 +415,10 @@ def advance_level(event):
     st["statusGeral"] = "em_andamento"
     st["ultimoUpdate"] = now_ts()
 
-    save_state(st)
+    ok = save_state(st)
+    if not ok:
+        log("advance_level SAVE FAILED", chamado=chamado, nivel=nivel)
+        return json_response(500, {"error": "falha ao salvar estado"})
 
     message = {
         "action": "levelAdvanced",
@@ -378,6 +426,7 @@ def advance_level(event):
         "serverTime": now_ts(),
         **st
     }
+    log("advance_level BROADCAST", chamado=chamado, nivel=nivel)
     return broadcast(event, message)
 
 def rollback_level(event):
@@ -392,6 +441,8 @@ def rollback_level(event):
     if not observacao:
         return json_response(400, {"error": "observacao obrigatória para retroceder"})
 
+    log("rollback_level BEGIN", chamado=chamado, nivel=nivel, observacaoLen=len(observacao))
+
     st = ensure_initial_state(chamado)
 
     # Marca o nível atual como pendente (não remove dados de timer)
@@ -403,7 +454,10 @@ def rollback_level(event):
     st["nivelAtual"] = nivel
     st["ultimoUpdate"] = now_ts()
 
-    save_state(st)
+    ok = save_state(st)
+    if not ok:
+        log("rollback_level SAVE FAILED", chamado=chamado, nivel=nivel)
+        return json_response(500, {"error": "falha ao salvar estado"})
 
     message = {
         "action": "levelRolledBack",
@@ -411,6 +465,7 @@ def rollback_level(event):
         "serverTime": now_ts(),
         **st
     }
+    log("rollback_level BROADCAST", chamado=chamado, nivel=nivel)
     return broadcast(event, message)
 
 def set_observation(event):
@@ -420,6 +475,8 @@ def set_observation(event):
     if nivel is None:
         return json_response(400, {"error": "nivel/timer inválido ou ausente"})
     observacao = body.get("observacao", "")
+
+    log("set_observation BEGIN", chamado=chamado, nivel=nivel, observacaoLen=len(observacao))
 
     st = ensure_initial_state(chamado)
     lv = st["niveis"].get(str(nivel))
@@ -437,7 +494,10 @@ def set_observation(event):
 
     st["niveis"][str(nivel)] = lv
     st["ultimoUpdate"] = now_ts()
-    save_state(st)
+    ok = save_state(st)
+    if not ok:
+        log("set_observation SAVE FAILED", chamado=chamado, nivel=nivel)
+        return json_response(500, {"error": "falha ao salvar estado"})
 
     message = {
         "action": "observationUpdated",
@@ -446,6 +506,7 @@ def set_observation(event):
         "serverTime": now_ts(),
         **st
     }
+    log("set_observation BROADCAST", chamado=chamado, nivel=nivel)
     return broadcast(event, message)
 
 def set_status_final(event):
@@ -455,10 +516,15 @@ def set_status_final(event):
     if status_final not in ("attended", "not-attended"):
         return json_response(400, {"error": "statusFinal deve ser 'attended' ou 'not-attended'"})
 
+    log("set_status_final BEGIN", chamado=chamado, status_final=status_final)
+
     st = ensure_initial_state(chamado)
     st["statusFinal"] = status_final
     st["ultimoUpdate"] = now_ts()
-    save_state(st)
+    ok = save_state(st)
+    if not ok:
+        log("set_status_final SAVE FAILED", chamado=chamado)
+        return json_response(500, {"error": "falha ao salvar estado"})
 
     message = {
         "action": "finalStatusUpdated",
@@ -466,12 +532,15 @@ def set_status_final(event):
         "serverTime": now_ts(),
         **st
     }
+    log("set_status_final BROADCAST", chamado=chamado)
     return broadcast(event, message)
 
 def complete(event):
     body = parse_body_safe(event)
     chamado = int(body["chamado"])
     observacao = (body.get("observacao") or "").strip()
+
+    log("complete BEGIN", chamado=chamado, observacaoLen=len(observacao))
 
     st = ensure_initial_state(chamado)
     # Conclui nível atual, se houver
@@ -486,7 +555,10 @@ def complete(event):
 
     st["statusGeral"] = "concluido"
     st["ultimoUpdate"] = now_ts()
-    save_state(st)
+    ok = save_state(st)
+    if not ok:
+        log("complete SAVE FAILED", chamado=chamado)
+        return json_response(500, {"error": "falha ao salvar estado"})
 
     message = {
         "action": "completed",
@@ -494,6 +566,7 @@ def complete(event):
         "serverTime": now_ts(),
         **st
     }
+    log("complete BROADCAST", chamado=chamado)
     return broadcast(event, message)
 
 def get_state(event):
