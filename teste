@@ -1,17 +1,2 @@
-{
-	"Version": "2012-10-17",
-	"Statement": [
-		{
-			"Effect": "Allow",
-			"Action": [
-				"dynamodb:PutItem",
-				"dynamodb:GetItem",
-				"dynamodb:UpdateItem",
-				"dynamodb:DeleteItem",
-				"dynamodb:Scan",
-				"dynamodb:Query"
-			],
-			"Resource": "arn:aws:dynamodb:us-east-1:368696837445:table/painelmonitoracao_obs"
-		}
-	]
-}
+Erro na lambda: An error occurred (ValidationException) when calling the PutItem operation: One or more parameter values were invalid: Missing the key chamado in the item
+
