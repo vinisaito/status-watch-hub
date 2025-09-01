@@ -47,4 +47,34 @@ def lambda_handler(event, context):
         }
 
         print("Tentando salvar item:", item)
-        ta
+        table.put_item(Item=item)
+        print("Item salvo com sucesso")
+
+        return {
+            "statusCode": 200,
+            "body": json.dumps({
+                "message": "Registro inserido com sucesso",
+                "item": {
+                    "chamado": int(chamado),
+                    "observacao": observacao,
+                    "status": status,
+                    "operador": operador,
+                    "createdAt": item["createdAt"]
+                }
+            })
+        }
+
+    except Exception as e:
+        print("Erro na lambda:", str(e))
+        return {
+            "statusCode": 500,
+            "body": json.dumps({"error": str(e)})
+        }
+
+
+
+
+
+{
+  "body": "{\"chamado\": 12345, \"observacao\": \"Porta principal acionada\", \"status\": \"acionado\", \"operador\": \"Vinicius\"}"
+}
