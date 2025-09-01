@@ -1,7 +1,21 @@
-{
-  "requestContext": {
-    "connectionId": "test-123",
-    "routeKey": "$default"
-  },
-  "body": "{\"action\":\"update\",\"chamado\":1,\"level\":1,\"status\":\"pending\",\"observations\":\"teste lambda\"}"
-}
+if action == "update":
+    chamado_id = body.get("chamado")
+    if not chamado_id:
+        logger.warning("[UPDATE] Chamado não informado")
+        return {"statusCode": 400, "body": "Chamado id required"}
+
+    item = {
+        "chamado": int(chamado_id),
+        "level": body.get("level", 1),
+        "status": body.get("status", "pending"),
+        "timerStart": body.get("timerStart", datetime.utcnow().isoformat()),
+        "timerDuration": body.get("timerDuration", 1200),
+        "observations": body.get("observations", ""),
+        "updatedAt": datetime.utcnow().isoformat()
+    }
+
+    try:
+        chamados_table.put_item(Item=item)
+        logger.info(f"[UPDATE] Chamado {chamado_id} salvo no DynamoDB: {item}")
+    except Exception as e:
+        logger.error(f"[DynamoDB] Erro ao salvar chamado {chamado_id}: {e}")
