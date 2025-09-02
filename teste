@@ -1,387 +1,167 @@
-import { useState, useEffect, useMemo, useCallback } from 'react';
-import { Check, AlertTriangle, ExternalLink, Zap, Group, Calendar, Info, XCircle, Flame, ChevronLeft, ChevronRight, ArrowUpDown, ArrowUp, ArrowDown, User, FileText, Save, Edit3, CheckCircle, X, RefreshCw } from 'lucide-react';
-import { Card, CardContent, CardHeader } from '@/components/ui/card';
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
-import { toast } from '@/hooks/use-toast';
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
-import { Textarea } from '@/components/ui/textarea';
-import { Label } from '@/components/ui/label';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { AlertData } from './Dashboard';
+import { useState } from 'react';
 
-interface AlertData {
-  id: string;
-  chamado: string;
-  tipo_chamado: string;
-  grupo_chamado: string;
-  status_chamado: string;
-  abertura_chamado: string;
-  resumo_chamado: string;
-  severidade_chamado: string;
-  acionado: string;
-  chat: boolean;
-}
-
-interface ObservacaoData {
-  chamado: number;
-  observacao: string;
-  status: string;
-  operador: string;
-  CreatedAt?: string;
-}
-
-interface ActionTableProps {
+interface MonitoringCardsProps {
   alertData: AlertData[];
-  onUpdateAcknowledgment: (alertId: string, acknowledged: boolean) => void;
-  loading: boolean;
+  onFilterSelect: (filter: string | null) => void; // Agora aceita limpar filtro
 }
 
-interface Obsstatus {
-  status: string;
-}
+export const MonitoringCards = ({ alertData, onFilterSelect }: MonitoringCardsProps) => {
+  const [activeFilter, setActiveFilter] = useState<string | null>(null);
 
-const Obsstatus: React.FC<Obsstatus> = ({ status }) => {
-  if (status === "finalizado") {
-    return null; // não renderiza nada
-  }
-}
-export default Obsstatus;
-
-type SortField = 'chamado' | 'tipo_chamado' | 'grupo_chamado' | 'status_chamado' | 'abertura_chamado' | 'resumo_chamado' | 'severidade_chamado' | 'acionado';
-type SortDirection = 'asc' | 'desc' | null;
-
-export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: ActionTableProps) => {
-  const [selectedIncident, setSelectedIncident] = useState<AlertData | null>(null);
-  const [crisisDialogOpen, setCrisisDialogOpen] = useState(false);
-  const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
-  const [currentPage, setCurrentPage] = useState(1);
-  const itemsPerPage = 5;
-
-  // Estados para ordenação
-  const [sortField, setSortField] = useState<SortField>('chamado');
-  const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
-
-  // Estado que guarda os numeros chamados já acionados (string)
-  const [acionadosSet, setAcionadosSet] = useState<Set<string>>(new Set());
-
-  // Estados para observações
-  const [observacoesData, setObservacoesData] = useState<Map<string, ObservacaoData>>(new Map());
-  const [observacaoDialogOpen, setObservacaoDialogOpen] = useState(false);
-  const [selectedChamadoForEdit, setSelectedChamadoForEdit] = useState<string>('');
-  const [tempOperador, setTempOperador] = useState<string>('');
-  const [tempObservacao, setTempObservacao] = useState<string>('');
-
-  // Modal para detalhes do chamado
-  const [chamadoModalOpen, setChamadoModalOpen] = useState(false);
-
-  // Lista de operadores
-  const operadores = [
-    'Operador 1',
-    'Operador 2', 
-    'Operador 3',
-    'Supervisor',
-    'Coordenador'
-  ];
-
-  // Função para buscar observações da API com retry
-  const fetchObservacoes = useCallback(async (retryCount = 0) => {
-    try {
-      const response = await fetch('https://f6ffk8e9fe.execute-api.us-east-1.amazonaws.com/prod/obs', {
-        method: 'GET',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-      });
-
-      if (response.ok) {
-        const data: ObservacaoData[] = await response.json();
-        const observacoesMap = new Map<string, ObservacaoData>();
-        data.forEach(obs => {
-          observacoesMap.set(obs.chamado.toString(), obs);
-        });
-        setObservacoesData(observacoesMap);
-        console.log(`Observações carregadas: ${data.length} registros`);
-      } else if (response.status === 404) {
-        // API retorna 404 quando não há dados, isso é normal
-        console.log('Nenhuma observação encontrada na API');
-        setObservacoesData(new Map());
-      } else {
-        throw new Error(`API retornou status: ${response.status}`);
-      }
-    } catch (error) {
-      console.error('Erro ao buscar observações:', error);
-      
-      // Retry até 3 tentativas
-      if (retryCount < 3) {
-        console.log(`Tentando novamente... (${retryCount + 1}/3)`);
-        setTimeout(() => fetchObservacoes(retryCount + 1), 2000 * (retryCount + 1));
-      } else {
-        toast({
-          title: 'Erro ao carregar observações',
-          description: 'Não foi possível carregar dados salvos. As novas alterações funcionarão normalmente.',
-          variant: 'destructive',
-        });
-      }
-    }
-  }, []);
-
-  // Carrega observações ao montar o componente
-  useEffect(() => {
-    fetchObservacoes();
-  }, [fetchObservacoes]);
-
-  // Auto-refresh a cada 5 minutos
-  useEffect(() => {
-    const interval = setInterval(() => {
-      fetchObservacoes();
-    }, 5 * 60 * 1000); // 5 minutos
-
-    return () => clearInterval(interval);
-  }, [fetchObservacoes]);
-
-  // Busca os incidentes acionados no DynamoDB via API
-  useEffect(() => {
-    const fetchAcionados = async () => {
-      try {
-        const res = await fetch('https://f6ffk8e9fe.execute-api.us-east-1.amazonaws.com/prod/chatacionados');
-        if (!res.ok) throw new Error(`Erro ao buscar acionados: ${res.status}`);
-        const data: { chamado: string }[] = await res.json();
-        setAcionadosSet(new Set(data.map(item => item.chamado.toString())));
-      } catch (error) {
-        toast({
-          title: 'Erro ao buscar acionados',
-          description: 'Não foi possível carregar os incidentes acionados',
-          variant: 'destructive',
-        });
-      }
-    };
-    fetchAcionados();
-  }, []);
-
-  // Funções para manipular observações
-  const handleOpenObservacao = (chamado: string) => {
-    setSelectedChamadoForEdit(chamado);
-    const existingObs = observacoesData.get(chamado);
-    if (existingObs) {
-      setTempOperador(existingObs.operador);
-      setTempObservacao(existingObs.observacao);
+  // Função toggle do filtro
+  const handleCardClick = (filterKey: string) => {
+    if (activeFilter === filterKey) {
+      setActiveFilter(null);
+      onFilterSelect(null);
     } else {
-      setTempOperador('');
-      setTempObservacao('');
-    }
-    setObservacaoDialogOpen(true);
-  };
-
-  const handleSaveObservacao = async () => {
-    if (!tempOperador || !tempObservacao.trim() || !selectedChamadoForEdit) {
-      toast({
-        title: 'Campos obrigatórios',
-        description: 'Preencha o operador e a observação',
-        variant: 'destructive',
-      });
-      return;
-    }
-
-    try {
-      const payload: ObservacaoData = {
-        chamado: parseInt(selectedChamadoForEdit),
-        observacao: tempObservacao.trim(),
-        status: 'acionado',
-        operador: tempOperador,
-      };
-
-      const response = await fetch('https://f6ffk8e9fe.execute-api.us-east-1.amazonaws.com/prod/obs', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(payload),
-      });
-
-      if (!response.ok) {
-        throw new Error(`Erro na API: ${response.status}`);
-      }
-
-      // Atualiza o estado local
-      const updatedObsData = new Map(observacoesData);
-      updatedObsData.set(selectedChamadoForEdit, payload);
-      setObservacoesData(updatedObsData);
-
-      toast({
-        title: 'Observação salva',
-        description: 'A observação foi salva com sucesso',
-      });
-
-      // Recarrega dados da API para pegar o CreatedAt
-      fetchObservacoes();
-
-      handleCancelObservacao();
-    } catch (error) {
-      console.error('Erro ao salvar observação:', error);
-      toast({
-        title: 'Erro ao salvar',
-        description: 'Não foi possível salvar a observação',
-        variant: 'destructive',
-      });
+      setActiveFilter(filterKey);
+      onFilterSelect(filterKey);
     }
   };
 
-  const handleCancelObservacao = () => {
-    setObservacaoDialogOpen(false);
-    setSelectedChamadoForEdit('');
-    setTempOperador('');
-    setTempObservacao('');
-  };
+  // Métricas
+  const sev4Incidents = alertData.filter(alert =>
+    alert.tipo_chamado.toLowerCase().includes('incidente') &&
+    alert.severidade_chamado.includes('4') &&
+    alert.acionado !== 'OK'
+  ).length;
 
-  const handleAcknowledgment = async (alert: AlertData) => {
-    try {
-      const response = await fetch(
-        "https://f6ffk8e9fe.execute-api.us-east-1.amazonaws.com/prod/webhook"
-      );
-      const data = await response.json();
+  const totalSev4Incidents = alertData.filter(alert =>
+    alert.tipo_chamado.toLowerCase().includes('incidente') &&
+    alert.severidade_chamado.includes('4')
+  ).length;
 
-      // Procura o grupo correspondente
-      const grupoEntry = data.grupos.find(
-        (g: any) => g.grupo_chamado === alert.grupo_chamado
-      );
+  const sev4Alerts = alertData.filter(alert =>
+    alert.tipo_chamado.toLowerCase().includes('alerta') &&
+    alert.severidade_chamado.includes('4') &&
+    alert.acionado !== 'OK'
+  ).length;
 
-      if (!grupoEntry || !grupoEntry.webhooks.length) {
-        toast({
-          title: "Webhook não configurado",
-          description: `Configure o webhook para o Grupo: ${alert.grupo_chamado}`,
-          variant: "destructive",
-        });
-        return;
-      }
+  const totalSev4Alerts = alertData.filter(alert =>
+    alert.tipo_chamado.toLowerCase().includes('alerta') &&
+    alert.severidade_chamado.includes('4')
+  ).length;
 
-      // Pega o primeiro webhook ativo
-      const activeWebhook = grupoEntry.webhooks.find((w: any) => w.ativo);
-      if (!activeWebhook) {
-        toast({
-          title: "Nenhum webhook ativo",
-          description: `O grupo ${alert.grupo_chamado} não possui webhooks ativos`,
-          variant: "destructive",
-        });
-        return;
-      }
+  const sev3Incidents = alertData.filter(alert =>
+    alert.tipo_chamado.toLowerCase().includes('incidente') &&
+    alert.severidade_chamado.includes('3') &&
+    alert.acionado !== 'OK'
+  ).length;
 
-      const webhookUrl = activeWebhook.url;
+  const totalSev3Incidents = alertData.filter(alert =>
+    alert.tipo_chamado.toLowerCase().includes('incidente') &&
+    alert.severidade_chamado.includes('3')
+  ).length;
 
-      // Enviar mensagem para Google Chat
-      const message = {
-        cards: [
-          {
-            header: {
-              title: "<b>🚨 O CIOPs precisa da sua atenção! <b>"
-            },
-            sections: [
-              {
-                widgets: [
-                  {
-                    textParagraph: {
-                      text: `É necessário confirmação de recebimento e ciência pelo grupo responsável.`
-                    }
-                  }
-                ]
-              },
-              {
-                widgets: [
-                  {
-                    textParagraph: {
-                      text:
-                        "<b>Detalhes do Evento:</b><br><br>" +
-                        "<b>📌 Chamado: </b>" + alert.chamado + "<br><br>" +
-                        "<b>⚠️ Severidade: </b>" + alert.severidade_chamado + "<br><br>" +
-                        "<b>📰 Título: </b>" + alert.resumo_chamado + "<br><br>" +
-                        "<b>📅 Abertura: </b>" + alert.abertura_chamado + "<br><br>" +
-                        "<b>👥 Grupo: </b>" + alert.grupo_chamado
-                    }
-                  }
-                ],
-              },
-              {
-                widgets: [
-                  {
-                    textParagraph: {
-                      text: `<b>⚠️ Atenção: </b> Na ausência de confirmação, o CIOPs dará início ao processo de escalonamento, conforme procedimento padrão.`
-                    }
-                  }
-                ]
-              },
-              {
-                widgets: [
-                  {
-                    buttons: [
-                      {
-                        textButton: {
-                          text: "✅ Confirmar Recebimento",
-                          onClick: {
-                            action: {
-                              actionMethodName: "confirmarAlerta",
-                              parameters: [
-                                { key: "chamado", value: alert.chamado },
-                                { key: "grupo", value: alert.grupo_chamado }
-                              ]
-                            }
-                          }
-                        }
-                      }
-                    ]
-                  }
-                ]
-              }
-            ],
-          },
-        ],
-      };
 
-      await fetch(webhookUrl, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(message),
-      });
+  return (
+    <div className="grid grid-cols-1 md:grid-cols-3 gap-6 w-full max-w-none">
+      {/* SEV4 Incidents */}
+      <div className="space-y-4">
+        <Card
+          className={`bg-panel-bg border-sev4-incident/20 hover:border-sev4-incident/40 transition-colors cursor-pointer 
+            ${activeFilter === 'SEV4_INCIDENT' ? 'ring-2 ring-sev4-incident' : ''}`}
+          onClick={() => handleCardClick('SEV4_INCIDENT')}
+        >
+          <CardHeader className="pb-3">
+            <CardTitle className="text-sev4-incident text-sm font-medium uppercase tracking-wide">
+              Incidentes SEV4
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="text-4xl font-bold text-sev4-incident mb-2">
+              {sev4Incidents}
+            </div>
+          </CardContent>
+        </Card>
 
-      // Marca como acionado no DynamoDB
-      const res = await fetch(
-        "https://f6ffk8e9fe.execute-api.us-east-1.amazonaws.com/prod/chatacionados",
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ chamado: alert.chamado.toString() }),
-        }
-      );
+        <Card
+          className={`bg-panel-bg/50 border-sev4-incident/10 cursor-pointer hover:border-sev4-incident/40 transition-colors 
+            ${activeFilter === 'SEV4_INCIDENT_TOTAL' ? 'ring-2 ring-sev4-incident' : ''}`}
+          onClick={() => handleCardClick('SEV4_INCIDENT_TOTAL')}
+        >
+          <CardContent className="pt-4">
+            <div className="flex items-center justify-between">
+              <span className="text-sm text-muted-foreground">Total</span>
+              <span className="text-lg font-semibold text-sev4-incident">
+                {totalSev4Incidents}
+              </span>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
 
-      if (!res.ok) {
-        const errorData = await res.json();
-        throw new Error(errorData.message || "Erro ao marcar como acionado");
-      }
+      {/* SEV4 Alerts */}
+      <div className="space-y-4">
+        <Card
+          className={`bg-panel-bg border-sev4-alert/20 hover:border-sev4-alert/40 transition-colors cursor-pointer 
+            ${activeFilter === 'SEV4_ALERT' ? 'ring-2 ring-sev4-alert' : ''}`}
+          onClick={() => handleCardClick('SEV4_ALERT')}
+        >
+          <CardHeader className="pb-3">
+            <CardTitle className="text-sev4-alert text-sm font-medium uppercase tracking-wide">
+              Alertas SEV4
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="text-4xl font-bold text-sev4-alert mb-2">
+              {sev4Alerts}
+            </div>
+          </CardContent>
+        </Card>
 
-      setAcionadosSet(prev => new Set([...prev, alert.chamado.toString()]));
-      onUpdateAcknowledgment(alert.id, true);
+        <Card
+          className={`bg-panel-bg/50 border-sev4-alert/10 cursor-pointer hover:border-sev4-alert/40 transition-colors 
+            ${activeFilter === 'SEV4_ALERT_TOTAL' ? 'ring-2 ring-sev4-alert' : ''}`}
+          onClick={() => handleCardClick('SEV4_ALERT_TOTAL')}
+        >
+          <CardContent className="pt-4">
+            <div className="flex items-center justify-between">
+              <span className="text-sm text-muted-foreground">Total</span>
+              <span className="text-lg font-semibold text-sev4-alert">
+                {totalSev4Alerts}
+              </span>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
 
-      toast({
-        title: "Alerta acionado com sucesso",
-        description: `Mensagem enviada para o Grupo: ${alert.grupo_chamado}`,
-      });
+      {/* SEV3 Incidents */}
+      <div className="space-y-4">
+        <Card
+          className={`bg-panel-bg border-sev3-incident/20 hover:border-sev3-incident/40 transition-colors cursor-pointer 
+            ${activeFilter === 'SEV3_INCIDENT' ? 'ring-2 ring-sev3-incident' : ''}`}
+          onClick={() => handleCardClick('SEV3_INCIDENT')}
+        >
+          <CardHeader className="pb-3">
+            <CardTitle className="text-sev3-incident text-sm font-medium uppercase tracking-wide">
+              Incidentes SEV3
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="text-4xl font-bold text-sev3-incident mb-2">
+              {sev3Incidents}
+            </div>
+          </CardContent>
+        </Card>
 
-    } catch (error: any) {
-      toast({
-        title: "Erro ao acionar alerta",
-        description: error.message || "Não foi possível concluir o acionamento",
-        variant: "destructive",
-      });
-    }
-  };
+        <Card
+          className={`bg-panel-bg/50 border-sev3-incident/10 cursor-pointer hover:border-sev3-incident/40 transition-colors 
+            ${activeFilter === 'SEV3_INCIDENT_TOTAL' ? 'ring-2 ring-sev3-incident' : ''}`}
+          onClick={() => handleCardClick('SEV3_INCIDENT_TOTAL')}
+        >
+          <CardContent className="pt-4">
+            <div className="flex items-center justify-between">
+              <span className="text-sm text-muted-foreground">Total</span>
+              <span className="text-lg font-semibold text-sev3-incident">
+                {totalSev3Incidents}
+              </span>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    </div>
+  );
+};
