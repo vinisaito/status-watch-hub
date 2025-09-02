@@ -1,6 +1,4 @@
-export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: ActionTableProps) => {
-  const [selectedIncident, setSelectedIncident] = useState<AlertData | null>(null);
-  const [crisisDialogOpen, setCrisisDialogOpen] = useState(false);
-  const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
-  const [currentPage, setCurrentPage] = useState(1);
-  const itemsPerPage = 5;
+const Status: React.FC<StatusProps> = ({ status }) => {
+  if (status === "finalizado") {
+    return null; // não renderiza nada
+  }
