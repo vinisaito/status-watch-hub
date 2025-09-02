@@ -1,110 +1,25 @@
- {/* Dialog para editar observação */}
-          <Dialog open={observacaoDialogOpen} onOpenChange={setObservacaoDialogOpen}>
-            <DialogContent className="max-w-md border-border shadow-2xl">
-              <DialogHeader className="pb-4 border-b border-border">
-                <DialogTitle className="text-left flex items-center gap-2">
-                  <div className="p-2 rounded-lg bg-primary/10">
-                    <FileText className="h-5 w-5 text-primary" />
-                  </div>
-                  <div>
-                    <h3 className="text-lg font-semibold">Registro de Acionamento</h3>
-                    <p className="text-sm text-muted-foreground">Chamado: {selectedChamadoForEdit}</p>
-                  </div>
-                </DialogTitle>
-              </DialogHeader>
+{/* Timestamp do acionamento */}
+{selectedChamadoForEdit && hasTimestamp(selectedChamadoForEdit) && (
+  <div className="p-3 rounded-lg bg-blue-50 border border-blue-200 dark:bg-blue-950/20 dark:border-blue-800">
+    <div className="flex items-center gap-2 text-blue-700 dark:text-blue-300">
+      <Clock className="h-4 w-4" />
+      <span className="text-sm font-medium">Acionado no chat em:</span>
+    </div>
+    <p className="text-sm font-mono text-blue-800 dark:text-blue-200 mt-1">
+      {getTimestampForChamado(selectedChamadoForEdit)}
+    </p>
+  </div>
+)}
 
-              <div className="space-y-4 pt-4">
-                {/* Campo Operador */}
-                <div className="space-y-2">
-                  <Label htmlFor="operador" className="text-sm font-medium flex items-center gap-2">
-                    <User className="h-4 w-4" />
-                    Operador *
-                  </Label>
-                  <Select
-                    value={tempOperador}
-                    onValueChange={setTempOperador}
-                  >
-                    <SelectTrigger className="w-full">
-                      <SelectValue placeholder="Selecione um operador" />
-                    </SelectTrigger>
-                    <SelectContent className="bg-popover border-border z-50">
-                      {operadores.map((operador) => (
-                        <SelectItem key={operador} value={operador}>
-                          {operador}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
 
-                {/* Campo Observação */}
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between">
-                    <Label htmlFor="observacao" className="text-sm font-medium flex items-center gap-2">
-                      <FileText className="h-4 w-4" />
-                      Observações
-                    </Label>
-                    {tempOperador && selectedChamadoForEdit && (
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        onClick={() => {
-                          const grupo = alertData.find(a => a.chamado === selectedChamadoForEdit)?.grupo_chamado || 'XXXX';
-                          setTempObservacao(`Informado no chat do grupo ${grupo}`);
-                        }}
-                        className="text-xs h-7 px-2"
-                      >
-                        Modelo de Texto
-                      </Button>
-                    )}
-                  </div>
-                  <Textarea
-                    id="observacao"
-                    placeholder={!tempOperador ? "Selecione um operador primeiro..." : "Digite suas observações aqui..."}
-                    value={tempObservacao}
-                    onChange={(e) => setTempObservacao(e.target.value)}
-                    disabled={!tempOperador}
-                    className="min-h-[100px] resize-none"
-                    rows={4}
-                  />
-                  {!tempOperador && (
-                    <p className="text-xs text-muted-foreground">
-                      O campo de observação só pode ser preenchido após selecionar um operador.
-                    </p>
-                  )}
-                </div>
 
-                {/* Status preview */}
-                {tempOperador && tempObservacao && (
-                  <div className="p-3 rounded-lg bg-success/10 border border-success/20">
-                    <div className="flex items-center gap-2 text-success">
-                      <CheckCircle className="h-4 w-4" />
-                      <span className="text-sm font-medium">
-                        Após salvar, este item será marcado como FINALIZADO
-                      </span>
-                    </div>
-                  </div>
-                )}
-              </div>
 
-              <div className="flex items-center gap-2 pt-6 border-t border-border">
-                <Button
-                  variant="outline"
-                  onClick={handleCancelObservacao}
-                  className="flex-1"
-                >
-                  <X className="h-4 w-4 mr-2" />
-                  Cancelar
-                </Button>
-                <Button
-                  onClick={handleSaveObservacao}
-                  disabled={!tempOperador}
-                  className="flex-1"
-                >
-                  <Save className="h-4 w-4 mr-2" />
-                  Salvar
-                </Button>
-              </div>
-            </DialogContent>
-          </Dialog>
+
+onClick={() => {
+  const grupo = alertData.find(a => a.chamado === selectedChamadoForEdit)?.grupo_chamado || 'XXXX';
+  const timestamp = getTimestampForChamado(selectedChamadoForEdit);
+  const baseText = `Informado no chat do grupo ${grupo}`;
+  const fullText = timestamp ? `${baseText} em ${timestamp}` : baseText;
+  setTempObservacao(fullText);
+}}
+
