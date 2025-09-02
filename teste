@@ -1,4 +1,5 @@
-const Status: React.FC<StatusProps> = ({ status }) => {
-  if (status === "finalizado") {
-    return null; // não renderiza nada
-  }
+ const sev4Incidents = alertData.filter(alert =>
+    alert.tipo_chamado.toLowerCase().includes('incidente') &&
+    alert.severidade_chamado.includes('4') &&
+    alert.acionado !== 'OK'
+  ).length;
