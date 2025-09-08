@@ -1,219 +1,67 @@
-import { create } from 'zustand';
-import { ChamadoState, WebSocketMessage } from '@/types/ActionTable';
-
-interface ChamadoStore {
-  ws: WebSocket | null;
-  isConnected: boolean;
-  messages: WebSocketMessage[];
-  chamados: Record<number, ChamadoState>;
-  
-  // Conexão WebSocket
-  initWebSocket: () => void;
-  sendWS: (data: any) => void;
-  
-  // Métodos específicos do chamado
-  sendStartTimer: (chamado: number, level: 0 | 1 | 2 | 3 | 4, duration: number) => void;
-  sendUpdateObservacao: (chamado: number, level: 0 | 1 | 2 | 3 | 4, observacao: string) => void;
-  sendUpdateStatusFinal: (chamado: number, status: 'attended' | 'not-attended', observacao: string, level: 0 | 1 | 2 | 3 | 4) => void;
-  requestState: (chamado: number) => void;
-  
-  // Gerenciamento local de estado
-  updateChamadoState: (chamado: number, updates: Partial<ChamadoState>) => void;
-  getChamadoState: (chamado: number) => ChamadoState | null;
-  processWebSocketMessage: (message: WebSocketMessage) => void;
+export interface AlertData {
+  chamado: number;
+  operador: string;
+  statusFinal?: string;
+  // Adicione outros campos conforme necessário
 }
 
-const useChamadoStore = create<ChamadoStore>((set, get) => ({
-  ws: null,
-  isConnected: false,
-  messages: [],
-  chamados: {},
+export interface PendingStatusChange {
+  status: 'attended' | 'not-attended';
+  observations: string;
+}
 
-  initWebSocket: () => {
-    try {
-      console.log('🔌 [WebSocket] Iniciando conexão...');
-      const ws = new WebSocket("wss://rsgjd6wsza.execute-api.us-east-1.amazonaws.com/dev");
+export interface ChamadoState {
+  chamado: number;
+  operador: string;
+  statusFinal?: string;
+  currentLevel: 0 | 1 | 2 | 3 | 4;
+  status: 'pending' | 'confirmed' | 'escalating' | 'completed';
+  timeRemaining: number;
+  timerActive: boolean;
+  isAttended: boolean;
+  observations?: string;
+  
+  // Dados específicos de cada nível
+  level0_timerStart?: string;
+  level0_duration?: number;
+  level0_status?: 'running' | 'paused';
+  level0_observacao?: string;
+  
+  level1_timerStart?: string;
+  level1_duration?: number;
+  level1_status?: 'running' | 'paused';
+  level1_observacao?: string;
+  
+  level2_timerStart?: string;
+  level2_duration?: number;
+  level2_status?: 'running' | 'paused';
+  level2_observacao?: string;
+  
+  level3_timerStart?: string;
+  level3_duration?: number;
+  level3_status?: 'running' | 'paused';
+  level3_observacao?: string;
+  
+  level4_timerStart?: string;
+  level4_duration?: number;
+  level4_status?: 'running' | 'paused';
+  level4_observacao?: string;
+}
 
-      ws.onopen = () => {
-        console.log("✅ [WebSocket] Conectado com sucesso");
-        set({ isConnected: true, ws });
-      };
+export interface WebSocketMessage {
+  action: string;
+  chamado: number;
+  data?: any;
+  timestamp?: string;
+  success?: boolean;
+  error?: string;
+}
 
-      ws.onmessage = (event) => {
-        console.log("📩 [WebSocket] Mensagem recebida:", event.data);
-        try {
-          const parsed: WebSocketMessage = JSON.parse(event.data);
-          
-          // Atualizar lista de mensagens
-          set((state) => ({ 
-            messages: [...state.messages, parsed] 
-          }));
-
-          // Processar mensagens específicas para atualizar estado dos chamados
-          if (parsed.action && parsed.chamado) {
-            get().processWebSocketMessage(parsed);
-          }
-        } catch (e) {
-          console.error("❌ [WebSocket] Erro ao parsear mensagem:", e);
-        }
-      };
-
-      ws.onerror = (error) => {
-        console.error("❌ [WebSocket] Erro na conexão:", error);
-      };
-
-      ws.onclose = (event) => {
-        console.warn("⚠️ [WebSocket] Conexão fechada:", event.code, event.reason);
-        set({ isConnected: false, ws: null });
-        
-        // Tentar reconectar em 5s se não foi fechamento manual
-        if (event.code !== 1000) {
-          setTimeout(() => {
-            console.log('🔄 [WebSocket] Tentando reconectar...');
-            get().initWebSocket();
-          }, 5000);
-        }
-      };
-
-    } catch (err) {
-      console.error("❌ [WebSocket] Erro ao inicializar:", err);
-    }
-  },
-
-  sendWS: (data: any) => {
-    const ws = get().ws;
-    if (ws && ws.readyState === WebSocket.OPEN) {
-      console.log("📤 [WebSocket] Enviando:", data);
-      ws.send(JSON.stringify(data));
-    } else {
-      console.warn("❌ [WebSocket] Não conectado, não foi possível enviar:", data);
-    }
-  },
-
-  // Métodos específicos para chamados
-  sendStartTimer: (chamado: number, level: 0 | 1 | 2 | 3 | 4, duration: number) => {
-    const data = {
-      action: 'startTimer',
-      chamado,
-      level,
-      duration,
-      timestamp: new Date().toISOString()
-    };
-    
-    console.log(`⏱️ [Store] Iniciando timer - Chamado: ${chamado}, Nível: ${level}, Duração: ${duration}s`);
-    get().sendWS(data);
-  },
-
-  sendUpdateObservacao: (chamado: number, level: 0 | 1 | 2 | 3 | 4, observacao: string) => {
-    const data = {
-      action: 'updateObservacao',
-      chamado,
-      level,
-      observacao,
-      timestamp: new Date().toISOString()
-    };
-    
-    console.log(`📝 [Store] Atualizando observação - Chamado: ${chamado}, Nível: ${level}`);
-    get().sendWS(data);
-  },
-
-  sendUpdateStatusFinal: (chamado: number, status: 'attended' | 'not-attended', observacao: string, level: 0 | 1 | 2 | 3 | 4) => {
-    const data = {
-      action: 'updateStatusFinal',
-      chamado,
-      status,
-      observacao,
-      level,
-      timestamp: new Date().toISOString()
-    };
-    
-    console.log(`🏁 [Store] Atualizando status final - Chamado: ${chamado}, Status: ${status}`);
-    get().sendWS(data);
-  },
-
-  requestState: (chamado: number) => {
-    const data = {
-      action: 'getState',
-      chamado,
-      timestamp: new Date().toISOString()
-    };
-    
-    console.log(`📋 [Store] Solicitando estado - Chamado: ${chamado}`);
-    get().sendWS(data);
-  },
-
-  // Gerenciamento local de estado
-  updateChamadoState: (chamado: number, updates: Partial<ChamadoState>) => {
-    set((state) => ({
-      chamados: {
-        ...state.chamados,
-        [chamado]: {
-          ...state.chamados[chamado],
-          ...updates
-        }
-      }
-    }));
-    
-    console.log(`🔄 [Store] Estado local atualizado - Chamado: ${chamado}`, updates);
-  },
-
-  getChamadoState: (chamado: number) => {
-    return get().chamados[chamado] || null;
-  },
-
-  // Processar mensagens do WebSocket para atualizar estado local
-  processWebSocketMessage: (message: WebSocketMessage) => {
-    const { action, chamado, data: messageData } = message;
-    
-    switch (action) {
-      case 'timerUpdate':
-        if (messageData && chamado) {
-          get().updateChamadoState(chamado, {
-            timeRemaining: messageData.remaining,
-            timerActive: messageData.active,
-            [`level${messageData.level}_timerStart`]: messageData.startTime,
-            [`level${messageData.level}_duration`]: messageData.duration
-          });
-        }
-        break;
-        
-      case 'stateSync':
-        if (messageData && chamado) {
-          // Sincronizar todo o estado do chamado
-          get().updateChamadoState(chamado, messageData);
-        }
-        break;
-        
-      case 'observacaoUpdated':
-        if (messageData && chamado) {
-          get().updateChamadoState(chamado, {
-            [`level${messageData.level}_observacao`]: messageData.observacao
-          });
-        }
-        break;
-        
-      case 'statusFinalUpdated':
-        if (messageData && chamado) {
-          get().updateChamadoState(chamado, {
-            statusFinal: messageData.status,
-            status: 'completed',
-            timerActive: false
-          });
-        }
-        break;
-        
-      case 'error':
-        console.error(`❌ [Store] Erro do servidor - Chamado: ${chamado}`, message.error);
-        break;
-        
-      default:
-        console.log(`🔄 [Store] Mensagem não processada:`, message);
-    }
-  }
-}));
-
-// Exportações para uso externo
-export const initWebSocket = () => useChamadoStore.getState().initWebSocket();
-export const sendWS = (data: any) => useChamadoStore.getState().sendWS(data);
-
-export default useChamadoStore;
+export interface TimerData {
+  chamado: number;
+  level: 0 | 1 | 2 | 3 | 4;
+  duration: number;
+  remaining: number;
+  active: boolean;
+  startTime: string;
+}
