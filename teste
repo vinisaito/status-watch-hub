@@ -1,95 +1,229 @@
-export interface AlertData {
-  id: string;
-  chamado: string;
-  tipo_chamado: string;
-  grupo_chamado: string;
-  status_chamado: string;
-  abertura_chamado: string;
-  resumo_chamado: string;
-  severidade_chamado: string;
-  chat: boolean;
-}
+import { useEffect, useState } from "react";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { ConfirmColumn } from "@/components/ConfirmColumn";
+import useChamadoStore from "@/store/useChamadoStore";
+import { AlertData, PendingStatusChange } from "@/types/ActionTable";
 
-export interface EscalationState {
-  status: 'pending' | 'confirmed' | 'escalating' | 'completed';
-  currentLevel: 0 | 1 | 2 | 3 | 4;
-  timeRemaining: number;
-  timerActive: boolean;
-  isAttended: boolean;
-  observations: string;
-  pendingStatus?: string;
-  pendingObservations?: string;
-  startedAt?: string;
-  durationMinutes?: number;
-}
+const Index = () => {
+  const store = useChamadoStore();
+  const [observations, setObservations] = useState<Record<string, string>>({});
+  const [confirmations, setConfirmations] = useState<Record<string, boolean>>({});
+  const [pendingChanges, setPendingChanges] = useState<Record<string, PendingStatusChange>>({});
 
-export interface ActionTableProps {
-  alertData: AlertData[];
-  onUpdateAcknowledgment: (alertId: string, acknowledged: boolean) => void;
-  loading: boolean;
-}
+  // Dados de exemplo para testar o componente
+  const sampleAlerts: AlertData[] = [
+    { 
+      id: "1", 
+      chamado: "101", 
+      tipo_chamado: "Crítico", 
+      grupo_chamado: "TI", 
+      status_chamado: "Aberto", 
+      abertura_chamado: "2025-09-08T10:00:00Z", 
+      resumo_chamado: "Teste de chamado 101", 
+      severidade_chamado: "Alta", 
+      chat: false 
+    },
+    { 
+      id: "2", 
+      chamado: "102", 
+      tipo_chamado: "Normal", 
+      grupo_chamado: "TI", 
+      status_chamado: "Aberto", 
+      abertura_chamado: "2025-09-08T11:00:00Z", 
+      resumo_chamado: "Teste de chamado 102", 
+      severidade_chamado: "Média", 
+      chat: false 
+    },
+    { 
+      id: "3", 
+      chamado: "103", 
+      tipo_chamado: "Urgente", 
+      grupo_chamado: "TI", 
+      status_chamado: "Aberto", 
+      abertura_chamado: "2025-09-08T12:00:00Z", 
+      resumo_chamado: "Teste de chamado 103", 
+      severidade_chamado: "Alta", 
+      chat: false 
+    },
+  ];
 
-export type SortField = 'chamado' | 'tipo_chamado' | 'grupo_chamado' | 'status_chamado' | 'abertura_chamado' | 'resumo_chamado' | 'severidade_chamado';
-export type SortDirection = 'asc' | 'desc' | null;
+  // Inicializar WebSocket ao montar o componente
+  useEffect(() => {
+    if (!store.isConnected) {
+      console.log('🔌 Inicializando conexão WebSocket...');
+      store.initWebSocket();
+    }
+  }, [store]);
 
-export interface PendingStatusChange {
-  status: string;
-  observations: string;
-}
+  // Handlers para os callbacks do ConfirmColumn
+  const handleStartConfirmation = (alertId: string) => {
+    console.log(`📝 Iniciando confirmação para chamado: ${alertId}`);
+    setConfirmations(prev => ({ ...prev, [alertId]: false }));
+  };
 
-// Interfaces para WebSocket e Timer (para suporte interno)
-export interface ChamadoState {
-  chamado: string;
-  operador: string;
-  statusFinal?: string;
-  currentLevel: 0 | 1 | 2 | 3 | 4;
-  status: 'pending' | 'confirmed' | 'escalating' | 'completed';
-  timeRemaining: number;
-  timerActive: boolean;
-  isAttended: boolean;
-  observations?: string;
-  
-  // Dados específicos de cada nível
-  level0_timerStart?: string;
-  level0_duration?: number;
-  level0_status?: 'running' | 'paused';
-  level0_observacao?: string;
-  
-  level1_timerStart?: string;
-  level1_duration?: number;
-  level1_status?: 'running' | 'paused';
-  level1_observacao?: string;
-  
-  level2_timerStart?: string;
-  level2_duration?: number;
-  level2_status?: 'running' | 'paused';
-  level2_observacao?: string;
-  
-  level3_timerStart?: string;
-  level3_duration?: number;
-  level3_status?: 'running' | 'paused';
-  level3_observacao?: string;
-  
-  level4_timerStart?: string;
-  level4_duration?: number;
-  level4_status?: 'running' | 'paused';
-  level4_observacao?: string;
-}
+  const handleConfirmReceived = (alertId: string) => {
+    console.log(`✅ Confirmação recebida para chamado: ${alertId}`);
+    setConfirmations(prev => ({ ...prev, [alertId]: true }));
+  };
 
-export interface WebSocketMessage {
-  action: string;
-  chamado: string;
-  data?: any;
-  timestamp?: string;
-  success?: boolean;
-  error?: string;
-}
+  const handleStartEscalation = (alertId: string, level: 1 | 2 | 3 | 4) => {
+    console.log(`📈 Escalando chamado ${alertId} para nível: ${level}`);
+  };
 
-export interface TimerData {
-  chamado: string;
-  level: 0 | 1 | 2 | 3 | 4;
-  duration: number;
-  remaining: number;
-  active: boolean;
-  startTime: string;
-}
+  const handleObservationChange = (alertId: string, value: string) => {
+    setObservations(prev => ({ ...prev, [alertId]: value }));
+  };
+
+  const handlePendingObservationChange = (alertId: string, value: string) => {
+    setPendingChanges(prev => ({
+      ...prev,
+      [alertId]: { ...prev[alertId], observations: value }
+    }));
+  };
+
+  const handlePrepareStatusChange = (alertId: string, status: string) => {
+    setPendingChanges(prev => ({
+      ...prev,
+      [alertId]: { status: status as 'attended' | 'not-attended', observations: '' }
+    }));
+  };
+
+  const handleConfirmStatusChange = (alertId: string) => {
+    console.log(`🏁 Status final confirmado para chamado: ${alertId}`);
+    setPendingChanges(prev => {
+      const updated = { ...prev };
+      delete updated[alertId];
+      return updated;
+    });
+  };
+
+  const handleCancelStatusChange = (alertId: string) => {
+    setPendingChanges(prev => {
+      const updated = { ...prev };
+      delete updated[alertId];
+      return updated;
+    });
+  };
+
+  const handleGoBack = (alertId: string) => {
+    console.log(`⬅️ Voltando etapa para chamado: ${alertId}`);
+  };
+
+  return (
+    <div className="min-h-screen bg-background p-6">
+      <div className="max-w-6xl mx-auto space-y-6">
+        {/* Header */}
+        <div className="space-y-2">
+          <h1 className="text-3xl font-bold">Sistema de Confirmação de Chamados</h1>
+          <p className="text-muted-foreground">
+            Demonstração do componente ConfirmColumn com integração WebSocket
+          </p>
+        </div>
+
+        {/* Status da Conexão WebSocket */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              Status da Conexão
+              <div 
+                className={`w-3 h-3 rounded-full ${
+                  store.isConnected ? 'bg-green-500 animate-pulse' : 'bg-red-500'
+                }`}
+              />
+            </CardTitle>
+            <CardDescription>
+              {store.isConnected 
+                ? '✅ Conectado ao WebSocket' 
+                : '❌ Desconectado - tentando reconectar...'
+              }
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="flex gap-2">
+              <Button 
+                onClick={() => store.initWebSocket()} 
+                disabled={store.isConnected}
+                variant="outline"
+                size="sm"
+              >
+                Reconectar
+              </Button>
+              <Button 
+                onClick={() => console.log('📊 Mensagens recebidas:', store.messages)} 
+                variant="outline"
+                size="sm"
+              >
+                Ver Log de Mensagens
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Tabela de Chamados */}
+        <Card>
+          <CardHeader>
+            <CardTitle>Chamados de Teste</CardTitle>
+            <CardDescription>
+              Use os controles abaixo para testar as funcionalidades do sistema
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {sampleAlerts.map((alert) => (
+                <Card key={alert.id} className="border-2">
+                  <CardHeader className="pb-3">
+                    <CardTitle className="text-lg">Chamado #{alert.chamado}</CardTitle>
+                    <CardDescription>{alert.resumo_chamado} - Severidade: {alert.severidade_chamado}</CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    <ConfirmColumn
+                      alert={alert}
+                      currentObservation={observations[alert.id] || ''}
+                      showConfirmation={!!pendingChanges[alert.id]?.status}
+                      pendingChange={pendingChanges[alert.id]}
+                      onStartConfirmation={handleStartConfirmation}
+                      onConfirmReceived={handleConfirmReceived}
+                      onStartEscalation={handleStartEscalation}
+                      onObservationChange={handleObservationChange}
+                      onPendingObservationChange={handlePendingObservationChange}
+                      onPrepareStatusChange={handlePrepareStatusChange}
+                      onConfirmStatusChange={handleConfirmStatusChange}
+                      onCancelStatusChange={handleCancelStatusChange}
+                      onGoBack={handleGoBack}
+                    />
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Debug Info */}
+        <Card>
+          <CardHeader>
+            <CardTitle>Informações de Debug</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-2 text-sm">
+              <p><strong>Estados dos Chamados:</strong></p>
+              <pre className="bg-muted p-3 rounded text-xs overflow-auto">
+                {JSON.stringify(store.chamados, null, 2)}
+              </pre>
+              <p><strong>Observações Locais:</strong></p>
+              <pre className="bg-muted p-3 rounded text-xs overflow-auto">
+                {JSON.stringify(observations, null, 2)}
+              </pre>
+              <p><strong>Últimas Mensagens WebSocket ({store.messages.length}):</strong></p>
+              <pre className="bg-muted p-3 rounded text-xs overflow-auto max-h-32">
+                {JSON.stringify(store.messages.slice(-3), null, 2)}
+              </pre>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    </div>
+  );
+};
+
+export default Index;
