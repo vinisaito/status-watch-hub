@@ -1,155 +1,477 @@
-import json
-import boto3
-import os
-import uuid
-from datetime import datetime, timezone
-from decimal import Decimal
+import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
+import { Label } from '@/components/ui/label';
+import { Textarea } from '@/components/ui/textarea';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Check, Clock, Play, CheckCircle, FastForward, RotateCcw, X } from 'lucide-react';
+import { AlertData, PendingStatusChange } from '@/types/ActionTable';
+import { useTimer } from '@/hooks/UseTimer';
+import useChamadoStore from '@/store/useChamadoStore';
+import { useEffect } from 'react';
 
-# ---------- Config ----------
-dynamodb = boto3.resource("dynamodb")
-table = dynamodb.Table(os.environ["CHAMADOS_TABLE"])  # Tabela principal (chamados)
-conn_table = dynamodb.Table(os.environ["CONNECTIONS_TABLE"])  # Tabela de conexões
-apigw = boto3.client(
-    "apigatewaymanagementapi",
-    endpoint_url=f"https://{os.environ['WS_API_ID']}.execute-api.{os.environ['AWS_REGION']}.amazonaws.com/{os.environ['WS_STAGE']}"
-)
+interface ConfirmColumnProps {
+  alert: AlertData;
+  currentObservation: string;
+  showConfirmation: boolean;
+  pendingChange?: PendingStatusChange;
+  onStartConfirmation: (alertId: string) => void;
+  onConfirmReceived: (alertId: string) => void;
+  onStartEscalation: (alertId: string, level: 1 | 2 | 3 | 4) => void;
+  onObservationChange: (alertId: string, value: string) => void;
+  onPendingObservationChange: (alertId: string, value: string) => void;
+  onPrepareStatusChange: (alertId: string, status: string) => void;
+  onConfirmStatusChange: (alertId: string) => void;
+  onCancelStatusChange: (alertId: string) => void;
+  onGoBack: (alertId: string) => void;
+}
 
-# ---------- Helpers ----------
-class DecimalEncoder(json.JSONEncoder):
-    def default(self, o):
-        if isinstance(o, Decimal):
-            if o % 1 == 0:
-                return int(o)
-            return float(o)
-        return super(DecimalEncoder, self).default(o)
+export const ConfirmColumn = ({
+  alert,
+  currentObservation,
+  showConfirmation,
+  pendingChange,
+  onStartConfirmation,
+  onConfirmReceived,
+  onStartEscalation,
+  onObservationChange,
+  onPendingObservationChange,
+  onPrepareStatusChange,
+  onConfirmStatusChange,
+  onCancelStatusChange,
+  onGoBack,
+}: ConfirmColumnProps) => {
+  const { formatTime, calculateTimeRemaining } = useTimer();
+  const store = useChamadoStore();
+  const state = store.chamados[alert.chamado];
 
-def log(trace, msg, **kwargs):
-    print(json.dumps({"trace": trace, "msg": msg, **kwargs}, cls=DecimalEncoder, default=str))
+  const levelNames = { 1: '1ª', 2: '2ª', 3: '3ª', 4: '4ª' } as const;
 
-def send_to_connection(conn_id, data):
-    """Envia mensagem para uma conexão específica"""
-    try:
-        apigw.post_to_connection(
-            ConnectionId=conn_id,
-            Data=json.dumps(data, cls=DecimalEncoder).encode("utf-8")
-        )
-    except apigw.exceptions.GoneException:
-        # Conexão morta -> remover
-        conn_table.delete_item(Key={"connectionId": conn_id})
-        log("broadcast", "Conexão removida (GoneException)", connectionId=conn_id)
-
-def broadcast(data):
-    """Envia mensagem para todos conectados"""
-    conns = conn_table.scan().get("Items", [])
-    for c in conns:
-        send_to_connection(c["connectionId"], data)
-
-def update_chamado(trace, chamado, update):
-    """Atualiza DynamoDB no chamado"""
-    log(trace, "Atualizando chamado", chamado=chamado, update=update)
-    resp = table.update_item(
-        Key={"chamado": chamado},
-        UpdateExpression="SET " + ", ".join(f"#{k} = :{k}" for k in update.keys()),
-        ExpressionAttributeNames={f"#{k}": k for k in update.keys()},
-        ExpressionAttributeValues={f":{k}": v for k, v in update.items()},
-        ReturnValues="ALL_NEW"
-    )
-    log(trace, "Chamado atualizado", new_state=resp.get("Attributes"))
-    return resp.get("Attributes")
-
-# ---------- Handlers ----------
-def handle_connect(event, trace):
-    conn_id = event["requestContext"]["connectionId"]
-    conn_table.put_item(Item={"connectionId": conn_id, "connectedAt": datetime.now(timezone.utc).isoformat()})
-    log(trace, "Novo cliente conectado", connectionId=conn_id)
-    return {"statusCode": 200}
-
-def handle_disconnect(event, trace):
-    conn_id = event["requestContext"]["connectionId"]
-    conn_table.delete_item(Key={"connectionId": conn_id})
-    log(trace, "Cliente desconectado", connectionId=conn_id)
-    return {"statusCode": 200}
-
-def handle_start_timer(event, trace, body):
-    chamado = int(body["chamado"])
-    level = int(body["level"])
-    duration = int(body.get("duration", 1200))  # padrão 20min
-    now = datetime.now(timezone.utc).isoformat()
-
-    update = {
-        f"level{level}_timerStart": now,
-        f"level{level}_duration": duration,
-        f"level{level}_status": "running"
+  // Log para debug - monitora mudanças no estado do chamado
+  useEffect(() => {
+    if (state) {
+      console.log(`🔄 [ConfirmColumn] Estado atualizado para chamado ${alert.chamado}:`, {
+        status: state.status,
+        currentLevel: state.currentLevel,
+        timeRemaining: state.timeRemaining,
+        timerActive: state.timerActive,
+        observations: state.observations
+      });
     }
-    state = update_chamado(trace, chamado, update)
-    broadcast({"event": "startTimer", "chamado": chamado, "level": level, "state": state})
-    return {"statusCode": 200, "body": json.dumps({"msg": "Timer iniciado"}, cls=DecimalEncoder)}
+  }, [state, alert.chamado]);
 
-def handle_update_observacao(event, trace, body):
-    chamado = int(body["chamado"])
-    level = int(body["level"])
-    obs = body["observacao"]
-    update = {f"level{level}_observacao": obs}
-    state = update_chamado(trace, chamado, update)
-    broadcast({"event": "updateObservacao", "chamado": chamado, "level": level, "state": state})
-    return {"statusCode": 200, "body": json.dumps({"msg": "Observação atualizada"}, cls=DecimalEncoder)}
+  // Sincronização automática do timer baseado nos dados do WebSocket
+  useEffect(() => {
+    if (!state || !state.timerActive) return;
 
-def handle_update_operador(event, trace, body):
-    chamado = int(body["chamado"])
-    operador = body["operador"]
-    update = {"operador": operador}
-    state = update_chamado(trace, chamado, update)
-    broadcast({"event": "updateOperador", "chamado": chamado, "state": state})
-    return {"statusCode": 200, "body": json.dumps({"msg": "Operador atualizado"}, cls=DecimalEncoder)}
+    const currentLevelKey = `level${state.currentLevel}` as const;
+    const timerStart = state[`${currentLevelKey}_timerStart`];
+    const duration = state[`${currentLevelKey}_duration`];
 
-def handle_update_status_final(event, trace, body):
-    chamado = int(body["chamado"])
-    status = body["status"]
-    update = {"statusFinal": status}
-    state = update_chamado(trace, chamado, update)
-    broadcast({"event": "updateStatusFinal", "chamado": chamado, "state": state})
-    return {"statusCode": 200, "body": json.dumps({"msg": "Status final atualizado"}, cls=DecimalEncoder)}
+    if (timerStart && duration) {
+      const remaining = calculateTimeRemaining(timerStart, duration);
+      
+      if (remaining !== state.timeRemaining) {
+        console.log(`⏰ [ConfirmColumn] Sincronizando timer - Chamado: ${alert.chamado}, Remaining: ${remaining}s`);
+        store.updateChamadoState(alert.chamado, { timeRemaining: remaining });
+      }
 
-def handle_get_state(event, trace, body):
-    chamado = int(body["chamado"])
-    resp = table.get_item(Key={"chamado": chamado})
-    state = resp.get("Item", {})
-    log(trace, "Estado retornado", chamado=chamado, state=state)
-    return {"statusCode": 200, "body": json.dumps(state, cls=DecimalEncoder)}
+      // Se o tempo acabou
+      if (remaining <= 0 && state.timerActive) {
+        console.log(`⏰ [ConfirmColumn] Timer expirado - Chamado: ${alert.chamado}`);
+        store.updateChamadoState(alert.chamado, { 
+          timerActive: false,
+          timeRemaining: 0 
+        });
+      }
+    }
+  }, [state, calculateTimeRemaining, alert.chamado, store]);
 
-# ---------- Main ----------
-def lambda_handler(event, context):
-    trace = str(uuid.uuid4())[:8]
+  const handleInit = () => {
+    try {
+      console.log(`🚀 [ConfirmColumn] Iniciando chamado ${alert.chamado} - Nível 0 (20min)`);
+      
+      // Inicializar estado local primeiro
+      store.updateChamadoState(alert.chamado, {
+        chamado: alert.chamado,
+        operador: alert.operador,
+        currentLevel: 0,
+        status: 'pending',
+        timeRemaining: 20 * 60,
+        timerActive: true,
+        isAttended: false
+      });
 
-    # Segurança: alguns invokes (ex. test console) podem não ter requestContext
-    req_ctx = event.get("requestContext", {})
-    route = req_ctx.get("routeKey", "UNKNOWN")
-    conn_id = req_ctx.get("connectionId", "N/A")
+      // Enviar comando para servidor
+      store.sendStartTimer(alert.chamado, 0, 20 * 60);
+      
+      // Se já tiver observação digitada, enviar junto
+      if (currentObservation?.trim()) {
+        store.sendUpdateObservacao(alert.chamado, 0, currentObservation.trim());
+      }
+      
+      onStartConfirmation(alert.chamado.toString());
+      
+      // Solicitar estado consolidado do servidor
+      setTimeout(() => store.requestState(alert.chamado), 1000);
+      
+    } catch (error) {
+      console.error(`❌ [ConfirmColumn] Erro ao iniciar chamado ${alert.chamado}:`, error);
+    }
+  };
 
-    log(trace, "invoke", routeKey=route, connectionId=conn_id, body=event.get("body"))
+  const handleConfirm = () => {
+    try {
+      console.log(`✅ [ConfirmColumn] Confirmando recebimento - Chamado: ${alert.chamado}`);
+      
+      // Salvar observação se houver
+      if (currentObservation?.trim()) {
+        store.sendUpdateObservacao(alert.chamado, 0, currentObservation.trim());
+      }
+      
+      // Atualizar estado local
+      store.updateChamadoState(alert.chamado, {
+        status: 'confirmed',
+        observations: currentObservation?.trim(),
+        timerActive: false
+      });
+      
+      onConfirmReceived(alert.chamado.toString());
+      
+    } catch (error) {
+      console.error(`❌ [ConfirmColumn] Erro ao confirmar chamado ${alert.chamado}:`, error);
+    }
+  };
 
-    try:
-        if route == "$connect":
-            return handle_connect(event, trace)
-        elif route == "$disconnect":
-            return handle_disconnect(event, trace)
-        else:
-            # Mensagens normais -> parse body
-            body = json.loads(event.get("body") or "{}")
+  const handleEscalate = (nextLevel: 1 | 2 | 3 | 4) => {
+    try {
+      console.log(`📈 [ConfirmColumn] Escalando para nível ${nextLevel} - Chamado: ${alert.chamado}`);
+      
+      // Atualizar estado local
+      store.updateChamadoState(alert.chamado, {
+        currentLevel: nextLevel,
+        status: 'escalating',
+        timeRemaining: 10 * 60,
+        timerActive: true
+      });
 
-            if route == "startTimer":
-                return handle_start_timer(event, trace, body)
-            elif route == "updateObservacao":
-                return handle_update_observacao(event, trace, body)
-            elif route == "updateOperador":
-                return handle_update_operador(event, trace, body)
-            elif route == "updateStatusFinal":
-                return handle_update_status_final(event, trace, body)
-            elif route == "getState":
-                return handle_get_state(event, trace, body)
-            else:
-                log(trace, "Rota inválida", route=route)
-                return {"statusCode": 400, "body": json.dumps({"error": "Invalid route"}, cls=DecimalEncoder)}
-    except Exception as e:
-        log(trace, "Erro na execução", error=str(e))
-        return {"statusCode": 500, "body": json.dumps({"error": str(e)}, cls=DecimalEncoder)}
+      // Iniciar nova etapa no servidor (10 min por padrão)
+      store.sendStartTimer(alert.chamado, nextLevel, 10 * 60);
+      
+      if (currentObservation?.trim()) {
+        store.sendUpdateObservacao(alert.chamado, nextLevel, currentObservation.trim());
+      }
+      
+      onStartEscalation(alert.chamado.toString(), nextLevel);
+      
+      // Solicitar estado atualizado
+      setTimeout(() => store.requestState(alert.chamado), 1000);
+      
+    } catch (error) {
+      console.error(`❌ [ConfirmColumn] Erro ao escalar chamado ${alert.chamado} para nível ${nextLevel}:`, error);
+    }
+  };
+
+  const handleGoBack = () => {
+    try {
+      const prevLevel = Math.max(0, (state?.currentLevel ?? 0) - 1) as 0 | 1 | 2 | 3;
+      const duration = prevLevel === 0 ? 20 * 60 : 10 * 60;
+      
+      console.log(`⬅️ [ConfirmColumn] Voltando para nível ${prevLevel} - Chamado: ${alert.chamado}`);
+      
+      // Atualizar estado local
+      store.updateChamadoState(alert.chamado, {
+        currentLevel: prevLevel,
+        timeRemaining: duration,
+        timerActive: true
+      });
+
+      store.sendStartTimer(alert.chamado, prevLevel, duration);
+      onGoBack(alert.chamado.toString());
+      
+      setTimeout(() => store.requestState(alert.chamado), 1000);
+      
+    } catch (error) {
+      console.error(`❌ [ConfirmColumn] Erro ao voltar nível - Chamado: ${alert.chamado}:`, error);
+    }
+  };
+
+  const handleConfirmFinalStatus = () => {
+    if (!pendingChange?.status || !pendingChange?.observations?.trim()) return;
+    
+    try {
+      const level = (state?.currentLevel ?? 0) as 0 | 1 | 2 | 3 | 4;
+      const finalStatus = pendingChange.status === "attended" ? "attended" : "not-attended";
+      
+      console.log(`🏁 [ConfirmColumn] Finalizando chamado ${alert.chamado} com status: ${finalStatus}`);
+      
+      // Atualizar estado local
+      store.updateChamadoState(alert.chamado, {
+        status: 'completed',
+        statusFinal: finalStatus,
+        observations: pendingChange.observations.trim(),
+        timerActive: false,
+        isAttended: finalStatus === 'attended'
+      });
+
+      store.sendUpdateStatusFinal(
+        alert.chamado,
+        finalStatus,
+        pendingChange.observations.trim(),
+        level
+      );
+      
+      onConfirmStatusChange(alert.chamado.toString());
+      
+    } catch (error) {
+      console.error(`❌ [ConfirmColumn] Erro ao finalizar chamado ${alert.chamado}:`, error);
+    }
+  };
+
+  // Se não há estado, mostrar botão inicial
+  if (!state) {
+    return (
+      <div className="text-center">
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={handleInit}
+          className="h-8 px-3 text-xs"
+        >
+          <Play className="h-3 w-3 mr-1" />
+          Iniciar
+        </Button>
+      </div>
+    );
+  }
+
+  // Renderização baseada no status atual
+  switch (state.status) {
+    case 'pending':
+      return (
+        <div className="text-center space-y-3">
+          <div className="flex items-center justify-center gap-2">
+            <Clock className="h-4 w-4 text-warning" />
+            <span
+              className="text-sm font-mono font-bold"
+              style={{ color: state.timeRemaining <= 60 ? '#ef4444' : '#f59e0b' }}
+            >
+              {formatTime(state.timeRemaining)}
+            </span>
+            {state.timerActive && (
+              <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
+            )}
+          </div>
+
+          <div className="space-y-2">
+            <div className="space-y-1">
+              <Label className="text-xs">
+                Observações <span className="text-destructive">*</span>
+              </Label>
+              <Textarea
+                placeholder="Observações são obrigatórias para confirmação"
+                value={currentObservation}
+                onChange={(e) => onObservationChange(alert.chamado.toString(), e.target.value)}
+                className="text-xs min-h-[60px] resize-none"
+                required
+              />
+              {!currentObservation.trim() && (
+                <p className="text-xs text-destructive">Observações são obrigatórias</p>
+              )}
+            </div>
+
+            <div className="flex gap-1">
+              <Button
+                size="sm"
+                variant="default"
+                onClick={handleConfirm}
+                disabled={!currentObservation.trim()}
+                className="h-8 px-3 text-xs flex-1 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <Check className="h-3 w-3 mr-1" />
+                Confirmar
+              </Button>
+              <Button
+                size="sm"
+                variant="secondary"
+                onClick={() => handleEscalate(1)}
+                disabled={!currentObservation.trim()}
+                className="h-8 px-3 text-xs flex-1 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <FastForward className="h-3 w-3 mr-1" />
+                Próxima Etapa
+              </Button>
+            </div>
+          </div>
+        </div>
+      );
+
+    case 'confirmed':
+      return (
+        <div className="text-center space-y-2">
+          <div className="flex gap-1 justify-center">
+            <Badge variant="default" className="bg-green-600 text-white">
+              <CheckCircle className="h-3 w-3 mr-1" />
+              Confirmado
+            </Badge>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => handleEscalate(1)}
+              className="h-6 px-2 text-xs"
+            >
+              <FastForward className="h-3 w-3 mr-1" />
+              Próxima
+            </Button>
+          </div>
+          {state.observations && (
+            <div className="text-xs text-muted-foreground p-2 bg-muted rounded text-left">
+              <strong>Observações:</strong>
+              <br />
+              {state.observations}
+            </div>
+          )}
+        </div>
+      );
+
+    case 'escalating':
+      return (
+        <div className="space-y-2">
+          {state.currentLevel > 0 && (
+            <div className="text-center">
+              <Badge variant="destructive" className="text-xs">
+                {levelNames[state.currentLevel as keyof typeof levelNames]} Escalação
+              </Badge>
+              {state.timerActive && (
+                <div className="flex items-center justify-center gap-1 mt-1">
+                  <Clock className="h-3 w-3 text-warning" />
+                  <span
+                    className="text-xs font-mono font-bold"
+                    style={{ color: state.timeRemaining <= 60 ? '#ef4444' : '#f59e0b' }}
+                  >
+                    {formatTime(state.timeRemaining)}
+                  </span>
+                  <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {!state.isAttended && (
+            <>
+              {showConfirmation ? (
+                <div className="space-y-2 p-2 border rounded bg-background">
+                  <div className="text-xs font-medium">
+                    Confirmar: {pendingChange?.status === 'attended' ? 'Atendida' : 'Não Atendida'}
+                  </div>
+
+                  <div className="space-y-1">
+                    <Label className="text-xs">
+                      Observações <span className="text-destructive">*</span>
+                    </Label>
+                    <Textarea
+                      placeholder="Observações obrigatórias..."
+                      value={pendingChange?.observations || ''}
+                      onChange={(e) => onPendingObservationChange(alert.chamado.toString(), e.target.value)}
+                      className="text-xs min-h-[60px] resize-none"
+                      required
+                    />
+                    {!pendingChange?.observations?.trim() && (
+                      <p className="text-xs text-destructive">Observações são obrigatórias</p>
+                    )}
+                  </div>
+
+                  <div className="flex gap-1">
+                    <Button
+                      size="sm"
+                      variant="default"
+                      onClick={handleConfirmFinalStatus}
+                      disabled={!pendingChange?.observations?.trim()}
+                      className="h-6 px-2 text-xs flex-1"
+                    >
+                      <Check className="h-3 w-3 mr-1" />
+                      Confirmar
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => onCancelStatusChange(alert.chamado.toString())}
+                      className="h-6 px-2 text-xs flex-1"
+                    >
+                      <X className="h-3 w-3 mr-1" />
+                      Cancelar
+                    </Button>
+                  </div>
+                </div>
+              ) : (
+                <>
+                  <div className="flex gap-1">
+                    {state.currentLevel > 0 && (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={handleGoBack}
+                        className="h-6 px-2 text-xs flex-1"
+                      >
+                        <RotateCcw className="h-3 w-3 mr-1" />
+                        Voltar
+                      </Button>
+                    )}
+
+                    {state.currentLevel < 4 && (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() =>
+                          handleEscalate((state.currentLevel + 1) as 1 | 2 | 3 | 4)
+                        }
+                        className="h-6 px-2 text-xs flex-1"
+                      >
+                        Iniciar{' '}
+                        {levelNames[(state.currentLevel + 1) as keyof typeof levelNames]} Escalação
+                      </Button>
+                    )}
+                  </div>
+
+                  <Select
+                    value=""
+                    onValueChange={(value) => onPrepareStatusChange(alert.chamado.toString(), value)}
+                  >
+                    <SelectTrigger className="h-6 text-xs">
+                      <SelectValue placeholder="Selecionar Status" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="attended">Atendida</SelectItem>
+                      <SelectItem value="not-attended">Não Atendida</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </>
+              )}
+            </>
+          )}
+        </div>
+      );
+
+    case 'completed':
+      return (
+        <div className="text-center space-y-2">
+          <div className="flex gap-1 justify-center">
+            <Badge variant="default" className="bg-green-600 text-white">
+              <CheckCircle className="h-3 w-3 mr-1" />
+              Finalizado
+            </Badge>
+          </div>
+          {state.observations && (
+            <div className="text-xs text-muted-foreground p-2 bg-muted rounded text-left">
+              <strong>Observações:</strong>
+              <br />
+              {state.observations}
+            </div>
+          )}
+        </div>
+      );
+
+    default:
+      console.warn(`⚠️ [ConfirmColumn] Status desconhecido para chamado ${alert.chamado}: ${state.status}`);
+      return null;
+  }
+};
