@@ -13,8 +13,7 @@ import { escalationApi } from '@/services/escalationApi';
 import { MobileCard } from '@/components/ActionTable/MobileCard';
 import { formatDate, truncateText, getSeverityColor } from '@/utils/formatters';
 import useChamadoStore from "@/store/useChamadoStore";
-import { ConfirmColumn } from "@/components/ActionTable/ConfirmationColumn";
-
+import { ConfirmColumn } from "@/components/ConfirmColumn";
 
 // Mock data for demonstration
 const mockAlertData: AlertData[] = [
@@ -636,6 +635,21 @@ export const ActionTable = ({ alertData = mockAlertData, onUpdateAcknowledgment,
                               </Badge>
                             </TableCell>
                             <TableCell className="min-w-[120px]">
+                              <ConfirmColumn
+                                alert={alert}
+                                currentObservation={currentObservation}
+                                showConfirmation={!!showConfirmation}
+                                pendingChange={pendingChange}
+                                onStartConfirmation={startConfirmation}
+                                onConfirmReceived={confirmReceived}
+                                onStartEscalation={startEscalation}
+                                onObservationChange={handleConfirmationObservationChange}
+                                onPendingObservationChange={handlePendingObservationChange}
+                                onPrepareStatusChange={prepareStatusChange}
+                                onConfirmStatusChange={confirmStatusChange}
+                                onCancelStatusChange={cancelStatusChange}
+                                onGoBack={goBackEscalation}
+                              />
                             </TableCell>
                             <TableCell>
                               <Button
