@@ -1,67 +1,38 @@
 export interface AlertData {
-  chamado: number;
-  operador: string;
-  statusFinal?: string;
-  // Adicione outros campos conforme necessário
+  id: string;
+  chamado: string;
+  tipo_chamado: string;
+  grupo_chamado: string;
+  status_chamado: string;
+  abertura_chamado: string;
+  resumo_chamado: string;
+  severidade_chamado: string;
+  chat: boolean;
 }
 
-export interface PendingStatusChange {
-  status: 'attended' | 'not-attended';
-  observations: string;
-}
-
-export interface ChamadoState {
-  chamado: number;
-  operador: string;
-  statusFinal?: string;
-  currentLevel: 0 | 1 | 2 | 3 | 4;
+export interface EscalationState {
   status: 'pending' | 'confirmed' | 'escalating' | 'completed';
+  currentLevel: 0 | 1 | 2 | 3 | 4;
   timeRemaining: number;
   timerActive: boolean;
   isAttended: boolean;
-  observations?: string;
-  
-  // Dados específicos de cada nível
-  level0_timerStart?: string;
-  level0_duration?: number;
-  level0_status?: 'running' | 'paused';
-  level0_observacao?: string;
-  
-  level1_timerStart?: string;
-  level1_duration?: number;
-  level1_status?: 'running' | 'paused';
-  level1_observacao?: string;
-  
-  level2_timerStart?: string;
-  level2_duration?: number;
-  level2_status?: 'running' | 'paused';
-  level2_observacao?: string;
-  
-  level3_timerStart?: string;
-  level3_duration?: number;
-  level3_status?: 'running' | 'paused';
-  level3_observacao?: string;
-  
-  level4_timerStart?: string;
-  level4_duration?: number;
-  level4_status?: 'running' | 'paused';
-  level4_observacao?: string;
+  observations: string;
+  pendingStatus?: string;
+  pendingObservations?: string;
+  startedAt?: string;
+  durationMinutes?: number;
 }
 
-export interface WebSocketMessage {
-  action: string;
-  chamado: number;
-  data?: any;
-  timestamp?: string;
-  success?: boolean;
-  error?: string;
+export interface ActionTableProps {
+  alertData: AlertData[];
+  onUpdateAcknowledgment: (alertId: string, acknowledged: boolean) => void;
+  loading: boolean;
 }
 
-export interface TimerData {
-  chamado: number;
-  level: 0 | 1 | 2 | 3 | 4;
-  duration: number;
-  remaining: number;
-  active: boolean;
-  startTime: string;
+export type SortField = 'chamado' | 'tipo_chamado' | 'grupo_chamado' | 'status_chamado' | 'abertura_chamado' | 'resumo_chamado' | 'severidade_chamado';
+export type SortDirection = 'asc' | 'desc' | null;
+
+export interface PendingStatusChange {
+  status: string;
+  observations: string;
 }
