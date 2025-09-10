@@ -1,16 +1,41 @@
-            <div className="flex items-center gap-2">
-              <Label htmlFor="itemsPerPage" className="text-sm font-medium whitespace-nowrap">
-                Alertas por página:
-              </Label>
-              <Select value={itemsPerPage.toString()} onValueChange={handleItemsPerPageChange}>
-                <SelectTrigger className="w-20">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="5">5</SelectItem>
-                  <SelectItem value="10">10</SelectItem>
-                  <SelectItem value="15">15</SelectItem>
-                  <SelectItem value="20">20</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
+const [itemsPerPage, setItemsPerPage] = useState<number>(() => {
+  const saved = sessionStorage.getItem("itemsPerPage");
+  return saved ? parseInt(saved, 10) : 10;
+});
+
+// Função que atualiza estado + sessionStorage
+const handleItemsPerPageChange = (value: string) => {
+  const num = parseInt(value, 10);
+  setItemsPerPage(num);
+  sessionStorage.setItem("itemsPerPage", num.toString());
+};
+
+
+
+
+
+
+
+
+
+
+
+<div className="flex items-center gap-2">
+  <Label
+    htmlFor="itemsPerPage"
+    className="text-sm font-medium whitespace-nowrap"
+  >
+    Alertas por página:
+  </Label>
+  <Select value={itemsPerPage.toString()} onValueChange={handleItemsPerPageChange}>
+    <SelectTrigger className="w-20">
+      <SelectValue />
+    </SelectTrigger>
+    <SelectContent>
+      <SelectItem value="5">5</SelectItem>
+      <SelectItem value="10">10</SelectItem>
+      <SelectItem value="15">15</SelectItem>
+      <SelectItem value="20">20</SelectItem>
+    </SelectContent>
+  </Select>
+</div>
