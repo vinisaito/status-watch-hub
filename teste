@@ -1,1 +1,183 @@
-https://f6ffk8e9fe.execute-api.us-east-1.amazonaws.com/prod/acompanhamento/
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { useState } from 'react';
+import { useChatAcionados } from '@/hooks/use-chat-acionados';
+
+interface AlertData {
+  id: string;
+  chamado: string;
+  tipo_chamado: string;
+  grupo_chamado: string;
+  status_chamado: string;
+  abertura_chamado: string;
+  resumo_chamado: string;
+  severidade_chamado: string;
+  acionado: string;
+  chat: boolean;
+}
+
+interface MonitoringCardsProps {
+  alertData: AlertData[];
+  onFilterSelect: (filter: string | null) => void; // Agora aceita limpar filtro
+}
+
+export const MonitoringCards = ({ alertData, onFilterSelect }: MonitoringCardsProps) => {
+  const [activeFilter, setActiveFilter] = useState<string | null>(null);
+  
+  // Usando o hook para obter os chamados acionados
+  const { isAcionado } = useChatAcionados();
+
+  // Função toggle do filtro
+  const handleCardClick = (filterKey: string) => {
+    if (activeFilter === filterKey) {
+      setActiveFilter(null);
+      onFilterSelect(null);
+    } else {
+      setActiveFilter(filterKey);
+      onFilterSelect(filterKey);
+    }
+  };
+
+  // Métricas com filtro de chatAcionado
+  const sev4Incidents = alertData.filter(alert =>
+    alert.tipo_chamado.toLowerCase().includes('incidente') &&
+    alert.severidade_chamado.includes('4') &&
+    !isAcionado(alert.chamado) // Exclui chamados já acionados via chat
+  ).length;
+
+  const totalSev4Incidents = alertData.filter(alert =>
+    alert.tipo_chamado.toLowerCase().includes('incidente') &&
+    alert.severidade_chamado.includes('4')
+  ).length;
+
+  const sev4Alerts = alertData.filter(alert =>
+    alert.tipo_chamado.toLowerCase().includes('alerta') &&
+    alert.severidade_chamado.includes('4') &&
+    alert.acionado !== 'OK' &&
+    !isAcionado(alert.chamado)
+  ).length;
+
+  const totalSev4Alerts = alertData.filter(alert =>
+    alert.tipo_chamado.toLowerCase().includes('alerta') &&
+    alert.severidade_chamado.includes('4')
+  ).length;
+
+  const sev3Incidents = alertData.filter(alert =>
+    alert.tipo_chamado.toLowerCase().includes('incidente') &&
+    alert.severidade_chamado.includes('3') &&
+    !isAcionado(alert.chamado)
+  ).length;
+
+  const totalSev3Incidents = alertData.filter(alert =>
+    alert.tipo_chamado.toLowerCase().includes('incidente') &&
+    alert.severidade_chamado.includes('3')
+  ).length;
+
+  return (
+    <div className="grid grid-cols-1 md:grid-cols-3 gap-6 w-full max-w-none">
+      {/* SEV4 Incidents */}
+      <div className="space-y-4">
+        <Card
+          className={`bg-panel-bg border-sev4-incident/20 hover:border-sev4-incident/40 transition-colors cursor-pointer 
+            ${activeFilter === 'SEV4_INCIDENT' ? 'ring-2 ring-sev4-incident' : ''}`}
+          onClick={() => handleCardClick('SEV4_INCIDENT')}
+        >
+          <CardHeader className="pb-3">
+            <CardTitle className="text-sev4-incident text-sm font-medium uppercase tracking-wide">
+              Incidentes SEV4
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="text-4xl font-bold text-sev4-incident mb-2">
+              {sev4Incidents}
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card
+          className={`bg-panel-bg/50 border-sev4-incident/10 cursor-pointer hover:border-sev4-incident/40 transition-colors 
+            ${activeFilter === 'SEV4_INCIDENT_TOTAL' ? 'ring-2 ring-sev4-incident' : ''}`}
+          onClick={() => handleCardClick('SEV4_INCIDENT_TOTAL')}
+        >
+          <CardContent className="pt-4">
+            <div className="flex items-center justify-between">
+              <span className="text-sm text-muted-foreground">Total</span>
+              <span className="text-lg font-semibold text-sev4-incident">
+                {totalSev4Incidents}
+              </span>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* SEV4 Alerts */}
+      <div className="space-y-4">
+        <Card
+          className={`bg-panel-bg border-sev4-alert/20 hover:border-sev4-alert/40 transition-colors cursor-pointer 
+            ${activeFilter === 'SEV4_ALERT' ? 'ring-2 ring-sev4-alert' : ''}`}
+          onClick={() => handleCardClick('SEV4_ALERT')}
+        >
+          <CardHeader className="pb-3">
+            <CardTitle className="text-sev4-alert text-sm font-medium uppercase tracking-wide">
+              Alertas SEV4
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="text-4xl font-bold text-sev4-alert mb-2">
+              {sev4Alerts}
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card
+          className={`bg-panel-bg/50 border-sev4-alert/10 cursor-pointer hover:border-sev4-alert/40 transition-colors 
+            ${activeFilter === 'SEV4_ALERT_TOTAL' ? 'ring-2 ring-sev4-alert' : ''}`}
+          onClick={() => handleCardClick('SEV4_ALERT_TOTAL')}
+        >
+          <CardContent className="pt-4">
+            <div className="flex items-center justify-between">
+              <span className="text-sm text-muted-foreground">Total</span>
+              <span className="text-lg font-semibold text-sev4-alert">
+                {totalSev4Alerts}
+              </span>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* SEV3 Incidents */}
+      <div className="space-y-4">
+        <Card
+          className={`bg-panel-bg border-sev3-incident/20 hover:border-sev3-incident/40 transition-colors cursor-pointer 
+            ${activeFilter === 'SEV3_INCIDENT' ? 'ring-2 ring-sev3-incident' : ''}`}
+          onClick={() => handleCardClick('SEV3_INCIDENT')}
+        >
+          <CardHeader className="pb-3">
+            <CardTitle className="text-sev3-incident text-sm font-medium uppercase tracking-wide">
+              Incidentes SEV3
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="text-4xl font-bold text-sev3-incident mb-2">
+              {sev3Incidents}
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card
+          className={`bg-panel-bg/50 border-sev3-incident/10 cursor-pointer hover:border-sev3-incident/40 transition-colors 
+            ${activeFilter === 'SEV3_INCIDENT_TOTAL' ? 'ring-2 ring-sev3-incident' : ''}`}
+          onClick={() => handleCardClick('SEV3_INCIDENT_TOTAL')}
+        >
+          <CardContent className="pt-4">
+            <div className="flex items-center justify-between">
+              <span className="text-sm text-muted-foreground">Total</span>
+              <span className="text-lg font-semibold text-sev3-incident">
+                {totalSev3Incidents}
+              </span>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    </div>
+  );
+};
