@@ -280,19 +280,18 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
       const webhookUrl = activeWebhook.url;
 
       // Enviar mensagem para Google Chat
-      const message = {
+       const message = {
         cards: [
           {
             header: {
               title: "<b>🚨 O CIOPs precisa da sua atenção! <b>"
-              
             },
             sections: [
               {
                 widgets: [
                   {
                     textParagraph: {
-                      text: `É necessário confirmação de recebimento e ciência pelo grupo responsável.`
+                      text: `É necessário confirmação de recebimento reagindo na mensagem ou respondendo ela.`
                     }
                   }
                 ]
@@ -321,28 +320,6 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
                   }
                 ]
               },
-              {
-                widgets: [
-                  {
-                    buttons: [
-                      {
-                        textButton: {
-                          text: "✅ Confirmar Recebimento",
-                          onClick: {
-                            action: {
-                              actionMethodName: "confirmarAlerta",
-                              parameters: [
-                                { key: "chamado", value: alert.chamado },
-                                { key: "grupo", value: alert.grupo_chamado }
-                              ]
-                            }
-                          }
-                        }
-                      }
-                    ]
-                  }
-                ]
-              }
             ],
           },
         ],
@@ -583,6 +560,12 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
       ? 'bg-success/90 text-white border-success/50 shadow-md'
       : 'bg-destructive/90 text-white border-destructive/50 shadow-md';
 
+  const getStatusIcon = (chat: boolean) =>
+    chat ? <Check className="h-4 w-4" /> : <XCircle className="h-4 w-4" />;
+
+  const getStatusText = (chat: boolean) => {
+    return chat ? 'ACIONADO VIA CHAT' : 'NÃO ACIONADO VIA CHAT';
+  };
 
   const handlePageChange = (page: number) => {
     setCurrentPage(page);
@@ -653,19 +636,6 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
                         </div>
 
                         <div className="flex items-center justify-between pt-3 gap-2">
-                          <div className="flex items-center gap-2">
-                            {alert.tipo_chamado.toLowerCase().includes('incidente') && (
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                onClick={() => handleIncidentClick(alert)}
-                                className="h-7 px-2 text-xs"
-                              >
-                                <ExternalLink className="h-3 w-3 mr-1" />
-                                <span className="hidden sm:inline">Crise</span>
-                              </Button>
-                            )}
-                          </div>
 
                           <div className="flex gap-2">
                             <Button
@@ -1039,6 +1009,16 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
                     {selectedIncident && (
                       <div className="relative z-10 flex flex-wrap items-center gap-3 mt-6">
                         <div className="animate-fade-in">
+                          <div className={`${getStatusBadgeClass(selectedIncident.chat)} flex items-center gap-2 px-4 py-2 rounded-xl 
+                              backdrop-blur-sm border border-white/20 shadow-lg`}>
+                            {getStatusIcon(selectedIncident.chat)}
+                            <span className="font-medium text-sm">
+                              {getStatusText(selectedIncident.chat)}
+                            </span>
+                          </div>
+                        </div>
+
+                        <div className="animate-fade-in">
                           <div className="bg-white/20 text-white flex items-center gap-2 px-4 py-2 rounded-xl 
                               backdrop-blur-sm border border-white/30 shadow-lg">
                             <span className="font-medium text-sm">{selectedIncident.tipo_chamado}</span>
@@ -1157,18 +1137,6 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
               </DialogHeader>
 
               <div className="space-y-4 pt-4">
-                {/* Exibir timestamp se disponível */}
-                {hasTimestamp(selectedChamadoForEdit) && (
-                  <div className="p-3 rounded-lg bg-blue-50 border border-blue-200 dark:bg-blue-950/30 dark:border-blue-800">
-                    <div className="flex items-center gap-2 text-blue-700 dark:text-blue-300">
-                      <Clock className="h-4 w-4" />
-                      <span className="text-sm font-medium">
-                        Acionado em: {getTimestampForChamado(selectedChamadoForEdit)}
-                      </span>
-                    </div>
-                  </div>
-                )}
-
                 {/* Campo Operador */}
                 <div className="space-y-2">
                   <Label htmlFor="operador" className="text-sm font-medium flex items-center gap-2">
@@ -1194,6 +1162,18 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
 
                 {/* Campo Observação */}
                 <div className="space-y-2">
+                  {/* Timestamp do acionamento */}
+                  {selectedChamadoForEdit && hasTimestamp(selectedChamadoForEdit) && (
+                    <div className="p-3 rounded-lg bg-blue-50 border border-blue-200 dark:bg-blue-950/20 dark:border-blue-800">
+                      <div className="flex items-center gap-2 text-blue-700 dark:text-blue-300">
+                        <Clock className="h-4 w-4" />
+                        <span className="text-sm font-medium">Acionado no chat em:</span>
+                      </div>
+                      <p className="text-sm font-mono text-blue-800 dark:text-blue-200 mt-1">
+                        {getTimestampForChamado(selectedChamadoForEdit)}
+                      </p>
+                    </div>
+                  )}
                   <div className="flex items-center justify-between">
                     <Label htmlFor="observacao" className="text-sm font-medium flex items-center gap-2">
                       <FileText className="h-4 w-4" />
@@ -1206,7 +1186,10 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
                         size="sm"
                         onClick={() => {
                           const grupo = alertData.find(a => a.chamado === selectedChamadoForEdit)?.grupo_chamado || 'XXXX';
-                          setTempObservacao(`Informado no chat do grupo ${grupo}`);
+                          const timestamp = getTimestampForChamado(selectedChamadoForEdit);
+                          const baseText = `Informado no chat do grupo ${grupo}`;
+                          const fullText = timestamp ? `${baseText} em ${timestamp}` : baseText;
+                          setTempObservacao(fullText);
                         }}
                         className="text-xs h-7 px-2"
                       >
