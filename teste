@@ -18,6 +18,7 @@ import { ShiftNotes } from './ShiftNotes';
 import { WebhookConfig } from './WebhookConfig';
 import { Sheet, SheetContent } from "@/components/ui/sheet";
 import  MaintenancePage  from './MaintenancePage';
+import { useChatAcionados } from '@/hooks/use-chat-acionados'; // <- ADICIONE ESTA LINHA
 
 export interface AlertData {
   id: string;
@@ -39,6 +40,9 @@ const Dashboard = () => {
   const [loading, setLoading] = useState(false);
   const [activeSection, setActiveSection] = useState<'incidents' | 'rdm' | 'notes' | null>(null);
   const [filter, setFilter] = useState<string | null>(null);
+  
+  // <- ADICIONE ESTA LINHA
+  const { isAcionado } = useChatAcionados();
 
   const fetchAlertData = async () => {
     setLoading(true);
@@ -94,8 +98,6 @@ const Dashboard = () => {
     }
   };
 
-
-
   const playAlertSound = () => {
     const audio = new Audio('data:audio/wav;base64,UklGRnoGAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQoGAACBhYqFbF1fdJivrJBhNjVgodDbq2EcBj+a2/LDciUFLIHO8tiJNwgZaLvt559NEAxQp+PwtmMcBjiR1/LMeSwFJHfH8N2QQAoUXrTp66hVFApGn+Dqu2sgBDR+w/PCaWEbEBOa5rWgdyoEKAA=');
     audio.play().catch(() => {
@@ -140,12 +142,13 @@ const Dashboard = () => {
     { title: "Recados do Turno", icon: MessageSquare, key: 'notes' as const },
   ];
 
+  // <- SUBSTITUA TODA ESTA SEÇÃO DE filteredData
   const filteredData = filter
     ? alertData.filter(alert => {
       if (filter === 'SEV4_INCIDENT') {
         return alert.tipo_chamado.toLowerCase().includes('incidente')
           && alert.severidade_chamado.includes('4')
-          && alert.acionado !== 'OK';
+          && !isAcionado(alert.chamado); // <- CORRIGIDO: usa isAcionado
       }
       if (filter === 'SEV4_INCIDENT_TOTAL') {
         return alert.tipo_chamado.toLowerCase().includes('incidente')
@@ -154,7 +157,8 @@ const Dashboard = () => {
       if (filter === 'SEV4_ALERT') {
         return alert.tipo_chamado.toLowerCase().includes('alerta')
           && alert.severidade_chamado.includes('4')
-          && alert.acionado !== 'OK';
+          && alert.acionado !== 'OK'
+          && !isAcionado(alert.chamado); // <- CORRIGIDO: usa isAcionado
       }
       if (filter === 'SEV4_ALERT_TOTAL') {
         return alert.tipo_chamado.toLowerCase().includes('alerta')
@@ -163,7 +167,7 @@ const Dashboard = () => {
       if (filter === 'SEV3_INCIDENT') {
         return alert.tipo_chamado.toLowerCase().includes('incidente')
           && alert.severidade_chamado.includes('3')
-          && alert.acionado !== 'OK';
+          && !isAcionado(alert.chamado); // <- CORRIGIDO: usa isAcionado
       }
       if (filter === 'SEV3_INCIDENT_TOTAL') {
         return alert.tipo_chamado.toLowerCase().includes('incidente')
@@ -173,10 +177,8 @@ const Dashboard = () => {
     })
     : alertData;
 
-
   return (
     <div className="min-h-screen flex bg-background text-foreground">
-
       {/* Conteúdo principal */}
       <div className="flex-1 flex flex-col">
         {/* Header */}
