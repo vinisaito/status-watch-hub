@@ -1,9 +1,10 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
-import { Check, AlertTriangle, ExternalLink, Zap, Group, Calendar, Info, XCircle, Flame, ChevronLeft, ChevronRight, ArrowUpDown, ArrowUp, ArrowDown, User, FileText, Save, Edit3, CheckCircle, X, RefreshCw, Clock } from 'lucide-react';
+import { Check, AlertTriangle, ExternalLink, Zap, Group, Calendar, Info, XCircle, Flame, ChevronLeft, ChevronRight, ArrowUpDown, ArrowUp, ArrowDown, User, FileText, Save, Edit3, CheckCircle, X, RefreshCw, Clock, Search } from 'lucide-react';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import { toast } from '@/hooks/use-toast';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import {
@@ -70,6 +71,7 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
   const [crisisDialogOpen, setCrisisDialogOpen] = useState(false);
   const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
   const [currentPage, setCurrentPage] = useState(1);
+  const [searchTerm, setSearchTerm] = useState('');
   const itemsPerPage = 5;
 
   // Estados para ordenação
@@ -245,124 +247,15 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
     setTempObservacao('');
   };
 
-  const handleAcknowledgment = async (alert: AlertData) => {
-    try {
-      const response = await fetch(
-        "https://f6ffk8e9fe.execute-api.us-east-1.amazonaws.com/prod/webhook"
-      );
-      const data = await response.json();
-
-      // Procura o grupo correspondente
-      const grupoEntry = data.grupos.find(
-        (g: any) => g.grupo_chamado === alert.grupo_chamado
-      );
-
-      if (!grupoEntry || !grupoEntry.webhooks.length) {
-        toast({
-          title: "Webhook não configurado",
-          description: `Configure o webhook para o Grupo: ${alert.grupo_chamado}`,
-          variant: "destructive",
-        });
-        return;
-      }
-
-      // Pega o primeiro webhook ativo
-      const activeWebhook = grupoEntry.webhooks.find((w: any) => w.ativo);
-      if (!activeWebhook) {
-        toast({
-          title: "Nenhum webhook ativo",
-          description: `O grupo ${alert.grupo_chamado} não possui webhooks ativos`,
-          variant: "destructive",
-        });
-        return;
-      }
-
-      const webhookUrl = activeWebhook.url;
-
-      // Enviar mensagem para Google Chat
-       const message = {
-        cards: [
-          {
-            header: {
-              title: "<b>🚨 O CIOPs precisa da sua atenção! <b>"
-            },
-            sections: [
-              {
-                widgets: [
-                  {
-                    textParagraph: {
-                      text: `É necessário confirmação de recebimento reagindo na mensagem ou respondendo ela.`
-                    }
-                  }
-                ]
-              },
-              {
-                widgets: [
-                  {
-                    textParagraph: {
-                      text:
-                        "<b>Detalhes do Evento:</b><br><br>" +
-                        "<b>📌 Chamado: </b>" + alert.chamado + "<br><br>" +
-                        "<b>⚠️ Severidade: </b>" + alert.severidade_chamado + "<br><br>" +
-                        "<b>📰 Título: </b>" + alert.resumo_chamado + "<br><br>" +
-                        "<b>📅 Abertura: </b>" + alert.abertura_chamado + "<br><br>" +
-                        "<b>👥 Grupo: </b>" + alert.grupo_chamado
-                    }
-                  }
-                ],
-              },
-              {
-                widgets: [
-                  {
-                    textParagraph: {
-                      text: `<b>⚠️ Atenção: </b> Na ausência de confirmação, o CIOPs dará início ao processo de escalonamento, conforme procedimento padrão.`
-                    }
-                  }
-                ]
-              },
-            ],
-          },
-        ],
-      };
-
-      await fetch(webhookUrl, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(message),
-      });
-
-      // Marca como acionado no DynamoDB
-      const res = await fetch(
-        "https://f6ffk8e9fe.execute-api.us-east-1.amazonaws.com/prod/chatacionados",
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ chamado: alert.chamado.toString() }),
-        }
-      );
-
-      if (!res.ok) {
-        const errorData = await res.json();
-        throw new Error(errorData.message || "Erro ao marcar como acionado");
-      }
-
-      // Usando a função do hook para adicionar o chamado acionado
-      addAcionado(alert.chamado.toString());
-      onUpdateAcknowledgment(alert.id, true);
-
-      toast({
-        title: "Alerta acionado com sucesso",
-        description: `Mensagem enviada para o Grupo: ${alert.grupo_chamado}`,
-      });
-
-    } catch (error: any) {
-      toast({
-        title: "Erro ao acionar alerta",
-        description: error.message || "Não foi possível concluir o acionamento",
-        variant: "destructive",
-      });
-    }
-  };
+  // Função de acionamento do chat
+  const handleAcknowledgment = useCallback((alert: AlertData) => {
+    addAcionado(alert.chamado);
+    onUpdateAcknowledgment(alert.id, true);
+    toast({
+      title: 'Chat acionado',
+      description: `Chamado ${alert.chamado} acionado com sucesso`,
+    });
+  }, [addAcionado, onUpdateAcknowledgment]);
 
   // Função para lidar com clique no cabeçalho da coluna
   const handleSort = (field: SortField) => {
@@ -476,9 +369,27 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
     return { text: acionado, isOk: false };
   };
 
+  // Função para filtrar dados baseado no termo de pesquisa
+  const filteredData = useMemo(() => {
+    if (!searchTerm.trim()) {
+      return alertData;
+    }
+
+    const searchLower = searchTerm.toLowerCase().trim();
+    return alertData.filter(alert => 
+      alert.chamado.toLowerCase().includes(searchLower) ||
+      alert.tipo_chamado.toLowerCase().includes(searchLower) ||
+      alert.grupo_chamado.toLowerCase().includes(searchLower) ||
+      alert.status_chamado.toLowerCase().includes(searchLower) ||
+      alert.resumo_chamado.toLowerCase().includes(searchLower) ||
+      alert.severidade_chamado.toLowerCase().includes(searchLower) ||
+      alert.acionado.toLowerCase().includes(searchLower)
+    );
+  }, [alertData, searchTerm]);
+
   // Dados ordenados e paginados
   const { sortedAndPaginatedData, totalPages } = useMemo(() => {
-    let sortedData = [...alertData];
+    let sortedData = [...filteredData];
 
     // Aplica ordenação se houver campo e direção definidos
     if (sortField && sortDirection) {
@@ -526,12 +437,12 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
       sortedAndPaginatedData: paginatedData,
       totalPages
     };
-  }, [alertData, currentPage, itemsPerPage, sortField, sortDirection]);
+  }, [filteredData, currentPage, itemsPerPage, sortField, sortDirection]);
 
-  // Reset página quando dados mudam
+  // Reset página quando dados mudam ou pesquisa muda
   useEffect(() => {
     setCurrentPage(1);
-  }, [alertData]);
+  }, [filteredData]);
 
   const truncateText = (text: string, maxLength: number) => {
     return text.length > maxLength ? text.substring(0, maxLength) + '...' : text;
@@ -575,6 +486,31 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
     <TooltipProvider>
       <Card className="bg-card border-border">
         <CardHeader>
+          {/* Campo de Pesquisa */}
+          <div className="relative mb-4">
+            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              placeholder="Pesquisar por chamado, tipo, grupo, status, título..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="pl-10"
+            />
+          </div>
+          
+          {/* Indicador de resultados */}
+          {searchTerm && (
+            <div className="text-sm text-muted-foreground">
+              {filteredData.length === 0 ? (
+                <span>Nenhum resultado encontrado para "{searchTerm}"</span>
+              ) : (
+                <span>
+                  {filteredData.length} resultado{filteredData.length !== 1 ? 's' : ''} 
+                  {filteredData.length !== alertData.length && ` de ${alertData.length}`} 
+                  para "{searchTerm}"
+                </span>
+              )}
+            </div>
+          )}
         </CardHeader>
         <CardContent>
           {/* Layout para Mobile (oculto em desktop) */}
@@ -586,7 +522,7 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
               </div>
             ) : sortedAndPaginatedData.length === 0 ? (
               <div className="text-center py-8 text-muted-foreground">
-                Nenhum dado disponível
+                {searchTerm ? 'Nenhum resultado encontrado' : 'Nenhum dado disponível'}
               </div>
             ) : (
               sortedAndPaginatedData.map((alert) => {
@@ -810,7 +746,7 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
                 ) : sortedAndPaginatedData.length === 0 ? (
                   <TableRow>
                     <TableCell colSpan={10} className="text-center py-8 text-muted-foreground">
-                      Nenhum dado disponível
+                      {searchTerm ? 'Nenhum resultado encontrado' : 'Nenhum dado disponível'}
                     </TableCell>
                   </TableRow>
                 ) : (
@@ -915,7 +851,8 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
           {!loading && sortedAndPaginatedData.length > 0 && totalPages > 1 && (
             <div className="flex items-center justify-between mt-4 pt-4 border-t border-border">
               <div className="text-sm text-muted-foreground">
-                Mostrando {((currentPage - 1) * itemsPerPage) + 1} a {Math.min(currentPage * itemsPerPage, alertData.length)} de {alertData.length} registros
+                Mostrando {((currentPage - 1) * itemsPerPage) + 1} a {Math.min(currentPage * itemsPerPage, filteredData.length)} de {filteredData.length} registros
+                {searchTerm && filteredData.length !== alertData.length && ` (filtrados de ${alertData.length})`}
               </div>
               <div className="flex items-center gap-2">
                 <Button
