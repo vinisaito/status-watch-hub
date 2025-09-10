@@ -72,7 +72,7 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
   const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
   const [currentPage, setCurrentPage] = useState(1);
   const [searchTerm, setSearchTerm] = useState('');
-  const itemsPerPage = 5;
+  const [itemsPerPage, setItemsPerPage] = useState(5);
 
   // Estados para ordenação
   const [sortField, setSortField] = useState<SortField>('chamado');
@@ -156,9 +156,7 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
   useEffect(() => {
     fetchObservacoes();
     fetchTimestamps();
-  }, [fetchObservacoes,
-    fetchTimestamps
-  ]);
+  }, [fetchObservacoes, fetchTimestamps]);
 
   // Auto-refresh a cada 5 minutos
   useEffect(() => {
@@ -168,9 +166,7 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
     }, 5 * 60 * 1000); // 5 minutos
 
     return () => clearInterval(interval);
-  }, [fetchObservacoes,
-    fetchTimestamps
-  ]);
+  }, [fetchObservacoes, fetchTimestamps]);
 
   // Funções para manipular observações
   const handleOpenObservacao = (chamado: string) => {
@@ -287,7 +283,6 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
           {
             header: {
               title: "<b>🚨 O CIOPs precisa da sua atenção! <b>"
-
             },
             sections: [
               {
@@ -549,10 +544,16 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
     };
   }, [filteredData, currentPage, itemsPerPage, sortField, sortDirection]);
 
-  // Reset página quando dados mudam ou pesquisa muda
+  // Reset página quando dados mudam, pesquisa muda ou itemsPerPage muda
   useEffect(() => {
     setCurrentPage(1);
-  }, [filteredData]);
+  }, [filteredData, itemsPerPage]);
+
+  // Função para lidar com mudança no número de itens por página
+  const handleItemsPerPageChange = (value: string) => {
+    setItemsPerPage(parseInt(value));
+    setCurrentPage(1); // Reset para primeira página
+  };
 
   const truncateText = (text: string, maxLength: number) => {
     return text.length > maxLength ? text.substring(0, maxLength) + '...' : text;
@@ -568,7 +569,7 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
   const getSeverityColor = (severity: string) => {
     return severity.includes('4')
       ? 'bg-destructive text-destructive-foreground'
-      : 'bg-warning text-warning-foreground';
+      : 'bg-yellow-500 text-yellow-950';
   };
 
   const handleChamadoClick = (alert: AlertData) => {
@@ -578,8 +579,8 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
 
   const getStatusBadgeClass = (chat: boolean) =>
     chat
-      ? 'bg-success/90 text-white border-success/50 shadow-md'
-      : 'bg-destructive/90 text-white border-destructive/50 shadow-md';
+      ? 'bg-green-500/90 text-white border-green-500/50 shadow-md'
+      : 'bg-red-500/90 text-white border-red-500/50 shadow-md';
 
   const getStatusIcon = (chat: boolean) =>
     chat ? <Check className="h-4 w-4" /> : <XCircle className="h-4 w-4" />;
@@ -607,20 +608,41 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
             />
           </div>
 
-          {/* Indicador de resultados */}
-          {searchTerm && (
-            <div className="text-sm text-muted-foreground">
-              {filteredData.length === 0 ? (
-                <span>Nenhum resultado encontrado para "{searchTerm}"</span>
-              ) : (
-                <span>
-                  {filteredData.length} resultado{filteredData.length !== 1 ? 's' : ''}
-                  {filteredData.length !== alertData.length && ` de ${alertData.length} `}
-                     para "{searchTerm}"
-                </span>
-              )}
+          {/* Controles superiores */}
+          <div className="flex items-center justify-between flex-wrap gap-4 mb-4">
+            {/* Seletor de itens por página */}
+            <div className="flex items-center gap-2">
+              <Label htmlFor="itemsPerPage" className="text-sm font-medium whitespace-nowrap">
+                Alertas por página:
+              </Label>
+              <Select value={itemsPerPage.toString()} onValueChange={handleItemsPerPageChange}>
+                <SelectTrigger className="w-20">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="5">5</SelectItem>
+                  <SelectItem value="10">10</SelectItem>
+                  <SelectItem value="15">15</SelectItem>
+                  <SelectItem value="20">20</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
-          )}
+
+            {/* Indicador de resultados */}
+            {searchTerm && (
+              <div className="text-sm text-muted-foreground">
+                {filteredData.length === 0 ? (
+                  <span>Nenhum resultado encontrado para "{searchTerm}"</span>
+                ) : (
+                  <span>
+                    {filteredData.length} resultado{filteredData.length !== 1 ? 's' : ''}
+                    {filteredData.length !== alertData.length && ` de ${alertData.length} `}
+                       para "{searchTerm}"
+                  </span>
+                )}
+              </div>
+            )}
+          </div>
         </CardHeader>
         <CardContent>
           {/* Layout para Mobile (oculto em desktop) */}
@@ -682,7 +704,6 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
                         </div>
 
                         <div className="flex items-center justify-between pt-3 gap-2">
-
                           <div className="flex gap-2">
                             <Button
                               variant={isChat ? 'default' : 'outline'}
@@ -690,7 +711,7 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
                               onClick={() => !isChat && handleAcknowledgment(alert)}
                               disabled={isChat}
                               className={`h-7 px-2 sm:px-3 text-xs flex-shrink-0 ${isChat
-                                ? 'bg-success text-success-foreground hover:bg-success/90'
+                                ? 'bg-green-600 text-white hover:bg-green-700'
                                 : 'border-border hover:bg-accent'
                                 }`}
                             >
@@ -712,7 +733,7 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
                               size="sm"
                               onClick={() => handleOpenObservacao(alert.chamado)}
                               className={`h-7 px-2 text-xs ${observacao
-                                ? 'bg-success text-success-foreground hover:bg-success/90'
+                                ? 'bg-green-600 text-white hover:bg-green-700'
                                 : 'border-border hover:bg-accent'
                                 }`}
                             >
@@ -921,7 +942,7 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
                             onClick={() => !isChat && handleAcknowledgment(alert)}
                             disabled={isChat}
                             className={`${isChat
-                              ? 'bg-success text-success-foreground hover:bg-success/90'
+                              ? 'bg-green-600 text-white hover:bg-green-700'
                               : 'border-border hover:bg-accent'
                               } h-7 w-7 p-0`}
                           >
@@ -938,7 +959,7 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
                             size="sm"
                             onClick={() => handleOpenObservacao(alert.chamado)}
                             className={`${observacao
-                              ? 'bg-success text-success-foreground hover:bg-success/90'
+                              ? 'bg-green-600 text-white hover:bg-green-700'
                               : 'border-border hover:bg-accent'
                               } h-7 w-7 p-0`}
                           >
@@ -1016,3 +1037,95 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
               </div>
             </div>
           )}
+        </CardContent>
+
+        {/* Dialog para observações */}
+        <Dialog open={observacaoDialogOpen} onOpenChange={setObservacaoDialogOpen}>
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader>
+              <DialogTitle>Observação - Chamado {selectedChamadoForEdit}</DialogTitle>
+            </DialogHeader>
+            <div className="space-y-4">
+              <div>
+                <Label htmlFor="operador">Operador</Label>
+                <Select value={tempOperador} onValueChange={setTempOperador}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Selecione o operador" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {operadores.map((operador) => (
+                      <SelectItem key={operador} value={operador}>
+                        {operador}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <Label htmlFor="observacao">Observação</Label>
+                <Textarea
+                  id="observacao"
+                  value={tempObservacao}
+                  onChange={(e) => setTempObservacao(e.target.value)}
+                  placeholder="Digite a observação..."
+                  rows={4}
+                />
+              </div>
+              <div className="flex justify-end gap-2">
+                <Button variant="outline" onClick={handleCancelObservacao}>
+                  Cancelar
+                </Button>
+                <Button onClick={handleSaveObservacao}>
+                  Salvar
+                </Button>
+              </div>
+            </div>
+          </DialogContent>
+        </Dialog>
+
+        {/* Dialog para detalhes do chamado */}
+        <Dialog open={chamadoModalOpen} onOpenChange={setChamadoModalOpen}>
+          <DialogContent className="sm:max-w-2xl">
+            <DialogHeader>
+              <DialogTitle>Detalhes do Chamado {selectedIncident?.chamado}</DialogTitle>
+            </DialogHeader>
+            {selectedIncident && (
+              <div className="space-y-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <Label className="font-semibold">Tipo:</Label>
+                    <p className="text-sm">{selectedIncident.tipo_chamado}</p>
+                  </div>
+                  <div>
+                    <Label className="font-semibold">Grupo:</Label>
+                    <p className="text-sm">{selectedIncident.grupo_chamado}</p>
+                  </div>
+                  <div>
+                    <Label className="font-semibold">Status:</Label>
+                    <p className="text-sm">{selectedIncident.status_chamado}</p>
+                  </div>
+                  <div>
+                    <Label className="font-semibold">Severidade:</Label>
+                    <Badge className={getSeverityColor(selectedIncident.severidade_chamado)}>
+                      {selectedIncident.severidade_chamado}
+                    </Badge>
+                  </div>
+                  <div className="md:col-span-2">
+                    <Label className="font-semibold">Abertura:</Label>
+                    <p className="text-sm">{formatDate(selectedIncident.abertura_chamado)}</p>
+                  </div>
+                </div>
+                <div>
+                  <Label className="font-semibold">Resumo:</Label>
+                  <p className="text-sm mt-1 p-3 bg-muted rounded-md">
+                    {selectedIncident.resumo_chamado}
+                  </p>
+                </div>
+              </div>
+            )}
+          </DialogContent>
+        </Dialog>
+      </Card>
+    </TooltipProvider>
+  );
+};
