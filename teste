@@ -247,16 +247,6 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
     setTempObservacao('');
   };
 
-  // Função de acionamento do chat
-  const handleAcknowledgment = useCallback((alert: AlertData) => {
-    addAcionado(alert.chamado);
-    onUpdateAcknowledgment(alert.id, true);
-    toast({
-      title: 'Chat acionado',
-      description: `Chamado ${alert.chamado} acionado com sucesso`,
-    });
-  }, [addAcionado, onUpdateAcknowledgment]);
-
   // Função para lidar com clique no cabeçalho da coluna
   const handleSort = (field: SortField) => {
     if (sortField === field) {
@@ -376,7 +366,7 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
     }
 
     const searchLower = searchTerm.toLowerCase().trim();
-    return alertData.filter(alert => 
+    return alertData.filter(alert =>
       alert.chamado.toLowerCase().includes(searchLower) ||
       alert.tipo_chamado.toLowerCase().includes(searchLower) ||
       alert.grupo_chamado.toLowerCase().includes(searchLower) ||
@@ -496,7 +486,7 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
               className="pl-10"
             />
           </div>
-          
+
           {/* Indicador de resultados */}
           {searchTerm && (
             <div className="text-sm text-muted-foreground">
@@ -504,9 +494,9 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
                 <span>Nenhum resultado encontrado para "{searchTerm}"</span>
               ) : (
                 <span>
-                  {filteredData.length} resultado{filteredData.length !== 1 ? 's' : ''} 
-                  {filteredData.length !== alertData.length && ` de ${alertData.length}`} 
-                  para "{searchTerm}"
+                  {filteredData.length} resultado{filteredData.length !== 1 ? 's' : ''}
+                  {filteredData.length !== alertData.length && ` de ${alertData.length} `}
+                     para "{searchTerm}"
                 </span>
               )}
             </div>
