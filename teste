@@ -1071,6 +1071,29 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
             </Table>
           </div>
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
           {/* Paginação */}
           {!loading && sortedAndPaginatedData.length > 0 && totalPages > 1 && (
             <div className="flex items-center justify-between mt-4 pt-4 border-t border-border">
@@ -1573,3 +1596,4 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
 };
 
 export default Obsstatus;
+
