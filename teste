@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
-import { Check, AlertTriangle, ExternalLink, Zap, Group, Calendar, Info, XCircle, Flame, ChevronLeft, ChevronRight, ArrowUpDown, ArrowUp, ArrowDown, User, FileText, Save, Edit3, CheckCircle, X, RefreshCw, Clock, Search } from 'lucide-react';
+import { Check, AlertTriangle, ExternalLink, Zap, Group, Calendar, Info, XCircle, Flame, ChevronLeft, ChevronRight, ArrowUpDown, ArrowUp, ArrowDown, User, FileText, Save, Edit3, CheckCircle, X, RefreshCw, Clock, Search, Play, Pause, SkipForward, RotateCcw } from 'lucide-react';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
@@ -7,17 +7,8 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { toast } from '@/hooks/use-toast';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
-import { Dialog, DialogContent,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
 import { useChatAcionados } from '@/hooks/use-chat-acionados';
@@ -44,6 +35,18 @@ interface ObservacaoData {
   CreatedAt?: string;
 }
 
+interface AcionamentoData {
+  chamado: string;
+  etapa: 'primeiro_acionamento' | 'escalacao_1' | 'escalacao_2' | 'escalacao_3' | 'escalacao_4';
+  status: 'em_andamento' | 'finalizado';
+  observacoes: string;
+  operador: string;
+  iniciadoEm: number;
+  finalizadoEm?: number;
+  cronometroAtivo: boolean;
+  tempoRestante: number; // em segundos (20 minutos = 1200 segundos)
+}
+
 interface ActionTableProps {
   alertData: AlertData[];
   onUpdateAcknowledgment: (alertId: string, acknowledged: boolean) => void;
@@ -59,7 +62,6 @@ const Obsstatus: React.FC<Obsstatus> = ({ status }) => {
     return null; // não renderiza nada
   }
 }
-export default Obsstatus;
 
 type SortField = 'chamado' | 'tipo_chamado' | 'grupo_chamado' | 'status_chamado' | 'abertura_chamado' | 'resumo_chamado' | 'severidade_chamado' | 'acionado';
 type SortDirection = 'asc' | 'desc' | null;
@@ -89,6 +91,13 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
   const [tempOperador, setTempOperador] = useState<string>('');
   const [tempObservacao, setTempObservacao] = useState<string>('');
 
+  // Estados para acionamento/escalação
+  const [acionamentosData, setAcionamentosData] = useState<Map<string, AcionamentoData>>(new Map());
+  const [acionamentoDialogOpen, setAcionamentoDialogOpen] = useState(false);
+  const [selectedChamadoAcionamento, setSelectedChamadoAcionamento] = useState<string>('');
+  const [tempAcionamentoOperador, setTempAcionamentoOperador] = useState<string>('');
+  const [tempAcionamentoObservacao, setTempAcionamentoObservacao] = useState<string>('');
+
   const { getTimestampForChamado, hasTimestamp, fetchTimestamps } = useChatAcionadosTimestamps();
 
   // Modal para detalhes do chamado
@@ -111,6 +120,219 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
     'VINICIUS RHYU VITURINO SAITO'
   ];
 
+  // Cronômetro para acionamentos
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setAcionamentosData(prev => {
+        const newData = new Map(prev);
+        let hasChanges = false;
+
+        for (const [chamado, acionamento] of newData.entries()) {
+          if (acionamento.cronometroAtivo && acionamento.tempoRestante > 0) {
+            acionamento.tempoRestante -= 1;
+            hasChanges = true;
+
+            // Se o tempo acabou, pausa o cronômetro
+            if (acionamento.tempoRestante === 0) {
+              acionamento.cronometroAtivo = false;
+              toast({
+                title: 'Tempo esgotado!',
+                description: `O cronômetro do chamado ${chamado} chegou ao fim`,
+                variant: 'destructive',
+              });
+            }
+          }
+        }
+
+        return hasChanges ? newData : prev;
+      });
+    }, 1000);
+
+    return () => clearInterval(interval);
+  }, []);
+
+  // Funções para acionamento
+  const iniciarAcionamento = (chamado: string) => {
+    const novoAcionamento: AcionamentoData = {
+      chamado,
+      etapa: 'primeiro_acionamento',
+      status: 'em_andamento',
+      observacoes: '',
+      operador: '',
+      iniciadoEm: Date.now(),
+      cronometroAtivo: true,
+      tempoRestante: 1200, // 20 minutos em segundos
+    };
+
+    setAcionamentosData(prev => new Map(prev.set(chamado, novoAcionamento)));
+    
+    toast({
+      title: 'Acionamento iniciado',
+      description: `Primeiro acionamento do chamado ${chamado} iniciado`,
+    });
+  };
+
+  const pausarCronometro = (chamado: string) => {
+    setAcionamentosData(prev => {
+      const newData = new Map(prev);
+      const acionamento = newData.get(chamado);
+      if (acionamento) {
+        acionamento.cronometroAtivo = false;
+        newData.set(chamado, acionamento);
+      }
+      return newData;
+    });
+  };
+
+  const retomarCronometro = (chamado: string) => {
+    setAcionamentosData(prev => {
+      const newData = new Map(prev);
+      const acionamento = newData.get(chamado);
+      if (acionamento && acionamento.tempoRestante > 0) {
+        acionamento.cronometroAtivo = true;
+        newData.set(chamado, acionamento);
+      }
+      return newData;
+    });
+  };
+
+  const proximaEtapa = (chamado: string) => {
+    setAcionamentosData(prev => {
+      const newData = new Map(prev);
+      const acionamento = newData.get(chamado);
+      if (acionamento) {
+        const etapas: AcionamentoData['etapa'][] = [
+          'primeiro_acionamento',
+          'escalacao_1',
+          'escalacao_2',
+          'escalacao_3',
+          'escalacao_4'
+        ];
+        
+        const currentIndex = etapas.indexOf(acionamento.etapa);
+        if (currentIndex < etapas.length - 1) {
+          acionamento.etapa = etapas[currentIndex + 1];
+          acionamento.tempoRestante = 1200; // Reset para 20 minutos
+          acionamento.cronometroAtivo = true;
+          acionamento.observacoes = '';
+          
+          toast({
+            title: 'Próxima etapa',
+            description: `Avançado para ${acionamento.etapa.replace('_', ' ')}`,
+          });
+        }
+        newData.set(chamado, acionamento);
+      }
+      return newData;
+    });
+  };
+
+  const voltarEtapa = (chamado: string) => {
+    setAcionamentosData(prev => {
+      const newData = new Map(prev);
+      const acionamento = newData.get(chamado);
+      if (acionamento) {
+        const etapas: AcionamentoData['etapa'][] = [
+          'primeiro_acionamento',
+          'escalacao_1',
+          'escalacao_2',
+          'escalacao_3',
+          'escalacao_4'
+        ];
+        
+        const currentIndex = etapas.indexOf(acionamento.etapa);
+        if (currentIndex > 0) {
+          acionamento.etapa = etapas[currentIndex - 1];
+          acionamento.tempoRestante = 1200; // Reset para 20 minutos
+          acionamento.cronometroAtivo = true;
+          acionamento.observacoes = '';
+          
+          toast({
+            title: 'Etapa anterior',
+            description: `Voltado para ${acionamento.etapa.replace('_', ' ')}`,
+          });
+        }
+        newData.set(chamado, acionamento);
+      }
+      return newData;
+    });
+  };
+
+  const finalizarAcionamento = (chamado: string) => {
+    setAcionamentosData(prev => {
+      const newData = new Map(prev);
+      const acionamento = newData.get(chamado);
+      if (acionamento) {
+        acionamento.status = 'finalizado';
+        acionamento.cronometroAtivo = false;
+        acionamento.finalizadoEm = Date.now();
+        
+        toast({
+          title: 'Acionamento finalizado',
+          description: `Chamado ${chamado} foi finalizado`,
+        });
+      }
+      newData.set(chamado, acionamento);
+      return newData;
+    });
+  };
+
+  const handleOpenAcionamento = (chamado: string) => {
+    setSelectedChamadoAcionamento(chamado);
+    const acionamento = acionamentosData.get(chamado);
+    if (acionamento) {
+      setTempAcionamentoOperador(acionamento.operador);
+      setTempAcionamentoObservacao(acionamento.observacoes);
+    } else {
+      setTempAcionamentoOperador('');
+      setTempAcionamentoObservacao('');
+    }
+    setAcionamentoDialogOpen(true);
+  };
+
+  const handleSaveAcionamento = () => {
+    if (!tempAcionamentoOperador || !tempAcionamentoObservacao.trim()) {
+      toast({
+        title: 'Campos obrigatórios',
+        description: 'Preencha o operador e a observação',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    setAcionamentosData(prev => {
+      const newData = new Map(prev);
+      const acionamento = newData.get(selectedChamadoAcionamento);
+      if (acionamento) {
+        acionamento.operador = tempAcionamentoOperador;
+        acionamento.observacoes = tempAcionamentoObservacao;
+        newData.set(selectedChamadoAcionamento, acionamento);
+      }
+      return newData;
+    });
+
+    toast({
+      title: 'Observação salva',
+      description: 'A observação do acionamento foi salva com sucesso',
+    });
+
+    handleCancelAcionamento();
+  };
+
+  const handleCancelAcionamento = () => {
+    setAcionamentoDialogOpen(false);
+    setSelectedChamadoAcionamento('');
+    setTempAcionamentoOperador('');
+    setTempAcionamentoObservacao('');
+  };
+
+  // Função para formatar tempo restante
+  const formatarTempo = (segundos: number) => {
+    const minutos = Math.floor(segundos / 60);
+    const segs = segundos % 60;
+    return `${minutos.toString().padStart(2, '0')}:${segs.toString().padStart(2, '0')}`;
+  };
+
   // Função para buscar observações da API com retry
   const fetchObservacoes = useCallback(async (retryCount = 0) => {
     try {
@@ -130,7 +352,6 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
         setObservacoesData(observacoesMap);
         console.log(`Observações carregadas: ${data.length} registros`);
       } else if (response.status === 404) {
-        // API retorna 404 quando não há dados, isso é normal
         console.log('Nenhuma observação encontrada na API');
         setObservacoesData(new Map());
       } else {
@@ -139,7 +360,6 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
     } catch (error) {
       console.error('Erro ao buscar observações:', error);
 
-      // Retry até 3 tentativas
       if (retryCount < 3) {
         console.log(`Tentando novamente... (${retryCount + 1}/3)`);
         setTimeout(() => fetchObservacoes(retryCount + 1), 2000 * (retryCount + 1));
@@ -213,7 +433,6 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
         throw new Error(`Erro na API: ${response.status}`);
       }
 
-      // Atualiza o estado local
       const updatedObsData = new Map(observacoesData);
       updatedObsData.set(selectedChamadoForEdit, payload);
       setObservacoesData(updatedObsData);
@@ -223,9 +442,7 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
         description: 'A observação foi salva com sucesso',
       });
 
-      // Recarrega dados da API para pegar o CreatedAt
       fetchObservacoes();
-
       handleCancelObservacao();
     } catch (error) {
       console.error('Erro ao salvar observação:', error);
@@ -251,7 +468,6 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
       );
       const data = await response.json();
 
-      // Procura o grupo correspondente
       const grupoEntry = data.grupos.find(
         (g: any) => g.grupo_chamado === alert.grupo_chamado
       );
@@ -265,7 +481,6 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
         return;
       }
 
-      // Pega o primeiro webhook ativo
       const activeWebhook = grupoEntry.webhooks.find((w: any) => w.ativo);
       if (!activeWebhook) {
         toast({
@@ -278,7 +493,6 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
 
       const webhookUrl = activeWebhook.url;
 
-      // Enviar mensagem para Google Chat
       const message = {
         cards: [
           {
@@ -330,7 +544,6 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
         body: JSON.stringify(message),
       });
 
-      // Marca como acionado no DynamoDB
       const res = await fetch(
         "https://f6ffk8e9fe.execute-api.us-east-1.amazonaws.com/prod/chatacionados",
         {
@@ -345,7 +558,6 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
         throw new Error(errorData.message || "Erro ao marcar como acionado");
       }
 
-      // Usando a função do hook para adicionar o chamado acionado
       addAcionado(alert.chamado.toString());
       onUpdateAcknowledgment(alert.id, true);
 
@@ -363,26 +575,24 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
     }
   };
 
-  // Função para lidar com clique no cabeçalho da coluna
+  // Funções de ordenação, formatação, etc.
+
   const handleSort = (field: SortField) => {
     if (sortField === field) {
-      // Se já está ordenando por este campo, alterna a direção
       if (sortDirection === 'asc') {
         setSortDirection('desc');
       } else if (sortDirection === 'desc') {
         setSortDirection(null);
-        setSortField('chamado'); // volta para o padrão
+        setSortField('chamado');
       } else {
         setSortDirection('asc');
       }
     } else {
-      // Se é um campo diferente, começa com ascendente
       setSortField(field);
       setSortDirection('asc');
     }
   };
 
-  // Função para obter o ícone de ordenação
   const getSortIcon = (field: SortField) => {
     if (sortField !== field) {
       return <ArrowUpDown className="h-4 w-4 ml-1 opacity-50" />;
@@ -396,7 +606,6 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
     return <ArrowUpDown className="h-4 w-4 ml-1 opacity-50" />;
   };
 
-  // Função para formatar data de forma segura
   const formatDate = (dateString: string) => {
     if (!dateString || dateString === '' || dateString === 'null' || dateString === 'undefined') {
       return '-';
@@ -406,16 +615,11 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
       let date: Date;
       const cleanString = String(dateString).trim();
 
-      // Caso 1: Timestamp em milissegundos
       if (/^\d{13}$/.test(cleanString)) {
         date = new Date(parseInt(cleanString));
-      }
-      // Caso 2: Timestamp em segundos  
-      else if (/^\d{10}$/.test(cleanString)) {
+      } else if (/^\d{10}$/.test(cleanString)) {
         date = new Date(parseInt(cleanString) * 1000);
-      }
-      // Caso 3: Formato brasileiro dd/mm/yyyy ou dd/mm/yyyy hh:mm:ss
-      else if (/^\d{2}\/\d{2}\/\d{4}/.test(cleanString)) {
+      } else if (/^\d{2}\/\d{2}\/\d{4}/.test(cleanString)) {
         const parts = cleanString.split(' ');
         const datePart = parts[0];
         const timePart = parts[1] || '00:00:00';
@@ -425,24 +629,20 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
 
         date = new Date(
           parseInt(year),
-          parseInt(month) - 1, // mês é 0-indexed
+          parseInt(month) - 1,
           parseInt(day),
           parseInt(hour || '0'),
           parseInt(minute || '0'),
           parseInt(second || '0')
         );
-      }
-      // Caso 4: ISO string ou outros formatos padrão
-      else {
+      } else {
         date = new Date(cleanString);
       }
 
-      // Verifica se a data é válida
       if (isNaN(date.getTime())) {
-        return cleanString; // Retorna o valor original
+        return cleanString;
       }
 
-      // Verifica se a data é muito antiga ou muito futura (validação básica)
       const year = date.getFullYear();
       if (year < 1900 || year > 2100) {
         return cleanString;
@@ -457,11 +657,10 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
         second: '2-digit',
       });
     } catch (error) {
-      return String(dateString); // Garante que retorna string
+      return String(dateString);
     }
   };
 
-  // Função para formatar o status "Acionado"
   const formatAcionadoStatus = (acionado: string) => {
     if (!acionado) return { text: '-', isOk: false };
 
@@ -475,7 +674,6 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
     return { text: acionado, isOk: false };
   };
 
-  // Função para filtrar dados baseado no termo de pesquisa
   const filteredData = useMemo(() => {
     if (!searchTerm.trim()) {
       return alertData;
@@ -493,17 +691,14 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
     );
   }, [alertData, searchTerm]);
 
-  // Dados ordenados e paginados
   const { sortedAndPaginatedData, totalPages } = useMemo(() => {
     let sortedData = [...filteredData];
 
-    // Aplica ordenação se houver campo e direção definidos
     if (sortField && sortDirection) {
       sortedData.sort((a, b) => {
         let aValue: any = a[sortField];
         let bValue: any = b[sortField];
 
-        // Tratamento especial para diferentes tipos de dados
         if (sortField === 'chamado') {
           aValue = parseInt(a.chamado) || 0;
           bValue = parseInt(b.chamado) || 0;
@@ -511,7 +706,6 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
           aValue = new Date(a.abertura_chamado).getTime() || 0;
           bValue = new Date(b.abertura_chamado).getTime() || 0;
         } else {
-          // Para strings, converte para minúsculo para ordenação case-insensitive
           aValue = String(aValue).toLowerCase();
           bValue = String(bValue).toLowerCase();
         }
@@ -525,7 +719,6 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
         return 0;
       });
     } else {
-      // Ordenação padrão por chamado decrescente
       sortedData.sort((a, b) => {
         const chamadoA = parseInt(a.chamado) || 0;
         const chamadoB = parseInt(b.chamado) || 0;
@@ -533,7 +726,6 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
       });
     }
 
-    // Calcula paginação
     const startIndex = (currentPage - 1) * itemsPerPage;
     const endIndex = startIndex + itemsPerPage;
     const paginatedData = sortedData.slice(startIndex, endIndex);
@@ -545,12 +737,10 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
     };
   }, [filteredData, currentPage, itemsPerPage, sortField, sortDirection]);
 
-  // Reset página quando dados mudam, pesquisa muda ou itemsPerPage muda
   useEffect(() => {
     setCurrentPage(1);
   }, [filteredData, itemsPerPage]);
 
-  // Função para lidar com mudança no número de itens por página
   const handleItemsPerPageChange = (value: string) => {
     const num = parseInt(value, 10);
     setItemsPerPage(num);
@@ -610,9 +800,7 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
             />
           </div>
 
-          {/* Controles superiores */}
           <div className="flex items-center justify-between flex-wrap gap-4 mb-4">
-            {/* Indicador de resultados */}
             {searchTerm && (
               <div className="text-sm text-muted-foreground">
                 {filteredData.length === 0 ? (
@@ -626,131 +814,13 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
                 )}
               </div>
             )}
-
           </div>
-
         </CardHeader>
+
         <CardContent>
-          {/* Layout para Mobile (oculto em desktop) */}
-          <div className="block lg:hidden space-y-4">
-            {loading ? (
-              <div className="text-center py-8">
-                <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary mb-4"></div>
-                <p>Carregando dados...</p>
-              </div>
-            ) : sortedAndPaginatedData.length === 0 ? (
-              <div className="text-center py-8 text-muted-foreground">
-                {searchTerm ? 'Nenhum resultado encontrado' : 'Nenhum dado disponível'}
-              </div>
-            ) : (
-              sortedAndPaginatedData.map((alert) => {
-                const isChat = acionadosSet.has(alert.chamado.toString());
-                const isExpanded = expandedRows.has(alert.id);
-                const observacao = observacoesData.get(alert.chamado);
-                return (
-                  <Card key={alert.id} className="bg-secondary border-border w-full">
-                    <CardContent className="p-3 sm:p-4">
-                      <div className="flex items-center justify-between mb-3 gap-2 flex-wrap">
-                        <div className="flex items-center gap-1 sm:gap-2 flex-wrap">
-                          <Badge variant="outline" className="text-xs">
-                            <Button
-                              variant="link"
-                              size="sm"
-                              className="text-xs p-0 hover:underline"
-                              onClick={() => handleChamadoClick(alert)}
-                            >
-                              {alert.chamado}
-                            </Button>
-                          </Badge>
-                          <Badge variant="outline" className="text-xs max-w-[100px] truncate">
-                            {alert.tipo_chamado}
-                          </Badge>
-                          <Badge className={`${getSeverityColor(alert.severidade_chamado)} text-xs`}>
-                            {alert.severidade_chamado}
-                          </Badge>
-                        </div>
-                      </div>
-
-                      <div className="space-y-2">
-                        <div className="w-full">
-                          <p className="text-sm font-medium break-words">
-                            {truncateText(alert.resumo_chamado, isExpanded ? 200 : 60)}
-                          </p>
-                        </div>
-
-                        <div className="flex items-center justify-between text-xs text-muted-foreground gap-2">
-                          <span className="text-sm font-semibold text-foreground truncate flex-1">
-                            {alert.grupo_chamado}
-                          </span>
-                          <span className="truncate">{alert.status_chamado}</span>
-                        </div>
-
-                        <div className="text-xs text-muted-foreground">
-                          {formatDate(alert.abertura_chamado)}
-                        </div>
-
-                        <div className="flex items-center justify-between pt-3 gap-2">
-                          <div className="flex gap-2">
-                            <Button
-                              variant={isChat ? 'default' : 'outline'}
-                              size="sm"
-                              onClick={() => !isChat && handleAcknowledgment(alert)}
-                              disabled={isChat}
-                              className={`h-7 px-2 sm:px-3 text-xs flex-shrink-0 ${isChat
-                                ? 'bg-green-600 text-white hover:bg-green-700'
-                                : 'border-border hover:bg-accent'
-                                }`}
-                            >
-                              {isChat ? (
-                                <>
-                                  <Check className="h-3 w-3 mr-1" />
-                                  <span className="hidden sm:inline">Acionado</span>
-                                </>
-                              ) : (
-                                <>
-                                  <AlertTriangle className="h-3 w-3 mr-1" />
-                                  <span className="hidden sm:inline">Acionar</span>
-                                </>
-                              )}
-                            </Button>
-
-                            <Button
-                              variant={observacao ? "default" : "outline"}
-                              size="sm"
-                              onClick={() => handleOpenObservacao(alert.chamado)}
-                              className={`h-7 px-2 text-xs ${observacao
-                                ? 'bg-green-600 text-white hover:bg-green-700'
-                                : 'border-border hover:bg-accent'
-                                }`}
-                            >
-                              {observacao ? (
-                                <>
-                                  <CheckCircle className="h-3 w-3 mr-1" />
-                                  <span className="hidden sm:inline">Finalizado</span>
-                                </>
-                              ) : (
-                                <>
-                                  <Edit3 className="h-3 w-3 mr-1" />
-                                  <span className="hidden sm:inline">Observação</span>
-                                </>
-                              )}
-                            </Button>
-                          </div>
-                        </div>
-                      </div>
-                    </CardContent>
-                  </Card>
-                );
-              })
-            )}
-
-            {/* Paginação Mobile */}
-
-          </div>
-
           {/* Layout para Desktop */}
-          <div className="hidden lg:block overflow-x-auto">
-            <Table className="min-w-[1000px]">
+          <div className="overflow-x-auto">
+            <Table className="min-w-[1200px]">
               <TableHeader>
                 <TableRow className="border-border hover:bg-accent">
                   <TableHead className="text-muted-foreground w-20">
@@ -825,18 +895,19 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
                   </TableHead>
                   <TableHead className="text-muted-foreground w-16 text-center">Chat</TableHead>
                   <TableHead className="text-muted-foreground w-32 text-center">Observação</TableHead>
+                  <TableHead className="text-muted-foreground w-40 text-center">Acionamento</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {loading ? (
                   <TableRow>
-                    <TableCell colSpan={10} className="text-center py-8">
+                    <TableCell colSpan={11} className="text-center py-8">
                       Carregando dados...
                     </TableCell>
                   </TableRow>
                 ) : sortedAndPaginatedData.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={10} className="text-center py-8 text-muted-foreground">
+                    <TableCell colSpan={11} className="text-center py-8 text-muted-foreground">
                       {searchTerm ? 'Nenhum resultado encontrado' : 'Nenhum dado disponível'}
                     </TableCell>
                   </TableRow>
@@ -844,6 +915,8 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
                   sortedAndPaginatedData.map((alert) => {
                     const isChat = acionadosSet.has(alert.chamado.toString());
                     const observacao = observacoesData.get(alert.chamado);
+                    const acionamento = acionamentosData.get(alert.chamado);
+                    
                     return (
                       <TableRow
                         key={alert.id}
@@ -930,6 +1003,66 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
                             )}
                           </Button>
                         </TableCell>
+                        <TableCell>
+                          <div className="flex items-center gap-1">
+                            {!acionamento ? (
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => iniciarAcionamento(alert.chamado)}
+                                className="h-7 px-2 text-xs"
+                              >
+                                <Play className="h-3 w-3 mr-1" />
+                                Iniciar
+                              </Button>
+                            ) : acionamento.status === 'finalizado' ? (
+                              <Badge variant="default" className="text-xs bg-green-600 text-white">
+                                Finalizado
+                              </Badge>
+                            ) : (
+                              <div className="flex items-center gap-1">
+                                <div className="text-xs text-center">
+                                  <div className="font-mono font-bold text-primary">
+                                    {formatarTempo(acionamento.tempoRestante)}
+                                  </div>
+                                  <div className="text-[10px] text-muted-foreground">
+                                    {acionamento.etapa.replace('_', ' ')}
+                                  </div>
+                                </div>
+                                <div className="flex flex-col gap-1">
+                                  <Button
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={() => handleOpenAcionamento(alert.chamado)}
+                                    className="h-6 w-6 p-0"
+                                  >
+                                    <Edit3 className="h-3 w-3" />
+                                  </Button>
+                                  {acionamento.cronometroAtivo ? (
+                                    <Button
+                                      variant="outline"
+                                      size="sm"
+                                      onClick={() => pausarCronometro(alert.chamado)}
+                                      className="h-6 w-6 p-0"
+                                    >
+                                      <Pause className="h-3 w-3" />
+                                    </Button>
+                                  ) : (
+                                    <Button
+                                      variant="outline"
+                                      size="sm"
+                                      onClick={() => retomarCronometro(alert.chamado)}
+                                      className="h-6 w-6 p-0"
+                                      disabled={acionamento.tempoRestante === 0}
+                                    >
+                                      <Play className="h-3 w-3" />
+                                    </Button>
+                                  )}
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        </TableCell>
                       </TableRow>
                     );
                   })
@@ -938,19 +1071,16 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
             </Table>
           </div>
 
-          {/* Paginação Desktop */}
+          {/* Paginação */}
           {!loading && sortedAndPaginatedData.length > 0 && totalPages > 1 && (
             <div className="flex items-center justify-between mt-4 pt-4 border-t border-border">
               <div className="text-sm text-muted-foreground">
                 Mostrando {((currentPage - 1) * itemsPerPage) + 1} a {Math.min(currentPage * itemsPerPage, filteredData.length)} de {filteredData.length} registros
                 {searchTerm && filteredData.length !== alertData.length && ` (filtrados de ${alertData.length})`}
               </div>
-              {/* Seletor de itens por página */}
+              
               <div className="flex items-center gap-2">
-                <Label
-                  htmlFor="itemsPerPage"
-                  className="text-sm font-medium whitespace-nowrap"
-                >
+                <Label htmlFor="itemsPerPage" className="text-sm font-medium whitespace-nowrap">
                   Por Página:
                 </Label>
                 <Select value={itemsPerPage.toString()} onValueChange={handleItemsPerPageChange}>
@@ -1019,32 +1149,166 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
             </div>
           )}
 
+          {/* Dialog para Acionamento */}
+          <Dialog open={acionamentoDialogOpen} onOpenChange={setAcionamentoDialogOpen}>
+            <DialogContent className="max-w-md border-border shadow-2xl">
+              <DialogHeader className="pb-4 border-b border-border">
+                <DialogTitle className="text-left flex items-center gap-2">
+                  <div className="p-2 rounded-lg bg-primary/10">
+                    <Clock className="h-5 w-5 text-primary" />
+                  </div>
+                  <div>
+                    <h3 className="text-lg font-semibold">Acionamento/Escalação</h3>
+                    <p className="text-sm text-muted-foreground">
+                      Chamado: {selectedChamadoAcionamento}
+                      {acionamentosData.get(selectedChamadoAcionamento) && (
+                        <span className="ml-2 text-primary font-medium">
+                          {acionamentosData.get(selectedChamadoAcionamento)?.etapa.replace('_', ' ')}
+                        </span>
+                      )}
+                    </p>
+                  </div>
+                </DialogTitle>
+              </DialogHeader>
 
+              {acionamentosData.get(selectedChamadoAcionamento) && (
+                <div className="space-y-4 pt-4">
+                  {/* Cronômetro */}
+                  <div className="p-4 rounded-lg bg-accent/50 border border-border">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="text-sm font-medium">Tempo Restante</p>
+                        <p className="text-2xl font-mono font-bold text-primary">
+                          {formatarTempo(acionamentosData.get(selectedChamadoAcionamento)?.tempoRestante || 0)}
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        {acionamentosData.get(selectedChamadoAcionamento)?.cronometroAtivo ? (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => pausarCronometro(selectedChamadoAcionamento)}
+                          >
+                            <Pause className="h-4 w-4" />
+                          </Button>
+                        ) : (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => retomarCronometro(selectedChamadoAcionamento)}
+                            disabled={acionamentosData.get(selectedChamadoAcionamento)?.tempoRestante === 0}
+                          >
+                            <Play className="h-4 w-4" />
+                          </Button>
+                        )}
+                      </div>
+                    </div>
+                  </div>
 
+                  {/* Controles de Etapa */}
+                  <div className="flex items-center gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => voltarEtapa(selectedChamadoAcionamento)}
+                      disabled={acionamentosData.get(selectedChamadoAcionamento)?.etapa === 'primeiro_acionamento'}
+                      className="flex-1"
+                    >
+                      <RotateCcw className="h-4 w-4 mr-2" />
+                      Voltar Etapa
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => proximaEtapa(selectedChamadoAcionamento)}
+                      disabled={acionamentosData.get(selectedChamadoAcionamento)?.etapa === 'escalacao_4'}
+                      className="flex-1"
+                    >
+                      <SkipForward className="h-4 w-4 mr-2" />
+                      Próxima Etapa
+                    </Button>
+                  </div>
 
+                  {/* Campo Operador */}
+                  <div className="space-y-2">
+                    <Label htmlFor="acionamento-operador" className="text-sm font-medium flex items-center gap-2">
+                      <User className="h-4 w-4" />
+                      Operador *
+                    </Label>
+                    <Select
+                      value={tempAcionamentoOperador}
+                      onValueChange={setTempAcionamentoOperador}
+                    >
+                      <SelectTrigger className="w-full">
+                        <SelectValue placeholder="Selecione um operador" />
+                      </SelectTrigger>
+                      <SelectContent className="bg-popover border-border z-50">
+                        {operadores.map((operador) => (
+                          <SelectItem key={operador} value={operador}>
+                            {operador}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
 
+                  {/* Campo Observação */}
+                  <div className="space-y-2">
+                    <Label htmlFor="acionamento-observacao" className="text-sm font-medium flex items-center gap-2">
+                      <FileText className="h-4 w-4" />
+                      Observações desta Etapa
+                    </Label>
+                    <Textarea
+                      id="acionamento-observacao"
+                      placeholder="Digite as observações desta etapa..."
+                      value={tempAcionamentoObservacao}
+                      onChange={(e) => setTempAcionamentoObservacao(e.target.value)}
+                      className="min-h-[100px] resize-none"
+                      rows={4}
+                    />
+                  </div>
 
+                  {/* Ações */}
+                  <div className="flex items-center gap-2 pt-6 border-t border-border">
+                    <Button
+                      variant="outline"
+                      onClick={handleCancelAcionamento}
+                      className="flex-1"
+                    >
+                      <X className="h-4 w-4 mr-2" />
+                      Cancelar
+                    </Button>
+                    <Button
+                      onClick={handleSaveAcionamento}
+                      disabled={!tempAcionamentoOperador}
+                      className="flex-1"
+                    >
+                      <Save className="h-4 w-4 mr-2" />
+                      Salvar
+                    </Button>
+                    <Button
+                      variant="destructive"
+                      onClick={() => {
+                        finalizarAcionamento(selectedChamadoAcionamento);
+                        handleCancelAcionamento();
+                      }}
+                      className="flex-1"
+                    >
+                      <CheckCircle className="h-4 w-4 mr-2" />
+                      Finalizar
+                    </Button>
+                  </div>
+                </div>
+              )}
+            </DialogContent>
+          </Dialog>
 
-
-
-
-
-
-
-
-
-
-
-
-
-          {/* Dialog do Modal de Chamado */}
+          {/* Dialog do Modal de Chamado - mantendo código original */}
           <Dialog open={chamadoModalOpen} onOpenChange={setChamadoModalOpen}>
             <DialogContent className="max-w-3xl max-h-[80vh] border-border shadow-2xl overflow-y-auto">
               <DialogHeader className="pb-6 border-b border-border">
                 <DialogTitle className="text-left">
-                  {/* Header com design melhorado */}
                   <div className="relative overflow-hidden rounded-2xl p-6 mb-4 bg-gradient-to-r from-primary to-primary/80">
-                    {/* Número do chamado e título */}
                     <div className="relative z-10 flex items-start gap-4">
                       <div className="p-3 rounded-xl bg-white/20 backdrop-blur-sm border border-white/30 shadow-lg">
                         {selectedIncident?.tipo_chamado === "Solicitação" ? (
@@ -1072,7 +1336,6 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
                       </div>
                     </div>
 
-                    {/* Status badges */}
                     {selectedIncident && (
                       <div className="relative z-10 flex flex-wrap items-center gap-3 mt-6">
                         <div className="animate-fade-in">
@@ -1097,11 +1360,9 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
                 </DialogTitle>
               </DialogHeader>
 
-              {/* Conteúdo principal */}
               {selectedIncident && (
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mt-6">
                   <div className="space-y-4">
-                    {/* Card Grupo */}
                     <div className="group relative overflow-hidden rounded-xl bg-card border border-border p-5 
                         shadow-lg hover:shadow-xl transition-all duration-300 hover:-translate-y-1">
                       <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-primary to-blue-500"></div>
@@ -1116,7 +1377,6 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
                       </div>
                     </div>
 
-                    {/* Card Abertura */}
                     <div className="group relative overflow-hidden rounded-xl bg-card border border-border p-5 
                         shadow-lg hover:shadow-xl transition-all duration-300 hover:-translate-y-1">
                       <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-green-500 to-emerald-500"></div>
@@ -1131,7 +1391,6 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
                       </div>
                     </div>
 
-                    {/* Card CreatedAt - Observação */}
                     {(() => {
                       const obsData = selectedIncident ? observacoesData.get(selectedIncident.chamado) : null;
                       return obsData?.CreatedAt && (
@@ -1153,7 +1412,6 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
                   </div>
 
                   <div className="space-y-4">
-                    {/* Card Status */}
                     <div className="group relative overflow-hidden rounded-xl bg-card border border-border p-5 
                         shadow-lg hover:shadow-xl transition-all duration-300 hover:-translate-y-1">
                       <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-blue-500 to-cyan-500"></div>
@@ -1168,7 +1426,6 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
                       </div>
                     </div>
 
-                    {/* Card Severidade */}
                     <div className="group relative overflow-hidden rounded-xl bg-card border border-border p-5 
                         shadow-lg hover:shadow-xl transition-all duration-300 hover:-translate-y-1">
                       <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-red-500 to-orange-500"></div>
@@ -1188,7 +1445,7 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
             </DialogContent>
           </Dialog>
 
-          {/* Dialog para editar observação */}
+          {/* Dialog para editar observação - mantendo código original */}
           <Dialog open={observacaoDialogOpen} onOpenChange={setObservacaoDialogOpen}>
             <DialogContent className="max-w-md border-border shadow-2xl">
               <DialogHeader className="pb-4 border-b border-border">
@@ -1204,7 +1461,6 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
               </DialogHeader>
 
               <div className="space-y-4 pt-4">
-                {/* Campo Operador */}
                 <div className="space-y-2">
                   <Label htmlFor="operador" className="text-sm font-medium flex items-center gap-2">
                     <User className="h-4 w-4" />
@@ -1227,9 +1483,7 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
                   </Select>
                 </div>
 
-                {/* Campo Observação */}
                 <div className="space-y-2">
-                  {/* Timestamp do acionamento */}
                   {selectedChamadoForEdit && hasTimestamp(selectedChamadoForEdit) && (
                     <div className="p-3 rounded-lg bg-blue-50 border border-blue-200 dark:bg-blue-950/20 dark:border-blue-800">
                       <div className="flex items-center gap-2 text-blue-700 dark:text-blue-300">
@@ -1280,7 +1534,6 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
                   )}
                 </div>
 
-                {/* Status preview */}
                 {tempOperador && tempObservacao && (
                   <div className="p-3 rounded-lg bg-success/10 border border-success/20">
                     <div className="flex items-center gap-2 text-success">
@@ -1319,3 +1572,4 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
   );
 };
 
+export default Obsstatus;
