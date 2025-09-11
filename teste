@@ -1,155 +1,1020 @@
-import json
-import boto3
-import os
-import uuid
-from datetime import datetime, timezone
-from decimal import Decimal
+import { useState, useEffect, useMemo, useCallback } from 'react';
+import { Check, AlertTriangle, ExternalLink, Zap, Group, Calendar, Info, XCircle, Flame, ChevronLeft, ChevronRight, ArrowUpDown, ArrowUp, ArrowDown, User, FileText, Save, Edit3, CheckCircle, X, RefreshCw, Clock, Search } from 'lucide-react';
+import { Card, CardContent, CardHeader } from '@/components/ui/card';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { toast } from '@/hooks/use-toast';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
+import { Dialog, DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import { Textarea } from '@/components/ui/textarea';
+import { Label } from '@/components/ui/label';
+import { useChatAcionados } from '@/hooks/use-chat-acionados';
+import { useChatAcionadosTimestamps } from '@/hooks/use-chat-acionados-timestamps';
 
-# ---------- Config ----------
-dynamodb = boto3.resource("dynamodb")
-table = dynamodb.Table(os.environ["CHAMADOS_TABLE"])  # Tabela principal (chamados)
-conn_table = dynamodb.Table(os.environ["CONNECTIONS_TABLE"])  # Tabela de conexões
-apigw = boto3.client(
-    "apigatewaymanagementapi",
-    endpoint_url=f"https://{os.environ['WS_API_ID']}.execute-api.{os.environ['AWS_REGION']}.amazonaws.com/{os.environ['WS_STAGE']}"
-)
+interface AlertData {
+  id: string;
+  chamado: string;
+  tipo_chamado: string;
+  grupo_chamado: string;
+  status_chamado: string;
+  abertura_chamado: string;
+  resumo_chamado: string;
+  severidade_chamado: string;
+  acionado: string;
+  chat: boolean;
+}
 
-# ---------- Helpers ----------
-class DecimalEncoder(json.JSONEncoder):
-    def default(self, o):
-        if isinstance(o, Decimal):
-            if o % 1 == 0:
-                return int(o)
-            return float(o)
-        return super(DecimalEncoder, self).default(o)
+interface ObservacaoData {
+  chamado: number;
+  observacao: string;
+  status: string;
+  operador: string;
+  CreatedAt?: string;
+}
 
-def log(trace, msg, **kwargs):
-    print(json.dumps({"trace": trace, "msg": msg, **kwargs}, cls=DecimalEncoder, default=str))
+interface ActionTableProps {
+  alertData: AlertData[];
+  onUpdateAcknowledgment: (alertId: string, acknowledged: boolean) => void;
+  loading: boolean;
+}
 
-def send_to_connection(conn_id, data):
-    """Envia mensagem para uma conexão específica"""
-    try:
-        apigw.post_to_connection(
-            ConnectionId=conn_id,
-            Data=json.dumps(data, cls=DecimalEncoder).encode("utf-8")
-        )
-    except apigw.exceptions.GoneException:
-        # Conexão morta -> remover
-        conn_table.delete_item(Key={"connectionId": conn_id})
-        log("broadcast", "Conexão removida (GoneException)", connectionId=conn_id)
+interface Obsstatus {
+  status: string;
+}
 
-def broadcast(data):
-    """Envia mensagem para todos conectados"""
-    conns = conn_table.scan().get("Items", [])
-    for c in conns:
-        send_to_connection(c["connectionId"], data)
+const Obsstatus: React.FC<Obsstatus> = ({ status }) => {
+  if (status === "finalizado") {
+    return null; // não renderiza nada
+  }
+}
+export default Obsstatus;
 
-def update_chamado(trace, chamado, update):
-    """Atualiza DynamoDB no chamado"""
-    log(trace, "Atualizando chamado", chamado=chamado, update=update)
-    resp = table.update_item(
-        Key={"chamado": chamado},
-        UpdateExpression="SET " + ", ".join(f"#{k} = :{k}" for k in update.keys()),
-        ExpressionAttributeNames={f"#{k}": k for k in update.keys()},
-        ExpressionAttributeValues={f":{k}": v for k, v in update.items()},
-        ReturnValues="ALL_NEW"
-    )
-    log(trace, "Chamado atualizado", new_state=resp.get("Attributes"))
-    return resp.get("Attributes")
+type SortField = 'chamado' | 'tipo_chamado' | 'grupo_chamado' | 'status_chamado' | 'abertura_chamado' | 'resumo_chamado' | 'severidade_chamado' | 'acionado';
+type SortDirection = 'asc' | 'desc' | null;
 
-# ---------- Handlers ----------
-def handle_connect(event, trace):
-    conn_id = event["requestContext"]["connectionId"]
-    conn_table.put_item(Item={"connectionId": conn_id, "connectedAt": datetime.now(timezone.utc).isoformat()})
-    log(trace, "Novo cliente conectado", connectionId=conn_id)
-    return {"statusCode": 200}
+export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: ActionTableProps) => {
+  const [selectedIncident, setSelectedIncident] = useState<AlertData | null>(null);
+  const [crisisDialogOpen, setCrisisDialogOpen] = useState(false);
+  const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
+  const [currentPage, setCurrentPage] = useState(1);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [itemsPerPage, setItemsPerPage] = useState<number>(() => {
+    const saved = sessionStorage.getItem("itemsPerPage");
+    return saved ? parseInt(saved, 10) : 5;
+  });
 
-def handle_disconnect(event, trace):
-    conn_id = event["requestContext"]["connectionId"]
-    conn_table.delete_item(Key={"connectionId": conn_id})
-    log(trace, "Cliente desconectado", connectionId=conn_id)
-    return {"statusCode": 200}
+  // Estados para ordenação
+  const [sortField, setSortField] = useState<SortField>('chamado');
+  const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
 
-def handle_start_timer(event, trace, body):
-    chamado = int(body["chamado"])
-    level = int(body["level"])
-    duration = int(body.get("duration", 1200))  # padrão 20min
-    now = datetime.now(timezone.utc).isoformat()
+  // Usando o hook personalizado para chat acionados
+  const { acionadosSet, isAcionado, addAcionado } = useChatAcionados();
 
-    update = {
-        f"level{level}_timerStart": now,
-        f"level{level}_duration": duration,
-        f"level{level}_status": "running"
+  // Estados para observações
+  const [observacoesData, setObservacoesData] = useState<Map<string, ObservacaoData>>(new Map());
+  const [observacaoDialogOpen, setObservacaoDialogOpen] = useState(false);
+  const [selectedChamadoForEdit, setSelectedChamadoForEdit] = useState<string>('');
+  const [tempOperador, setTempOperador] = useState<string>('');
+  const [tempObservacao, setTempObservacao] = useState<string>('');
+
+  const { getTimestampForChamado, hasTimestamp, fetchTimestamps } = useChatAcionadosTimestamps();
+
+  // Modal para detalhes do chamado
+  const [chamadoModalOpen, setChamadoModalOpen] = useState(false);
+
+  // Lista de operadores
+  const operadores = [
+    'ALBERTO LAGES',
+    'ALEXANDRE LIMA SILVA',
+    'ANSELMO ALVES PESSOA',
+    'BRUNO MAZZO FEITOSA',
+    'CAIO CESAR ALVES DA LUZ',
+    'CLAUDIA ZORZAN DE CAMARGO',
+    'JEFFERSON DA SILVA SOUZA',
+    'JULIANA BEATRIZ DE ANGELO',
+    'MARIA LUIZA DOS SANTOS COIADO',
+    'RAFAEL NUNES PACHECO',
+    'SERGIO ANTONIO DA SILVA',
+    'VICTOR HUGO ALMEIDA FERNANDES',
+    'VINICIUS RHYU VITURINO SAITO'
+  ];
+
+  // Função para buscar observações da API com retry
+  const fetchObservacoes = useCallback(async (retryCount = 0) => {
+    try {
+      const response = await fetch('https://f6ffk8e9fe.execute-api.us-east-1.amazonaws.com/prod/obs', {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      });
+
+      if (response.ok) {
+        const data: ObservacaoData[] = await response.json();
+        const observacoesMap = new Map<string, ObservacaoData>();
+        data.forEach(obs => {
+          observacoesMap.set(obs.chamado.toString(), obs);
+        });
+        setObservacoesData(observacoesMap);
+        console.log(`Observações carregadas: ${data.length} registros`);
+      } else if (response.status === 404) {
+        // API retorna 404 quando não há dados, isso é normal
+        console.log('Nenhuma observação encontrada na API');
+        setObservacoesData(new Map());
+      } else {
+        throw new Error(`API retornou status: ${response.status}`);
+      }
+    } catch (error) {
+      console.error('Erro ao buscar observações:', error);
+
+      // Retry até 3 tentativas
+      if (retryCount < 3) {
+        console.log(`Tentando novamente... (${retryCount + 1}/3)`);
+        setTimeout(() => fetchObservacoes(retryCount + 1), 2000 * (retryCount + 1));
+      } else {
+        toast({
+          title: 'Erro ao carregar observações',
+          description: 'Não foi possível carregar dados salvos. As novas alterações funcionarão normalmente.',
+          variant: 'destructive',
+        });
+      }
     }
-    state = update_chamado(trace, chamado, update)
-    broadcast({"event": "startTimer", "chamado": chamado, "level": level, "state": state})
-    return {"statusCode": 200, "body": json.dumps({"msg": "Timer iniciado"}, cls=DecimalEncoder)}
+  }, []);
 
-def handle_update_observacao(event, trace, body):
-    chamado = int(body["chamado"])
-    level = int(body["level"])
-    obs = body["observacao"]
-    update = {f"level{level}_observacao": obs}
-    state = update_chamado(trace, chamado, update)
-    broadcast({"event": "updateObservacao", "chamado": chamado, "level": level, "state": state})
-    return {"statusCode": 200, "body": json.dumps({"msg": "Observação atualizada"}, cls=DecimalEncoder)}
+  // Carrega observações ao montar o componente
+  useEffect(() => {
+    fetchObservacoes();
+    fetchTimestamps();
+  }, [fetchObservacoes, fetchTimestamps]);
 
-def handle_update_operador(event, trace, body):
-    chamado = int(body["chamado"])
-    operador = body["operador"]
-    update = {"operador": operador}
-    state = update_chamado(trace, chamado, update)
-    broadcast({"event": "updateOperador", "chamado": chamado, "state": state})
-    return {"statusCode": 200, "body": json.dumps({"msg": "Operador atualizado"}, cls=DecimalEncoder)}
+  // Auto-refresh a cada 5 minutos
+  useEffect(() => {
+    const interval = setInterval(() => {
+      fetchObservacoes();
+      fetchTimestamps();
+    }, 5 * 60 * 1000); // 5 minutos
 
-def handle_update_status_final(event, trace, body):
-    chamado = int(body["chamado"])
-    status = body["status"]
-    update = {"statusFinal": status}
-    state = update_chamado(trace, chamado, update)
-    broadcast({"event": "updateStatusFinal", "chamado": chamado, "state": state})
-    return {"statusCode": 200, "body": json.dumps({"msg": "Status final atualizado"}, cls=DecimalEncoder)}
+    return () => clearInterval(interval);
+  }, [fetchObservacoes, fetchTimestamps]);
 
-def handle_get_state(event, trace, body):
-    chamado = int(body["chamado"])
-    resp = table.get_item(Key={"chamado": chamado})
-    state = resp.get("Item", {})
-    log(trace, "Estado retornado", chamado=chamado, state=state)
-    return {"statusCode": 200, "body": json.dumps(state, cls=DecimalEncoder)}
+  // Funções para manipular observações
+  const handleOpenObservacao = (chamado: string) => {
+    setSelectedChamadoForEdit(chamado);
+    const existingObs = observacoesData.get(chamado);
+    if (existingObs) {
+      setTempOperador(existingObs.operador);
+      setTempObservacao(existingObs.observacao);
+    } else {
+      setTempOperador('');
+      setTempObservacao('');
+    }
+    setObservacaoDialogOpen(true);
+  };
 
-# ---------- Main ----------
-def lambda_handler(event, context):
-    trace = str(uuid.uuid4())[:8]
+  const handleSaveObservacao = async () => {
+    if (!tempOperador || !tempObservacao.trim() || !selectedChamadoForEdit) {
+      toast({
+        title: 'Campos obrigatórios',
+        description: 'Preencha o operador e a observação',
+        variant: 'destructive',
+      });
+      return;
+    }
 
-    # Segurança: alguns invokes (ex. test console) podem não ter requestContext
-    req_ctx = event.get("requestContext", {})
-    route = req_ctx.get("routeKey", "UNKNOWN")
-    conn_id = req_ctx.get("connectionId", "N/A")
+    try {
+      const payload: ObservacaoData = {
+        chamado: parseInt(selectedChamadoForEdit),
+        observacao: tempObservacao.trim(),
+        status: 'acionado',
+        operador: tempOperador,
+      };
 
-    log(trace, "invoke", routeKey=route, connectionId=conn_id, body=event.get("body"))
+      const response = await fetch('https://f6ffk8e9fe.execute-api.us-east-1.amazonaws.com/prod/obs', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(payload),
+      });
 
-    try:
-        if route == "$connect":
-            return handle_connect(event, trace)
-        elif route == "$disconnect":
-            return handle_disconnect(event, trace)
-        else:
-            # Mensagens normais -> parse body
-            body = json.loads(event.get("body") or "{}")
+      if (!response.ok) {
+        throw new Error(`Erro na API: ${response.status}`);
+      }
 
-            if route == "startTimer":
-                return handle_start_timer(event, trace, body)
-            elif route == "updateObservacao":
-                return handle_update_observacao(event, trace, body)
-            elif route == "updateOperador":
-                return handle_update_operador(event, trace, body)
-            elif route == "updateStatusFinal":
-                return handle_update_status_final(event, trace, body)
-            elif route == "getState":
-                return handle_get_state(event, trace, body)
-            else:
-                log(trace, "Rota inválida", route=route)
-                return {"statusCode": 400, "body": json.dumps({"error": "Invalid route"}, cls=DecimalEncoder)}
-    except Exception as e:
-        log(trace, "Erro na execução", error=str(e))
-        return {"statusCode": 500, "body": json.dumps({"error": str(e)}, cls=DecimalEncoder)}
+      // Atualiza o estado local
+      const updatedObsData = new Map(observacoesData);
+      updatedObsData.set(selectedChamadoForEdit, payload);
+      setObservacoesData(updatedObsData);
+
+      toast({
+        title: 'Observação salva',
+        description: 'A observação foi salva com sucesso',
+      });
+
+      // Recarrega dados da API para pegar o CreatedAt
+      fetchObservacoes();
+
+      handleCancelObservacao();
+    } catch (error) {
+      console.error('Erro ao salvar observação:', error);
+      toast({
+        title: 'Erro ao salvar',
+        description: 'Não foi possível salvar a observação',
+        variant: 'destructive',
+      });
+    }
+  };
+
+  const handleCancelObservacao = () => {
+    setObservacaoDialogOpen(false);
+    setSelectedChamadoForEdit('');
+    setTempOperador('');
+    setTempObservacao('');
+  };
+
+  const handleAcknowledgment = async (alert: AlertData) => {
+    try {
+      const response = await fetch(
+        "https://f6ffk8e9fe.execute-api.us-east-1.amazonaws.com/prod/webhook"
+      );
+      const data = await response.json();
+
+      // Procura o grupo correspondente
+      const grupoEntry = data.grupos.find(
+        (g: any) => g.grupo_chamado === alert.grupo_chamado
+      );
+
+      if (!grupoEntry || !grupoEntry.webhooks.length) {
+        toast({
+          title: "Webhook não configurado",
+          description: `Configure o webhook para o Grupo: ${alert.grupo_chamado}`,
+          variant: "destructive",
+        });
+        return;
+      }
+
+      // Pega o primeiro webhook ativo
+      const activeWebhook = grupoEntry.webhooks.find((w: any) => w.ativo);
+      if (!activeWebhook) {
+        toast({
+          title: "Nenhum webhook ativo",
+          description: `O grupo ${alert.grupo_chamado} não possui webhooks ativos`,
+          variant: "destructive",
+        });
+        return;
+      }
+
+      const webhookUrl = activeWebhook.url;
+
+      // Enviar mensagem para Google Chat
+      const message = {
+        cards: [
+          {
+            header: {
+              title: "<b>🚨 O CIOPs precisa da sua atenção! <b>"
+            },
+            sections: [
+              {
+                widgets: [
+                  {
+                    textParagraph: {
+                      text: `É necessário confirmação de recebimento e ciência pelo grupo responsável.`
+                    }
+                  }
+                ]
+              },
+              {
+                widgets: [
+                  {
+                    textParagraph: {
+                      text:
+                        "<b>Detalhes do Evento:</b><br><br>" +
+                        "<b>📌 Chamado: </b>" + alert.chamado + "<br><br>" +
+                        "<b>⚠️ Severidade: </b>" + alert.severidade_chamado + "<br><br>" +
+                        "<b>📰 Título: </b>" + alert.resumo_chamado + "<br><br>" +
+                        "<b>📅 Abertura: </b>" + alert.abertura_chamado + "<br><br>" +
+                        "<b>👥 Grupo: </b>" + alert.grupo_chamado
+                    }
+                  }
+                ],
+              },
+              {
+                widgets: [
+                  {
+                    textParagraph: {
+                      text: `<b>⚠️ Atenção: </b> Na ausência de confirmação, o CIOPs dará início ao processo de escalonamento, conforme procedimento padrão.`
+                    }
+                  }
+                ]
+              },
+            ],
+          },
+        ],
+      };
+
+      await fetch(webhookUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(message),
+      });
+
+      // Marca como acionado no DynamoDB
+      const res = await fetch(
+        "https://f6ffk8e9fe.execute-api.us-east-1.amazonaws.com/prod/chatacionados",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ chamado: alert.chamado.toString() }),
+        }
+      );
+
+      if (!res.ok) {
+        const errorData = await res.json();
+        throw new Error(errorData.message || "Erro ao marcar como acionado");
+      }
+
+      // Usando a função do hook para adicionar o chamado acionado
+      addAcionado(alert.chamado.toString());
+      onUpdateAcknowledgment(alert.id, true);
+
+      toast({
+        title: "Alerta acionado com sucesso",
+        description: `Mensagem enviada para o Grupo: ${alert.grupo_chamado}`,
+      });
+
+    } catch (error: any) {
+      toast({
+        title: "Erro ao acionar alerta",
+        description: error.message || "Não foi possível concluir o acionamento",
+        variant: "destructive",
+      });
+    }
+  };
+
+  // Função para lidar com clique no cabeçalho da coluna
+  const handleSort = (field: SortField) => {
+    if (sortField === field) {
+      // Se já está ordenando por este campo, alterna a direção
+      if (sortDirection === 'asc') {
+        setSortDirection('desc');
+      } else if (sortDirection === 'desc') {
+        setSortDirection(null);
+        setSortField('chamado'); // volta para o padrão
+      } else {
+        setSortDirection('asc');
+      }
+    } else {
+      // Se é um campo diferente, começa com ascendente
+      setSortField(field);
+      setSortDirection('asc');
+    }
+  };
+
+  // Função para obter o ícone de ordenação
+  const getSortIcon = (field: SortField) => {
+    if (sortField !== field) {
+      return <ArrowUpDown className="h-4 w-4 ml-1 opacity-50" />;
+    }
+    if (sortDirection === 'asc') {
+      return <ArrowUp className="h-4 w-4 ml-1" />;
+    }
+    if (sortDirection === 'desc') {
+      return <ArrowDown className="h-4 w-4 ml-1" />;
+    }
+    return <ArrowUpDown className="h-4 w-4 ml-1 opacity-50" />;
+  };
+
+  // Função para formatar data de forma segura
+  const formatDate = (dateString: string) => {
+    if (!dateString || dateString === '' || dateString === 'null' || dateString === 'undefined') {
+      return '-';
+    }
+
+    try {
+      let date: Date;
+      const cleanString = String(dateString).trim();
+
+      // Caso 1: Timestamp em milissegundos
+      if (/^\d{13}$/.test(cleanString)) {
+        date = new Date(parseInt(cleanString));
+      }
+      // Caso 2: Timestamp em segundos  
+      else if (/^\d{10}$/.test(cleanString)) {
+        date = new Date(parseInt(cleanString) * 1000);
+      }
+      // Caso 3: Formato brasileiro dd/mm/yyyy ou dd/mm/yyyy hh:mm:ss
+      else if (/^\d{2}\/\d{2}\/\d{4}/.test(cleanString)) {
+        const parts = cleanString.split(' ');
+        const datePart = parts[0];
+        const timePart = parts[1] || '00:00:00';
+
+        const [day, month, year] = datePart.split('/');
+        const [hour, minute, second] = timePart.split(':');
+
+        date = new Date(
+          parseInt(year),
+          parseInt(month) - 1, // mês é 0-indexed
+          parseInt(day),
+          parseInt(hour || '0'),
+          parseInt(minute || '0'),
+          parseInt(second || '0')
+        );
+      }
+      // Caso 4: ISO string ou outros formatos padrão
+      else {
+        date = new Date(cleanString);
+      }
+
+      // Verifica se a data é válida
+      if (isNaN(date.getTime())) {
+        return cleanString; // Retorna o valor original
+      }
+
+      // Verifica se a data é muito antiga ou muito futura (validação básica)
+      const year = date.getFullYear();
+      if (year < 1900 || year > 2100) {
+        return cleanString;
+      }
+
+      return date.toLocaleString('pt-BR', {
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+      });
+    } catch (error) {
+      return String(dateString); // Garante que retorna string
+    }
+  };
+
+  // Função para formatar o status "Acionado"
+  const formatAcionadoStatus = (acionado: string) => {
+    if (!acionado) return { text: '-', isOk: false };
+
+    const upperAcionado = acionado.toUpperCase();
+    if (upperAcionado === 'OK') {
+      return { text: 'ACIONADO', isOk: true };
+    } else if (upperAcionado === 'NOK') {
+      return { text: 'NÃO ACIONADO', isOk: false };
+    }
+
+    return { text: acionado, isOk: false };
+  };
+
+  // Função para filtrar dados baseado no termo de pesquisa
+  const filteredData = useMemo(() => {
+    if (!searchTerm.trim()) {
+      return alertData;
+    }
+
+    const searchLower = searchTerm.toLowerCase().trim();
+    return alertData.filter(alert =>
+      alert.chamado.toLowerCase().includes(searchLower) ||
+      alert.tipo_chamado.toLowerCase().includes(searchLower) ||
+      alert.grupo_chamado.toLowerCase().includes(searchLower) ||
+      alert.status_chamado.toLowerCase().includes(searchLower) ||
+      alert.resumo_chamado.toLowerCase().includes(searchLower) ||
+      alert.severidade_chamado.toLowerCase().includes(searchLower) ||
+      alert.acionado.toLowerCase().includes(searchLower)
+    );
+  }, [alertData, searchTerm]);
+
+  // Dados ordenados e paginados
+  const { sortedAndPaginatedData, totalPages } = useMemo(() => {
+    let sortedData = [...filteredData];
+
+    // Aplica ordenação se houver campo e direção definidos
+    if (sortField && sortDirection) {
+      sortedData.sort((a, b) => {
+        let aValue: any = a[sortField];
+        let bValue: any = b[sortField];
+
+        // Tratamento especial para diferentes tipos de dados
+        if (sortField === 'chamado') {
+          aValue = parseInt(a.chamado) || 0;
+          bValue = parseInt(b.chamado) || 0;
+        } else if (sortField === 'abertura_chamado') {
+          aValue = new Date(a.abertura_chamado).getTime() || 0;
+          bValue = new Date(b.abertura_chamado).getTime() || 0;
+        } else {
+          // Para strings, converte para minúsculo para ordenação case-insensitive
+          aValue = String(aValue).toLowerCase();
+          bValue = String(bValue).toLowerCase();
+        }
+
+        if (aValue < bValue) {
+          return sortDirection === 'asc' ? -1 : 1;
+        }
+        if (aValue > bValue) {
+          return sortDirection === 'asc' ? 1 : -1;
+        }
+        return 0;
+      });
+    } else {
+      // Ordenação padrão por chamado decrescente
+      sortedData.sort((a, b) => {
+        const chamadoA = parseInt(a.chamado) || 0;
+        const chamadoB = parseInt(b.chamado) || 0;
+        return chamadoB - chamadoA;
+      });
+    }
+
+    // Calcula paginação
+    const startIndex = (currentPage - 1) * itemsPerPage;
+    const endIndex = startIndex + itemsPerPage;
+    const paginatedData = sortedData.slice(startIndex, endIndex);
+    const totalPages = Math.ceil(sortedData.length / itemsPerPage);
+
+    return {
+      sortedAndPaginatedData: paginatedData,
+      totalPages
+    };
+  }, [filteredData, currentPage, itemsPerPage, sortField, sortDirection]);
+
+  // Reset página quando dados mudam, pesquisa muda ou itemsPerPage muda
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [filteredData, itemsPerPage]);
+
+  // Função para lidar com mudança no número de itens por página
+  const handleItemsPerPageChange = (value: string) => {
+    const num = parseInt(value, 10);
+    setItemsPerPage(num);
+    sessionStorage.setItem("itemsPerPage", num.toString());
+  };
+
+  const truncateText = (text: string, maxLength: number) => {
+    return text.length > maxLength ? text.substring(0, maxLength) + '...' : text;
+  };
+
+  const handleIncidentClick = (alert: AlertData) => {
+    if (alert.tipo_chamado.toLowerCase().includes('incidente')) {
+      setSelectedIncident(alert);
+      setCrisisDialogOpen(true);
+    }
+  };
+
+  const getSeverityColor = (severity: string) => {
+    return severity.includes('4')
+      ? 'bg-destructive text-destructive-foreground'
+      : 'bg-yellow-500 text-yellow-950';
+  };
+
+  const handleChamadoClick = (alert: AlertData) => {
+    setSelectedIncident(alert);
+    setChamadoModalOpen(true);
+  };
+
+  const getStatusBadgeClass = (chat: boolean) =>
+    chat
+      ? 'bg-green-500/90 text-white border-green-500/50 shadow-md'
+      : 'bg-red-500/90 text-white border-red-500/50 shadow-md';
+
+  const getStatusIcon = (chat: boolean) =>
+    chat ? <Check className="h-4 w-4" /> : <XCircle className="h-4 w-4" />;
+
+  const getStatusText = (chat: boolean) => {
+    return chat ? 'ACIONADO VIA CHAT' : 'NÃO ACIONADO VIA CHAT';
+  };
+
+  const handlePageChange = (page: number) => {
+    setCurrentPage(page);
+  };
+
+  return (
+    <TooltipProvider>
+      <Card className="bg-card border-border">
+        <CardHeader>
+          {/* Campo de Pesquisa */}
+          <div className="relative mb-4">
+            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              placeholder="Pesquisar por chamado, tipo, grupo, status, título..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="pl-10"
+            />
+          </div>
+
+          {/* Controles superiores */}
+          <div className="flex items-center justify-between flex-wrap gap-4 mb-4">
+            {/* Indicador de resultados */}
+            {searchTerm && (
+              <div className="text-sm text-muted-foreground">
+                {filteredData.length === 0 ? (
+                  <span>Nenhum resultado encontrado para "{searchTerm}"</span>
+                ) : (
+                  <span>
+                    {filteredData.length} resultado{filteredData.length !== 1 ? 's' : ''}
+                    {filteredData.length !== alertData.length && ` de ${alertData.length} `}
+                    para "{searchTerm}"
+                  </span>
+                )}
+              </div>
+            )}
+
+          </div>
+
+        </CardHeader>
+        <CardContent>
+          {/* Layout para Mobile (oculto em desktop) */}
+          <div className="block lg:hidden space-y-4">
+            {loading ? (
+              <div className="text-center py-8">
+                <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary mb-4"></div>
+                <p>Carregando dados...</p>
+              </div>
+            ) : sortedAndPaginatedData.length === 0 ? (
+              <div className="text-center py-8 text-muted-foreground">
+                {searchTerm ? 'Nenhum resultado encontrado' : 'Nenhum dado disponível'}
+              </div>
+            ) : (
+              sortedAndPaginatedData.map((alert) => {
+                const isChat = acionadosSet.has(alert.chamado.toString());
+                const isExpanded = expandedRows.has(alert.id);
+                const observacao = observacoesData.get(alert.chamado);
+                return (
+                  <Card key={alert.id} className="bg-secondary border-border w-full">
+                    <CardContent className="p-3 sm:p-4">
+                      <div className="flex items-center justify-between mb-3 gap-2 flex-wrap">
+                        <div className="flex items-center gap-1 sm:gap-2 flex-wrap">
+                          <Badge variant="outline" className="text-xs">
+                            <Button
+                              variant="link"
+                              size="sm"
+                              className="text-xs p-0 hover:underline"
+                              onClick={() => handleChamadoClick(alert)}
+                            >
+                              {alert.chamado}
+                            </Button>
+                          </Badge>
+                          <Badge variant="outline" className="text-xs max-w-[100px] truncate">
+                            {alert.tipo_chamado}
+                          </Badge>
+                          <Badge className={`${getSeverityColor(alert.severidade_chamado)} text-xs`}>
+                            {alert.severidade_chamado}
+                          </Badge>
+                        </div>
+                      </div>
+
+                      <div className="space-y-2">
+                        <div className="w-full">
+                          <p className="text-sm font-medium break-words">
+                            {truncateText(alert.resumo_chamado, isExpanded ? 200 : 60)}
+                          </p>
+                        </div>
+
+                        <div className="flex items-center justify-between text-xs text-muted-foreground gap-2">
+                          <span className="text-sm font-semibold text-foreground truncate flex-1">
+                            {alert.grupo_chamado}
+                          </span>
+                          <span className="truncate">{alert.status_chamado}</span>
+                        </div>
+
+                        <div className="text-xs text-muted-foreground">
+                          {formatDate(alert.abertura_chamado)}
+                        </div>
+
+                        <div className="flex items-center justify-between pt-3 gap-2">
+                          <div className="flex gap-2">
+                            <Button
+                              variant={isChat ? 'default' : 'outline'}
+                              size="sm"
+                              onClick={() => !isChat && handleAcknowledgment(alert)}
+                              disabled={isChat}
+                              className={`h-7 px-2 sm:px-3 text-xs flex-shrink-0 ${isChat
+                                ? 'bg-green-600 text-white hover:bg-green-700'
+                                : 'border-border hover:bg-accent'
+                                }`}
+                            >
+                              {isChat ? (
+                                <>
+                                  <Check className="h-3 w-3 mr-1" />
+                                  <span className="hidden sm:inline">Acionado</span>
+                                </>
+                              ) : (
+                                <>
+                                  <AlertTriangle className="h-3 w-3 mr-1" />
+                                  <span className="hidden sm:inline">Acionar</span>
+                                </>
+                              )}
+                            </Button>
+
+                            <Button
+                              variant={observacao ? "default" : "outline"}
+                              size="sm"
+                              onClick={() => handleOpenObservacao(alert.chamado)}
+                              className={`h-7 px-2 text-xs ${observacao
+                                ? 'bg-green-600 text-white hover:bg-green-700'
+                                : 'border-border hover:bg-accent'
+                                }`}
+                            >
+                              {observacao ? (
+                                <>
+                                  <CheckCircle className="h-3 w-3 mr-1" />
+                                  <span className="hidden sm:inline">Finalizado</span>
+                                </>
+                              ) : (
+                                <>
+                                  <Edit3 className="h-3 w-3 mr-1" />
+                                  <span className="hidden sm:inline">Observação</span>
+                                </>
+                              )}
+                            </Button>
+                          </div>
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+                );
+              })
+            )}
+
+            {/* Paginação Mobile */}
+
+          </div>
+
+          {/* Layout para Desktop */}
+          <div className="hidden lg:block overflow-x-auto">
+            <Table className="min-w-[1000px]">
+              <TableHeader>
+                <TableRow className="border-border hover:bg-accent">
+                  <TableHead className="text-muted-foreground w-20">
+                    <Button
+                      variant="ghost"
+                      className="h-auto p-0 font-medium text-muted-foreground hover:text-foreground text-xs"
+                      onClick={() => handleSort('chamado')}
+                    >
+                      Chamado
+                      {getSortIcon('chamado')}
+                    </Button>
+                  </TableHead>
+                  <TableHead className="text-muted-foreground w-24">
+                    <Button
+                      variant="ghost"
+                      className="h-auto p-0 font-medium text-muted-foreground hover:text-foreground text-xs"
+                      onClick={() => handleSort('tipo_chamado')}
+                    >
+                      Classificação
+                      {getSortIcon('tipo_chamado')}
+                    </Button>
+                  </TableHead>
+                  <TableHead className="text-muted-foreground w-20">
+                    <Button
+                      variant="ghost"
+                      className="h-auto p-0 font-medium text-muted-foreground hover:text-foreground text-xs"
+                      onClick={() => handleSort('grupo_chamado')}
+                    >
+                      Grupo
+                      {getSortIcon('grupo_chamado')}
+                    </Button>
+                  </TableHead>
+                  <TableHead className="text-muted-foreground w-20">
+                    <Button
+                      variant="ghost"
+                      className="h-auto p-0 font-medium text-muted-foreground hover:text-foreground text-xs"
+                      onClick={() => handleSort('status_chamado')}
+                    >
+                      Status
+                      {getSortIcon('status_chamado')}
+                    </Button>
+                  </TableHead>
+                  <TableHead className="text-muted-foreground w-28">
+                    <Button
+                      variant="ghost"
+                      className="h-auto p-0 font-medium text-muted-foreground hover:text-foreground text-xs"
+                      onClick={() => handleSort('abertura_chamado')}
+                    >
+                      Abertura
+                      {getSortIcon('abertura_chamado')}
+                    </Button>
+                  </TableHead>
+                  <TableHead className="text-muted-foreground flex-1 min-w-40">
+                    <Button
+                      variant="ghost"
+                      className="h-auto p-0 font-medium text-muted-foreground hover:text-foreground text-xs"
+                      onClick={() => handleSort('resumo_chamado')}
+                    >
+                      Título
+                      {getSortIcon('resumo_chamado')}
+                    </Button>
+                  </TableHead>
+                  <TableHead className="text-muted-foreground w-20">
+                    <Button
+                      variant="ghost"
+                      className="h-auto p-0 font-medium text-muted-foreground hover:text-foreground text-xs"
+                      onClick={() => handleSort('severidade_chamado')}
+                    >
+                      Severidade
+                      {getSortIcon('severidade_chamado')}
+                    </Button>
+                  </TableHead>
+                  <TableHead className="text-muted-foreground w-16 text-center">Chat</TableHead>
+                  <TableHead className="text-muted-foreground w-32 text-center">Observação</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {loading ? (
+                  <TableRow>
+                    <TableCell colSpan={10} className="text-center py-8">
+                      Carregando dados...
+                    </TableCell>
+                  </TableRow>
+                ) : sortedAndPaginatedData.length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={10} className="text-center py-8 text-muted-foreground">
+                      {searchTerm ? 'Nenhum resultado encontrado' : 'Nenhum dado disponível'}
+                    </TableCell>
+                  </TableRow>
+                ) : (
+                  sortedAndPaginatedData.map((alert) => {
+                    const isChat = acionadosSet.has(alert.chamado.toString());
+                    const observacao = observacoesData.get(alert.chamado);
+                    return (
+                      <TableRow
+                        key={alert.id}
+                        className="border-border hover:bg-accent transition-colors"
+                      >
+                        <TableCell className="font-medium">
+                          <Button
+                            variant="link"
+                            size="sm"
+                            className="p-0 text-foreground hover:underline text-xs"
+                            onClick={() => handleChamadoClick(alert)}
+                          >
+                            {alert.chamado}
+                          </Button>
+                        </TableCell>
+                        <TableCell>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <span className="truncate block max-w-[80px] text-xs">
+                                {alert.tipo_chamado}
+                              </span>
+                            </TooltipTrigger>
+                            <TooltipContent>
+                              <p className="max-w-xs">{alert.tipo_chamado}</p>
+                            </TooltipContent>
+                          </Tooltip>
+                        </TableCell>
+                        <TableCell className="text-xs">{alert.grupo_chamado}</TableCell>
+                        <TableCell className="text-xs">{alert.status_chamado}</TableCell>
+                        <TableCell className="text-xs">
+                          {formatDate(alert.abertura_chamado)}
+                        </TableCell>
+                        <TableCell>
+                          <div className="flex items-center gap-2">
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <span className="truncate block max-w-[120px] text-xs">
+                                  {alert.resumo_chamado}
+                                </span>
+                              </TooltipTrigger>
+                              <TooltipContent>
+                                <p className="max-w-md">{alert.resumo_chamado}</p>
+                              </TooltipContent>
+                            </Tooltip>
+                          </div>
+                        </TableCell>
+                        <TableCell>
+                          <Badge className={`${getSeverityColor(alert.severidade_chamado)} text-xs`}>
+                            {alert.severidade_chamado}
+                          </Badge>
+                        </TableCell>
+                        <TableCell>
+                          <Button
+                            variant={isChat ? "default" : "outline"}
+                            size="sm"
+                            onClick={() => !isChat && handleAcknowledgment(alert)}
+                            disabled={isChat}
+                            className={`${isChat
+                              ? 'bg-green-600 text-white hover:bg-green-700'
+                              : 'border-border hover:bg-accent'
+                              } h-7 w-7 p-0`}
+                          >
+                            {isChat ? (
+                              <Check className="h-3 w-3" />
+                            ) : (
+                              <AlertTriangle className="h-3 w-3" />
+                            )}
+                          </Button>
+                        </TableCell>
+                        <TableCell>
+                          <Button
+                            variant={observacao ? "default" : "outline"}
+                            size="sm"
+                            onClick={() => handleOpenObservacao(alert.chamado)}
+                            className={`${observacao
+                              ? 'bg-green-600 text-white hover:bg-green-700'
+                              : 'border-border hover:bg-accent'
+                              } h-7 w-7 p-0`}
+                          >
+                            {observacao ? (
+                              <CheckCircle className="h-3 w-3" />
+                            ) : (
+                              <Edit3 className="h-3 w-3" />
+                            )}
+                          </Button>
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })
+                )}
+              </TableBody>
+            </Table>
+          </div>
+
+          {/* Paginação Desktop */}
+          {!loading && sortedAndPaginatedData.length > 0 && totalPages > 1 && (
+            <div className="flex items-center justify-between mt-4 pt-4 border-t border-border">
+              <div className="text-sm text-muted-foreground">
+                Mostrando {((currentPage - 1) * itemsPerPage) + 1} a {Math.min(currentPage * itemsPerPage, filteredData.length)} de {filteredData.length} registros
+                {searchTerm && filteredData.length !== alertData.length && ` (filtrados de ${alertData.length})`}
+              </div>
+              {/* Seletor de itens por página */}
+              <div className="flex items-center gap-2">
+                <Label
+                  htmlFor="itemsPerPage"
+                  className="text-sm font-medium whitespace-nowrap"
+                >
+                  Por Página:
+                </Label>
+                <Select value={itemsPerPage.toString()} onValueChange={handleItemsPerPageChange}>
+                  <SelectTrigger className="w-20">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="5">5</SelectItem>
+                    <SelectItem value="10">10</SelectItem>
+                    <SelectItem value="15">15</SelectItem>
+                    <SelectItem value="20">20</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => handlePageChange(currentPage - 1)}
+                  disabled={currentPage === 1}
+                  className="h-8 px-3"
+                >
+                  <ChevronLeft className="h-4 w-4 mr-1" />
+                  Anterior
+                </Button>
+
+                <div className="flex items-center gap-1">
+                  {[...Array(Math.min(totalPages, 5))].map((_, index) => {
+                    let page;
+                    if (totalPages <= 5) {
+                      page = index + 1;
+                    } else if (currentPage <= 3) {
+                      page = index + 1;
+                    } else if (currentPage >= totalPages - 2) {
+                      page = totalPages - 4 + index;
+                    } else {
+                      page = currentPage - 2 + index;
+                    }
+
+                    return (
+                      <Button
+                        key={page}
+                        variant={currentPage === page ? "default" : "outline"}
+                        size="sm"
+                        onClick={() => handlePageChange(page)}
+                        className="h-8 w-8 p-0"
+                      >
+                        {page}
+                      </Button>
+                    );
+                  })}
+                </div>
+
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => handlePageChange(currentPage + 1)}
+                  disabled={currentPage === totalPages}
+                  className="h-8 px-3"
+                >
+                  Próximo
+                  <ChevronRight className="h-4 w-4 ml-1" />
+                </Button>
+              </div>
+            </div>
+          )}
