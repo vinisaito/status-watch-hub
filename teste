@@ -1,151 +1,121 @@
-import { useEffect, useRef, useState } from "react";
+"use client";
 
-interface TimerData {
-  chamado: string;
-  etapa: number;
-  timerStart: number;   // timestamp em ms
-  duration: number;     // duração total em segundos
-  status: string;
-}
-
-export function useWebsocketTimers() {
-  const [timers, setTimers] = useState<Map<string, TimerData>>(new Map());
-  const wsRef = useRef<WebSocket | null>(null);
-
-  useEffect(() => {
-    const ws = new WebSocket("wss://rsgjd6wsza.execute-api.us-east-1.amazonaws.com/dev/");
-
-    ws.onopen = () => {
-      console.log("✅ Conectado ao WebSocket");
-    };
-
-    ws.onmessage = (event) => {
-      try {
-        const data = JSON.parse(event.data);
-
-        if (data.action === "updateTimer") {
-          setTimers((prev) => {
-            const newMap = new Map(prev);
-            newMap.set(data.chamado, {
-              chamado: data.chamado,
-              etapa: data.etapa,
-              timerStart: data.timerStart,
-              duration: data.duration,
-              status: data.status,
-            });
-            return newMap;
-          });
-        }
-      } catch (err) {
-        console.error("Erro ao processar mensagem WebSocket:", err);
-      }
-    };
-
-    ws.onclose = () => {
-      console.warn("⚠️ WebSocket fechado, tentando reconectar...");
-      setTimeout(() => {
-        wsRef.current = null;
-      }, 3000);
-    };
-
-    ws.onerror = (err) => {
-      console.error("Erro WebSocket:", err);
-    };
-
-    wsRef.current = ws;
-    return () => ws.close();
-  }, []);
-
-  const sendMessage = (msg: any) => {
-    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-      wsRef.current.send(JSON.stringify(msg));
-    }
-  };
-
-  return { timers, sendMessage };
-}
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-export function getRemainingTime(timerStart: number, duration: number) {
-  if (!timerStart || !duration) return "00:00";
-
-  const now = Date.now();
-  const elapsed = Math.floor((now - timerStart) / 1000); // segundos
-  const remaining = Math.max(duration - elapsed, 0);
-
-  const minutes = Math.floor(remaining / 60).toString().padStart(2, "0");
-  const seconds = (remaining % 60).toString().padStart(2, "0");
-
-  return `${minutes}:${seconds}`;
-}
-
-
-
-
-
-
-
-
-
-
-
-
-
+import { useState } from "react";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/ui/card";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import {
+  Play,
+  Timer,
+} from "lucide-react";
 
 import { useWebsocketTimers } from "@/hooks/useWebsocketTimers";
-import { getRemainingTime } from "@/utils/timeUtils"; 
+import { getRemainingTime } from "@/utils/timeUtils";
 
-const { timers, sendMessage } = useWebsocketTimers();
+interface Alert {
+  chamado: string;
+  criticidade: string;
+  sistema: string;
+  horario: string;
+  descricao: string;
+}
 
+interface ActionTableProps {
+  alerts: Alert[];
+}
 
-const timerData = timers.get(alert.chamado);
+export default function ActionTable({ alerts }: ActionTableProps) {
+  const { timers, sendMessage } = useWebsocketTimers();
+  const [loading, setLoading] = useState<string | null>(null);
 
-{timerData ? (
-  <div className="flex items-center gap-2">
-    <Timer className="h-4 w-4 text-orange-500" />
-    <span className="text-sm font-mono">
-      {getRemainingTime(timerData.timerStart, timerData.duration)}
-    </span>
-    <Badge variant="secondary" className="text-xs">
-      Etapa {timerData.etapa}
-    </Badge>
-  </div>
-) : (
-  <Button
-    variant="outline"
-    size="sm"
-    onClick={() =>
-      sendMessage({
-        action: "startTimer",
-        chamado: alert.chamado,
-        etapa: 1,
-        duration: 300, // exemplo: 5 min
-      })
-    }
-  >
-    <Play className="h-3 w-3 mr-1" />
-    Iniciar
-  </Button>
-)}
+  return (
+    <Card className="mt-6">
+      <CardContent>
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Chamado</TableHead>
+              <TableHead>Criticidade</TableHead>
+              <TableHead>Sistema</TableHead>
+              <TableHead>Horário</TableHead>
+              <TableHead>Descrição</TableHead>
+              <TableHead className="text-center">Acionamento</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {alerts.map((alert) => {
+              const timerData = timers.get(alert.chamado);
+
+              return (
+                <TableRow key={alert.chamado}>
+                  <TableCell>{alert.chamado}</TableCell>
+                  <TableCell>
+                    <Badge
+                      variant={
+                        alert.criticidade === "Alta"
+                          ? "destructive"
+                          : alert.criticidade === "Média"
+                          ? "secondary"
+                          : "default"
+                      }
+                    >
+                      {alert.criticidade}
+                    </Badge>
+                  </TableCell>
+                  <TableCell>{alert.sistema}</TableCell>
+                  <TableCell>{alert.horario}</TableCell>
+                  <TableCell>{alert.descricao}</TableCell>
+
+                  {/* Coluna de Acionamento */}
+                  <TableCell className="text-center">
+                    {timerData ? (
+                      <div className="flex items-center gap-2 justify-center">
+                        <Timer className="h-4 w-4 text-orange-500" />
+                        <span className="text-sm font-mono">
+                          {getRemainingTime(
+                            timerData.timerStart,
+                            timerData.duration
+                          )}
+                        </span>
+                        <Badge variant="secondary" className="text-xs">
+                          Etapa {timerData.etapa}
+                        </Badge>
+                      </div>
+                    ) : (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        disabled={loading === alert.chamado}
+                        onClick={() => {
+                          setLoading(alert.chamado);
+                          sendMessage({
+                            action: "startTimer",
+                            chamado: alert.chamado,
+                            etapa: 1,
+                            duration: 300, // 5 minutos, pode ser dinâmico
+                          });
+                          setLoading(null);
+                        }}
+                      >
+                        <Play className="h-3 w-3 mr-1" />
+                        Iniciar
+                      </Button>
+                    )}
+                  </TableCell>
+                </TableRow>
+              );
+            })}
+          </TableBody>
+        </Table>
+      </CardContent>
+    </Card>
+  );
+}
