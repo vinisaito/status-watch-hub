@@ -1,196 +1,23 @@
 import { useState } from 'react';
-import { User, FileText, X, Save, Clock, CheckCircle } from 'lucide-react';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { Button } from '@/components/ui/button';
-import { Textarea } from '@/components/ui/textarea';
-import { Label } from '@/components/ui/label';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 
-const operadores = [
-  'ALBERTO LAGES',
-  'ALEXANDRE LIMA SILVA',
-  'ANSELMO ALVES PESSOA',
-  'BRUNO MAZZO FEITOSA',
-  'CAIO CESAR ALVES DA LUZ',
-  'CLAUDIA ZORZAN DE CAMARGO',
-  'JEFFERSON DA SILVA SOUZA',
-  'JULIANA BEATRIZ DE ANGELO',
-  'MARIA LUIZA DOS SANTOS COIADO',
-  'RAFAEL NUNES PACHECO',
-  'SERGIO ANTONIO DA SILVA',
-  'VICTOR HUGO ALMEIDA FERNANDES',
-  'VINICIUS RHYU VITURINO SAITO'
-];
-
-interface ObservacaoDialogProps {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  selectedChamado: string;
-  onSave: (observacao: string, operador: string) => Promise<boolean>;
-  hasTimestamp: (chamado: string) => boolean;
-  getTimestamp: (chamado: string) => string | undefined;
-  alertData: any[];
-  initialOperador?: string;
-  initialObservacao?: string;
-}
-
-export const ObservacaoDialog = ({
-  open,
-  onOpenChange,
-  selectedChamado,
-  onSave,
-  hasTimestamp,
-  getTimestamp,
-  alertData,
-  initialOperador = '',
-  initialObservacao = ''
-}: ObservacaoDialogProps) => {
-  const [tempOperador, setTempOperador] = useState(initialOperador);
-  const [tempObservacao, setTempObservacao] = useState(initialObservacao);
-
-  const handleSave = async () => {
-    if (!tempOperador || !tempObservacao.trim()) {
-      return;
-    }
-
-    const success = await onSave(tempObservacao, tempOperador);
-    if (success) {
-      setTempOperador('');
-      setTempObservacao('');
-      onOpenChange(false);
-    }
+export const useChatAcionados = () => {
+  const [acionadosSet, setAcionadosSet] = useState<Set<string>>(new Set());
+  
+  const isAcionado = (chamado: string) => acionadosSet.has(chamado);
+  
+  const addAcionado = (chamado: string) => {
+    setAcionadosSet(prev => new Set([...prev, chamado]));
   };
+  
+  return { acionadosSet, isAcionado, addAcionado };
+};
 
-  const handleCancel = () => {
-    setTempOperador('');
-    setTempObservacao('');
-    onOpenChange(false);
-  };
-
-  const handleModeloTexto = () => {
-    const grupo = alertData.find(a => a.chamado === selectedChamado)?.grupo_chamado || 'XXXX';
-    const timestamp = getTimestamp(selectedChamado);
-    const baseText = `Informado no chat do grupo ${grupo}`;
-    const fullText = timestamp ? `${baseText} em ${timestamp}` : baseText;
-    setTempObservacao(fullText);
-  };
-
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-md">
-        <DialogHeader className="pb-4 border-b">
-          <DialogTitle className="flex items-center gap-2">
-            <div className="p-2 rounded-lg bg-primary/10">
-              <FileText className="h-5 w-5 text-primary" />
-            </div>
-            <div>
-              <h3 className="text-lg font-semibold">Registro de Acionamento</h3>
-              <p className="text-sm text-muted-foreground">Chamado: {selectedChamado}</p>
-            </div>
-          </DialogTitle>
-        </DialogHeader>
-
-        <div className="space-y-4 pt-4">
-          {/* Operador */}
-          <div className="space-y-2">
-            <Label className="text-sm font-medium flex items-center gap-2">
-              <User className="h-4 w-4" />
-              Operador *
-            </Label>
-            <Select value={tempOperador} onValueChange={setTempOperador}>
-              <SelectTrigger>
-                <SelectValue placeholder="Selecione um operador" />
-              </SelectTrigger>
-              <SelectContent>
-                {operadores.map((operador) => (
-                  <SelectItem key={operador} value={operador}>
-                    {operador}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-
-          {/* Timestamp */}
-          {selectedChamado && hasTimestamp(selectedChamado) && (
-            <div className="p-3 rounded-lg bg-blue-50 border border-blue-200 dark:bg-blue-950/20 dark:border-blue-800">
-              <div className="flex items-center gap-2 text-blue-700 dark:text-blue-300">
-                <Clock className="h-4 w-4" />
-                <span className="text-sm font-medium">Acionado no chat em:</span>
-              </div>
-              <p className="text-sm font-mono text-blue-800 dark:text-blue-200 mt-1">
-                {getTimestamp(selectedChamado)}
-              </p>
-            </div>
-          )}
-
-          {/* Observação */}
-          <div className="space-y-2">
-            <div className="flex items-center justify-between">
-              <Label className="text-sm font-medium flex items-center gap-2">
-                <FileText className="h-4 w-4" />
-                Observações
-              </Label>
-              {tempOperador && selectedChamado && (
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  onClick={handleModeloTexto}
-                  className="text-xs h-7 px-2"
-                >
-                  Modelo de Texto
-                </Button>
-              )}
-            </div>
-            <Textarea
-              placeholder={!tempOperador ? "Selecione um operador primeiro..." : "Digite suas observações aqui..."}
-              value={tempObservacao}
-              onChange={(e) => setTempObservacao(e.target.value)}
-              disabled={!tempOperador}
-              className="min-h-[100px] resize-none"
-              rows={4}
-            />
-            {!tempOperador && (
-              <p className="text-xs text-muted-foreground">
-                O campo de observação só pode ser preenchido após selecionar um operador.
-              </p>
-            )}
-          </div>
-
-          {/* Success message */}
-          {tempOperador && tempObservacao && (
-            <div className="p-3 rounded-lg bg-green-50 border border-green-200 dark:bg-green-950/20 dark:border-green-800">
-              <div className="flex items-center gap-2 text-green-700 dark:text-green-300">
-                <CheckCircle className="h-4 w-4" />
-                <span className="text-sm font-medium">
-                  Após salvar, este item será marcado como FINALIZADO
-                </span>
-              </div>
-            </div>
-          )}
-        </div>
-
-        {/* Botões */}
-        <div className="flex items-center gap-2 pt-6 border-t">
-          <Button
-            variant="outline"
-            onClick={handleCancel}
-            className="flex-1"
-          >
-            <X className="h-4 w-4 mr-2" />
-            Cancelar
-          </Button>
-          <Button
-            onClick={handleSave}
-            disabled={!tempOperador || !tempObservacao.trim()}
-            className="flex-1"
-          >
-            <Save className="h-4 w-4 mr-2" />
-            Salvar
-          </Button>
-        </div>
-      </DialogContent>
-    </Dialog>
-  );
+export const useChatAcionadosTimestamps = () => {
+  const [timestamps] = useState<Map<string, string>>(new Map());
+  
+  const getTimestampForChamado = (chamado: string) => timestamps.get(chamado);
+  const hasTimestamp = (chamado: string) => timestamps.has(chamado);
+  const fetchTimestamps = () => Promise.resolve();
+  
+  return { getTimestampForChamado, hasTimestamp, fetchTimestamps };
 };
