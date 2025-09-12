@@ -1,1 +1,355 @@
-{ "chamado": 101, "level1_timerStart": "2025-09-08T14:00:00Z", "level1_duration": 1200, "level1_status": "running" }
+// ActionTable.tsx
+import React, { useState, useMemo, useCallback, useEffect, useRef } from 'react';
+import {
+  Check,
+  AlertTriangle,
+  Timer,
+  Play,
+  CheckCircle,
+  Edit3,
+  Search,
+  ChevronLeft,
+  ChevronRight,
+  ArrowUpDown,
+  ArrowUp,
+  ArrowDown,
+} from 'lucide-react';
+import { Card, CardContent, CardHeader } from '@/components/ui/card';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { toast } from '@/hooks/use-toast';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
+
+import { useEscalacao } from '@/hooks/useEscalacao';
+import { useObservacoes } from '@/hooks/useObservacao';
+import { useChatAcionados, useChatAcionadosTimestamps } from '@/hooks/useChatAcionados';
+
+import { EscalacaoDialog } from './EscalacaoDialog';
+import { ObservacaoDialog } from './ObservacaoDialog';
+import { ChamadoModal } from './ChamadoModal';
+
+interface AlertData {
+  id: string;
+  chamado: string;
+  tipo_chamado: string;
+  grupo_chamado: string;
+  status_chamado: string;
+  abertura_chamado: string;
+  resumo_chamado: string;
+  severidade_chamado: string;
+  acionado: string;
+  chat: boolean;
+}
+
+interface ActionTableProps {
+  alertData: AlertData[];
+  onUpdateAcknowledgment: (alertId: string, acknowledged: boolean) => void;
+  loading: boolean;
+}
+
+type SortField = keyof AlertData;
+type SortDirection = 'asc' | 'desc' | null;
+
+const WEBSOCKET_URL = 'wss://rsgjd6wsza.execute-api.us-east-1.amazonaws.com/dev/';
+
+type TimerEntry = {
+  chamado: string;
+  endTimeMs?: number | null;
+  remainingSeconds?: number | null;
+  updatedAt?: number;
+  source?: string;
+};
+
+export const ActionTable: React.FC<ActionTableProps> = ({ alertData, onUpdateAcknowledgment, loading }) => {
+  const [currentPage, setCurrentPage] = useState(1);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [itemsPerPage, setItemsPerPage] = useState<number>(() => {
+    const saved = sessionStorage.getItem('itemsPerPage');
+    return saved ? parseInt(saved, 10) : 5;
+  });
+  const [sortField, setSortField] = useState<SortField>('chamado');
+  const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
+
+  const [chamadoModalOpen, setChamadoModalOpen] = useState(false);
+  const [selectedIncident, setSelectedIncident] = useState<AlertData | null>(null);
+  const [observacaoDialogOpen, setObservacaoDialogOpen] = useState(false);
+  const [selectedChamadoForEdit, setSelectedChamadoForEdit] = useState<string>('');
+  const [escalacaoDialogOpen, setEscalacaoDialogOpen] = useState(false);
+  const [selectedChamadoEscalacao, setSelectedChamadoEscalacao] = useState<string>('');
+
+  const { acionadosSet, isAcionado, addAcionado } = useChatAcionados();
+  const { getTimestampForChamado, hasTimestamp } = useChatAcionadosTimestamps();
+  const { observacoesData, saveObservacao } = useObservacoes();
+  const {
+    iniciarEscalacao,
+    formatTime,
+  } = useEscalacao();
+
+  // timers
+  const [timers, setTimers] = useState<Record<string, TimerEntry>>({});
+  const wsRef = useRef<WebSocket | null>(null);
+  const reconnectTimeoutRef = useRef<number | null>(null);
+  const reconnectAttemptsRef = useRef(0);
+  const [tick, setTick] = useState(0);
+
+  // parser ajustado
+  const parseIncoming = useCallback((raw: any): TimerEntry[] => {
+    const out: TimerEntry[] = [];
+    if (!raw) return out;
+
+    let payload = raw;
+    if (typeof raw === 'string') {
+      try { payload = JSON.parse(raw); } catch { payload = raw; }
+    }
+    if (payload && payload.body) {
+      try {
+        payload = typeof payload.body === 'string' ? JSON.parse(payload.body) : payload.body;
+      } catch {}
+    }
+    if (payload && payload.payload) payload = payload.payload;
+
+    const normalizeOne = (obj: any): TimerEntry | null => {
+      if (!obj) return null;
+      const chamadoRaw = obj.chamado ?? obj.id ?? obj.chamado_id ?? obj.pk ?? obj.PK;
+      if (chamadoRaw == null) return null;
+      const chamado = String(chamadoRaw);
+      const now = Date.now();
+      const entry: TimerEntry = { chamado, updatedAt: now };
+
+      if (obj.level1_timerStart || obj.level1_duration) {
+        let startMs: number | undefined;
+        if (typeof obj.level1_timerStart === 'string') {
+          const parsed = Date.parse(obj.level1_timerStart);
+          if (!isNaN(parsed)) startMs = parsed;
+        }
+        let durationMs: number | undefined;
+        if (obj.level1_duration != null) {
+          const d = Number(obj.level1_duration);
+          if (!isNaN(d)) durationMs = d * 1000;
+        }
+        if (startMs != null && durationMs != null) {
+          entry.endTimeMs = startMs + durationMs;
+          entry.source = 'level1';
+          return entry;
+        }
+      }
+
+      if (obj.level2_timerStart || obj.level2_duration) {
+        let startMs: number | undefined;
+        if (typeof obj.level2_timerStart === 'string') {
+          const parsed = Date.parse(obj.level2_timerStart);
+          if (!isNaN(parsed)) startMs = parsed;
+        }
+        let durationMs: number | undefined;
+        if (obj.level2_duration != null) {
+          const d = Number(obj.level2_duration);
+          if (!isNaN(d)) durationMs = d * 1000;
+        }
+        if (startMs != null && durationMs != null) {
+          entry.endTimeMs = startMs + durationMs;
+          entry.source = 'level2';
+          return entry;
+        }
+      }
+
+      if (obj.remaining_seconds != null) {
+        const sec = Number(obj.remaining_seconds);
+        if (!isNaN(sec)) {
+          entry.endTimeMs = Date.now() + sec * 1000;
+          entry.source = 'remaining_seconds';
+          return entry;
+        }
+      }
+
+      return null;
+    };
+
+    if (Array.isArray(payload)) {
+      for (const item of payload) {
+        const norm = normalizeOne(item);
+        if (norm) out.push(norm);
+      }
+      return out;
+    }
+
+    const single = normalizeOne(payload);
+    if (single) out.push(single);
+    return out;
+  }, []);
+
+  const upsertTimerEntries = useCallback((entries: TimerEntry[]) => {
+    if (!entries.length) return;
+    setTimers(prev => {
+      const next = { ...prev };
+      for (const e of entries) {
+        const key = e.chamado;
+        const existing = next[key];
+        if (!existing || (e.updatedAt && (!existing.updatedAt || e.updatedAt >= existing.updatedAt))) {
+          next[key] = { ...existing, ...e, updatedAt: e.updatedAt ?? Date.now() };
+        }
+      }
+      return next;
+    });
+  }, []);
+
+  // websocket
+  useEffect(() => {
+    let closedByUs = false;
+
+    function connect() {
+      const ws = new WebSocket(WEBSOCKET_URL);
+      wsRef.current = ws;
+
+      ws.onopen = () => {
+        reconnectAttemptsRef.current = 0;
+        toast({ title: 'WS conectado', description: 'Conexão WebSocket estabelecida' });
+      };
+
+      ws.onmessage = (ev) => {
+        let raw: any;
+        try { raw = JSON.parse(ev.data); } catch { raw = ev.data; }
+        const parsed = parseIncoming(raw);
+        if (parsed && parsed.length) upsertTimerEntries(parsed);
+      };
+
+      ws.onclose = () => {
+        if (!closedByUs) {
+          reconnectAttemptsRef.current++;
+          const backoff = Math.min(30000, 1000 * Math.pow(1.5, reconnectAttemptsRef.current));
+          if (reconnectTimeoutRef.current) window.clearTimeout(reconnectTimeoutRef.current);
+          reconnectTimeoutRef.current = window.setTimeout(connect, backoff);
+        }
+      };
+    }
+
+    connect();
+    return () => {
+      closedByUs = true;
+      if (reconnectTimeoutRef.current) {
+        window.clearTimeout(reconnectTimeoutRef.current);
+        reconnectTimeoutRef.current = null;
+      }
+      if (wsRef.current) {
+        try { wsRef.current.close(); } catch {}
+        wsRef.current = null;
+      }
+    };
+  }, [parseIncoming, upsertTimerEntries]);
+
+  useEffect(() => {
+    const id = window.setInterval(() => setTick(t => t + 1), 1000);
+    return () => clearInterval(id);
+  }, []);
+
+  const getRemainingSeconds = useCallback((chamado: string) => {
+    const t = timers[chamado];
+    if (!t) return null;
+    if (t.endTimeMs != null) {
+      const ms = t.endTimeMs - Date.now();
+      return Math.max(0, Math.ceil(ms / 1000));
+    }
+    return null;
+  }, [timers, tick]);
+
+  const formatDuration = useCallback((seconds: number | null) => {
+    if (seconds == null) return '00:00';
+    const s = Math.max(0, Math.floor(seconds));
+    const h = Math.floor(s / 3600);
+    const m = Math.floor((s % 3600) / 60);
+    const sec = s % 60;
+    return h > 0
+      ? `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(sec).padStart(2, '0')}`
+      : `${String(m).padStart(2, '0')}:${String(sec).padStart(2, '0')}`;
+  }, []);
+
+  // render da tabela
+  const filteredData = useMemo(() => {
+    if (!searchTerm.trim()) return alertData;
+    const searchLower = searchTerm.toLowerCase();
+    return alertData.filter(alert =>
+      Object.values(alert).some(value =>
+        String(value).toLowerCase().includes(searchLower)
+      )
+    );
+  }, [alertData, searchTerm]);
+
+  const { sortedAndPaginatedData, totalPages } = useMemo(() => {
+    let sortedData = [...filteredData];
+    if (sortField && sortDirection) {
+      sortedData.sort((a, b) => {
+        let aValue: any = a[sortField];
+        let bValue: any = b[sortField];
+        if (sortField === 'chamado') {
+          aValue = parseInt(a.chamado) || 0;
+          bValue = parseInt(b.chamado) || 0;
+        } else if (sortField === 'abertura_chamado') {
+          aValue = new Date(a.abertura_chamado).getTime() || 0;
+          bValue = new Date(b.abertura_chamado).getTime() || 0;
+        } else {
+          aValue = String(aValue).toLowerCase();
+          bValue = String(bValue).toLowerCase();
+        }
+        if (aValue < bValue) return sortDirection === 'asc' ? -1 : 1;
+        if (aValue > bValue) return sortDirection === 'asc' ? 1 : -1;
+        return 0;
+      });
+    }
+    const startIndex = (currentPage - 1) * itemsPerPage;
+    const paginatedData = sortedData.slice(startIndex, startIndex + itemsPerPage);
+    const totalPages = Math.ceil(sortedData.length / itemsPerPage);
+    return { sortedAndPaginatedData: paginatedData, totalPages };
+  }, [filteredData, currentPage, itemsPerPage, sortField, sortDirection]);
+
+  return (
+    <TooltipProvider>
+      <Card className="bg-card border-border">
+        <CardHeader>
+          <div className="relative mb-4">
+            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              placeholder="Pesquisar por chamado, tipo, grupo, status, título..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="pl-10"
+            />
+          </div>
+        </CardHeader>
+        <CardContent>
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Chamado</TableHead>
+                <TableHead>Resumo</TableHead>
+                <TableHead>Grupo</TableHead>
+                <TableHead>Severidade</TableHead>
+                <TableHead>Timer</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {sortedAndPaginatedData.map(alert => {
+                const remaining = getRemainingSeconds(alert.chamado);
+                return (
+                  <TableRow key={alert.id}>
+                    <TableCell>{alert.chamado}</TableCell>
+                    <TableCell>{alert.resumo_chamado}</TableCell>
+                    <TableCell>{alert.grupo_chamado}</TableCell>
+                    <TableCell>{alert.severidade_chamado}</TableCell>
+                    <TableCell className="font-mono">
+                      {remaining != null ? formatDuration(remaining) : '00:00'}
+                    </TableCell>
+                  </TableRow>
+                );
+              })}
+            </TableBody>
+          </Table>
+        </CardContent>
+      </Card>
+    </TooltipProvider>
+  );
+};
+
+export default ActionTable;
