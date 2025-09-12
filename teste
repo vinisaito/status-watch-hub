@@ -13,7 +13,10 @@ import {
   ArrowUpDown,
   ArrowUp,
   ArrowDown,
+  MessageCircle,
+  PhoneCall,
 } from 'lucide-react';
+
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
@@ -32,6 +35,9 @@ import { EscalacaoDialog } from './EscalacaoDialog';
 import { ObservacaoDialog } from './ObservacaoDialog';
 import { ChamadoModal } from './ChamadoModal';
 
+// --------------------------------------------------
+// Tipos
+// --------------------------------------------------
 interface AlertData {
   id: string;
   chamado: string;
@@ -54,8 +60,6 @@ interface ActionTableProps {
 type SortField = keyof AlertData;
 type SortDirection = 'asc' | 'desc' | null;
 
-const WEBSOCKET_URL = 'wss://rsgjd6wsza.execute-api.us-east-1.amazonaws.com/dev/';
-
 type TimerEntry = {
   chamado: string;
   endTimeMs?: number | null;
@@ -64,7 +68,15 @@ type TimerEntry = {
   source?: string;
 };
 
-export const ActionTable: React.FC<ActionTableProps> = ({ alertData, onUpdateAcknowledgment, loading }) => {
+// --------------------------------------------------
+// Constantes
+// --------------------------------------------------
+const WEBSOCKET_URL = 'wss://rsgjd6wsza.execute-api.us-east-1.amazonaws.com/dev/';
+
+// --------------------------------------------------
+// Componente
+// --------------------------------------------------
+export const ActionTable: React.FC<ActionTableProps> = ({ alertData, onUpdateAcknowledgment }) => {
   const [currentPage, setCurrentPage] = useState(1);
   const [searchTerm, setSearchTerm] = useState('');
   const [itemsPerPage, setItemsPerPage] = useState<number>(() => {
@@ -84,19 +96,18 @@ export const ActionTable: React.FC<ActionTableProps> = ({ alertData, onUpdateAck
   const { acionadosSet, isAcionado, addAcionado } = useChatAcionados();
   const { getTimestampForChamado, hasTimestamp } = useChatAcionadosTimestamps();
   const { observacoesData, saveObservacao } = useObservacoes();
-  const {
-    iniciarEscalacao,
-    formatTime,
-  } = useEscalacao();
+  const { iniciarEscalacao, formatTime } = useEscalacao();
 
-  // timers
+  // Timers sincronizados
   const [timers, setTimers] = useState<Record<string, TimerEntry>>({});
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectTimeoutRef = useRef<number | null>(null);
   const reconnectAttemptsRef = useRef(0);
   const [tick, setTick] = useState(0);
 
-  // parser ajustado
+  // --------------------------------------------------
+  // Parser de mensagens WS
+  // --------------------------------------------------
   const parseIncoming = useCallback((raw: any): TimerEntry[] => {
     const out: TimerEntry[] = [];
     if (!raw) return out;
@@ -156,15 +167,6 @@ export const ActionTable: React.FC<ActionTableProps> = ({ alertData, onUpdateAck
         }
       }
 
-      if (obj.remaining_seconds != null) {
-        const sec = Number(obj.remaining_seconds);
-        if (!isNaN(sec)) {
-          entry.endTimeMs = Date.now() + sec * 1000;
-          entry.source = 'remaining_seconds';
-          return entry;
-        }
-      }
-
       return null;
     };
 
@@ -196,7 +198,9 @@ export const ActionTable: React.FC<ActionTableProps> = ({ alertData, onUpdateAck
     });
   }, []);
 
-  // websocket
+  // --------------------------------------------------
+  // WebSocket
+  // --------------------------------------------------
   useEffect(() => {
     let closedByUs = false;
 
@@ -266,7 +270,9 @@ export const ActionTable: React.FC<ActionTableProps> = ({ alertData, onUpdateAck
       : `${String(m).padStart(2, '0')}:${String(sec).padStart(2, '0')}`;
   }, []);
 
-  // render da tabela
+  // --------------------------------------------------
+  // Render da Tabela
+  // --------------------------------------------------
   const filteredData = useMemo(() => {
     if (!searchTerm.trim()) return alertData;
     const searchLower = searchTerm.toLowerCase();
@@ -326,7 +332,11 @@ export const ActionTable: React.FC<ActionTableProps> = ({ alertData, onUpdateAck
                 <TableHead>Resumo</TableHead>
                 <TableHead>Grupo</TableHead>
                 <TableHead>Severidade</TableHead>
-                <TableHead>Timer</TableHead>
+                <TableHead>Status</TableHead>
+                <TableHead>Acionamento</TableHead>
+                <TableHead>Observação</TableHead>
+                <TableHead>Escalação</TableHead>
+                <TableHead>Chat</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -338,8 +348,47 @@ export const ActionTable: React.FC<ActionTableProps> = ({ alertData, onUpdateAck
                     <TableCell>{alert.resumo_chamado}</TableCell>
                     <TableCell>{alert.grupo_chamado}</TableCell>
                     <TableCell>{alert.severidade_chamado}</TableCell>
+                    <TableCell>
+                      <Badge>{alert.status_chamado}</Badge>
+                    </TableCell>
                     <TableCell className="font-mono">
                       {remaining != null ? formatDuration(remaining) : '00:00'}
+                    </TableCell>
+                    <TableCell>
+                      <Button
+                        size="icon"
+                        variant="ghost"
+                        onClick={() => {
+                          setSelectedChamadoForEdit(alert.chamado);
+                          setObservacaoDialogOpen(true);
+                        }}
+                      >
+                        <Edit3 className="h-4 w-4" />
+                      </Button>
+                    </TableCell>
+                    <TableCell>
+                      <Button
+                        size="icon"
+                        variant="ghost"
+                        onClick={() => {
+                          setSelectedChamadoEscalacao(alert.chamado);
+                          setEscalacaoDialogOpen(true);
+                        }}
+                      >
+                        <PhoneCall className="h-4 w-4" />
+                      </Button>
+                    </TableCell>
+                    <TableCell>
+                      <Button
+                        size="icon"
+                        variant="ghost"
+                        onClick={() => {
+                          setSelectedIncident(alert);
+                          setChamadoModalOpen(true);
+                        }}
+                      >
+                        <MessageCircle className="h-4 w-4" />
+                      </Button>
                     </TableCell>
                   </TableRow>
                 );
@@ -348,6 +397,11 @@ export const ActionTable: React.FC<ActionTableProps> = ({ alertData, onUpdateAck
           </Table>
         </CardContent>
       </Card>
+
+      {/* Modais */}
+      <ChamadoModal open={chamadoModalOpen} onOpenChange={setChamadoModalOpen} incident={selectedIncident} />
+      <ObservacaoDialog open={observacaoDialogOpen} onOpenChange={setObservacaoDialogOpen} chamado={selectedChamadoForEdit} />
+      <EscalacaoDialog open={escalacaoDialogOpen} onOpenChange={setEscalacaoDialogOpen} chamado={selectedChamadoEscalacao} />
     </TooltipProvider>
   );
 };
