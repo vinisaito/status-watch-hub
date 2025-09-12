@@ -1,175 +1,224 @@
-import { AlertTriangle, Zap, Group, Calendar, Info, Flame, Check, XCircle } from 'lucide-react';
+import { useState } from 'react';
+import { Timer, User, FileText, X, RotateCcw, CheckCircle, SkipForward } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Button } from '@/components/ui/button';
+import { Textarea } from '@/components/ui/textarea';
+import { Label } from '@/components/ui/label';
+import { Progress } from '@/components/ui/progress';
+import { Badge } from '@/components/ui/badge';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 
-interface AlertData {
-  id: string;
-  chamado: string;
-  tipo_chamado: string;
-  grupo_chamado: string;
-  status_chamado: string;
-  abertura_chamado: string;
-  resumo_chamado: string;
-  severidade_chamado: string;
-  acionado: string;
-  chat: boolean;
-}
+const operadores = [
+  'ALBERTO LAGES',
+  'ALEXANDRE LIMA SILVA',
+  'ANSELMO ALVES PESSOA',
+  'BRUNO MAZZO FEITOSA',
+  'CAIO CESAR ALVES DA LUZ',
+  'CLAUDIA ZORZAN DE CAMARGO',
+  'JEFFERSON DA SILVA SOUZA',
+  'JULIANA BEATRIZ DE ANGELO',
+  'MARIA LUIZA DOS SANTOS COIADO',
+  'RAFAEL NUNES PACHECO',
+  'SERGIO ANTONIO DA SILVA',
+  'VICTOR HUGO ALMEIDA FERNANDES',
+  'VINICIUS RHYU VITURINO SAITO'
+];
 
-interface ChamadoModalProps {
+interface EscalacaoDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  selectedIncident: AlertData | null;
-  observacoesData: Map<string, any>;
-  formatDate: (date: string) => string;
+  selectedChamado: string;
+  currentEtapa: number;
+  currentTimer: number;
+  formatTime: (seconds: number) => string;
+  escalacaoData: Map<string, any>;
+  onAvancarEtapa: (observacao: string, operador: string) => boolean;
+  onVoltarEtapa: (observacao: string, operador: string) => boolean;
+  onFinalizarEscalacao: (observacao: string, operador: string) => boolean;
 }
 
-export const ChamadoModal = ({
+export const EscalacaoDialog = ({
   open,
   onOpenChange,
-  selectedIncident,
-  observacoesData,
-  formatDate
-}: ChamadoModalProps) => {
-  if (!selectedIncident) return null;
+  selectedChamado,
+  currentEtapa,
+  currentTimer,
+  formatTime,
+  escalacaoData,
+  onAvancarEtapa,
+  onVoltarEtapa,
+  onFinalizarEscalacao
+}: EscalacaoDialogProps) => {
+  const [tempOperador, setTempOperador] = useState('');
+  const [tempObservacao, setTempObservacao] = useState('');
 
-  const getStatusBadgeClass = (chat: boolean) =>
-    chat
-      ? 'bg-green-500/90 text-white border-green-500/50 shadow-md'
-      : 'bg-red-500/90 text-white border-red-500/50 shadow-md';
+  const handleAction = (action: 'avancar' | 'voltar' | 'finalizar') => {
+    let success = false;
+    
+    switch (action) {
+      case 'avancar':
+        success = onAvancarEtapa(tempObservacao, tempOperador);
+        break;
+      case 'voltar':
+        success = onVoltarEtapa(tempObservacao, tempOperador);
+        break;
+      case 'finalizar':
+        success = onFinalizarEscalacao(tempObservacao, tempOperador);
+        break;
+    }
 
-  const getStatusIcon = (chat: boolean) =>
-    chat ? <Check className="h-4 w-4" /> : <XCircle className="h-4 w-4" />;
+    if (success) {
+      setTempObservacao('');
+      setTempOperador('');
+      if (action === 'finalizar') {
+        onOpenChange(false);
+      }
+    }
+  };
 
-  const getStatusText = (chat: boolean) =>
-    chat ? 'ACIONADO VIA CHAT' : 'NÃO ACIONADO VIA CHAT';
-
-  const obsData = observacoesData.get(selectedIncident.chamado);
+  const observacoes = escalacaoData.get(selectedChamado)?.observacoes || [];
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-3xl max-h-[80vh] overflow-y-auto">
-        <DialogHeader className="pb-6 border-b">
-          <DialogTitle>
-            <div className="relative overflow-hidden rounded-2xl p-6 mb-4 bg-gradient-to-r from-primary to-primary/80">
-              <div className="relative z-10 flex items-start gap-4">
-                <div className="p-3 rounded-xl bg-white/20 backdrop-blur-sm border border-white/30 shadow-lg">
-                  {selectedIncident.tipo_chamado === "Solicitação" ? (
-                    <Zap className="h-6 w-6 text-white drop-shadow-sm" />
-                  ) : selectedIncident.tipo_chamado === "Incidente" ? (
-                    <AlertTriangle className="h-6 w-6 text-white drop-shadow-sm" />
-                  ) : (
-                    <Zap className="h-6 w-6 text-white drop-shadow-sm" />
-                  )}
-                </div>
-
-                <div className="flex-1">
-                  <div className="flex items-center gap-3 mb-2">
-                    <span className="text-2xl font-bold text-white drop-shadow-sm">
-                      {selectedIncident.chamado}
-                    </span>
-                    <div className="h-1 flex-1 bg-white/20 rounded-full">
-                      <div className="h-full w-3/4 bg-white/40 rounded-full"></div>
-                    </div>
-                  </div>
-
-                  <h2 className="text-lg font-medium text-white/95 leading-relaxed drop-shadow-sm">
-                    {selectedIncident.resumo_chamado}
-                  </h2>
-                </div>
-              </div>
-
-              <div className="relative z-10 flex flex-wrap items-center gap-3 mt-6">
-                <div className={`${getStatusBadgeClass(selectedIncident.chat)} flex items-center gap-2 px-4 py-2 rounded-xl 
-                    backdrop-blur-sm border border-white/20 shadow-lg`}>
-                  {getStatusIcon(selectedIncident.chat)}
-                  <span className="font-medium text-sm">
-                    {getStatusText(selectedIncident.chat)}
-                  </span>
-                </div>
-
-                <div className="bg-white/20 text-white flex items-center gap-2 px-4 py-2 rounded-xl 
-                    backdrop-blur-sm border border-white/30 shadow-lg">
-                  <span className="font-medium text-sm">{selectedIncident.tipo_chamado}</span>
-                </div>
-              </div>
+      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+        <DialogHeader className="pb-4 border-b">
+          <DialogTitle className="flex items-center gap-3">
+            <div className="p-3 rounded-xl bg-gradient-to-r from-orange-500 to-red-500">
+              <Timer className="h-6 w-6 text-white" />
+            </div>
+            <div>
+              <h3 className="text-xl font-bold">Processo de Escalação</h3>
+              <p className="text-sm text-muted-foreground">
+                Chamado: {selectedChamado} - Etapa {currentEtapa}/4
+              </p>
             </div>
           </DialogTitle>
         </DialogHeader>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mt-6">
-          <div className="space-y-4">
-            <div className="group relative overflow-hidden rounded-xl bg-card border p-5 
-                shadow-lg hover:shadow-xl transition-all duration-300 hover:-translate-y-1">
-              <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-primary to-blue-500"></div>
-              <div className="flex items-start gap-4">
-                <div className="p-2 rounded-lg bg-primary/10 group-hover:bg-primary/20 transition-colors duration-300">
-                  <Group className="h-5 w-5 text-primary" />
-                </div>
-                <div className="flex-1">
-                  <p className="text-sm text-muted-foreground font-medium mb-1">Grupo</p>
-                  <p className="font-bold text-foreground text-lg">{selectedIncident.grupo_chamado}</p>
-                </div>
+        <div className="space-y-6 pt-4">
+          {/* Timer */}
+          <div className="bg-gradient-to-r from-orange-50 to-red-50 dark:from-orange-950/20 dark:to-red-950/20 p-4 rounded-lg border border-orange-200 dark:border-orange-800">
+            <div className="flex items-center justify-between mb-3">
+              <div className="flex items-center gap-2">
+                <Timer className="h-5 w-5 text-orange-600" />
+                <span className="font-medium">Timer da Etapa</span>
+              </div>
+              <div className="text-2xl font-mono font-bold text-orange-600">
+                {formatTime(currentTimer)}
               </div>
             </div>
-
-            <div className="group relative overflow-hidden rounded-xl bg-card border p-5 
-                shadow-lg hover:shadow-xl transition-all duration-300 hover:-translate-y-1">
-              <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-green-500 to-emerald-500"></div>
-              <div className="flex items-start gap-4">
-                <div className="p-2 rounded-lg bg-green-500/10 group-hover:bg-green-500/20 transition-colors duration-300">
-                  <Calendar className="h-5 w-5 text-green-600" />
-                </div>
-                <div className="flex-1">
-                  <p className="text-sm text-muted-foreground font-medium mb-1">Data de Abertura</p>
-                  <p className="font-bold text-foreground text-lg">{formatDate(selectedIncident.abertura_chamado)}</p>
-                </div>
-              </div>
+            
+            <Progress 
+              value={((20 * 60 - currentTimer) / (20 * 60)) * 100} 
+              className="h-2 mb-2"
+            />
+            
+            <div className="flex items-center justify-between text-xs text-muted-foreground">
+              <span>Tempo restante para ação</span>
+              <span>{currentTimer > 0 ? 'Em andamento' : 'Tempo esgotado'}</span>
             </div>
-
-            {obsData?.CreatedAt && (
-              <div className="group relative overflow-hidden rounded-xl bg-card border p-5 
-                  shadow-lg hover:shadow-xl transition-all duration-300 hover:-translate-y-1">
-                <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-purple-500 to-pink-500"></div>
-                <div className="flex items-start gap-4">
-                  <div className="p-2 rounded-lg bg-purple-500/10 group-hover:bg-purple-500/20 transition-colors duration-300">
-                    <Calendar className="h-5 w-5 text-purple-600" />
-                  </div>
-                  <div className="flex-1">
-                    <p className="text-sm text-muted-foreground font-medium mb-1">Data da Confirmação</p>
-                    <p className="font-bold text-foreground text-lg">{formatDate(obsData.CreatedAt)}</p>
-                  </div>
-                </div>
-              </div>
-            )}
           </div>
 
-          <div className="space-y-4">
-            <div className="group relative overflow-hidden rounded-xl bg-card border p-5 
-                shadow-lg hover:shadow-xl transition-all duration-300 hover:-translate-y-1">
-              <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-blue-500 to-cyan-500"></div>
-              <div className="flex items-start gap-4">
-                <div className="p-2 rounded-lg bg-blue-500/10 group-hover:bg-blue-500/20 transition-colors duration-300">
-                  <Info className="h-5 w-5 text-blue-600" />
-                </div>
-                <div className="flex-1">
-                  <p className="text-sm text-muted-foreground font-medium mb-1">Status</p>
-                  <p className="font-bold text-foreground text-lg">{selectedIncident.status_chamado}</p>
-                </div>
+          {/* Histórico */}
+          {observacoes.length > 0 && (
+            <div className="space-y-2">
+              <h4 className="font-medium text-sm">Histórico de Observações</h4>
+              <div className="max-h-32 overflow-y-auto space-y-2">
+                {observacoes.map((obs: any, index: number) => (
+                  <div key={index} className="bg-secondary p-2 rounded text-xs">
+                    <div className="flex justify-between items-start mb-1">
+                      <Badge variant="outline" className="text-xs">
+                        Etapa {obs.etapa}
+                      </Badge>
+                      <span className="text-muted-foreground">{obs.timestamp}</span>
+                    </div>
+                    <p className="text-foreground mb-1">{obs.observacao}</p>
+                    <p className="text-muted-foreground">Por: {obs.operador}</p>
+                  </div>
+                ))}
               </div>
+            </div>
+          )}
+
+          {/* Formulário */}
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label className="text-sm font-medium flex items-center gap-2">
+                <User className="h-4 w-4" />
+                Operador *
+              </Label>
+              <Select value={tempOperador} onValueChange={setTempOperador}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Selecione um operador" />
+                </SelectTrigger>
+                <SelectContent>
+                  {operadores.map((operador) => (
+                    <SelectItem key={operador} value={operador}>
+                      {operador}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
 
-            <div className="group relative overflow-hidden rounded-xl bg-card border p-5 
-                shadow-lg hover:shadow-xl transition-all duration-300 hover:-translate-y-1">
-              <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-red-500 to-orange-500"></div>
-              <div className="flex items-start gap-4">
-                <div className="p-2 rounded-lg bg-red-500/10 group-hover:bg-red-500/20 transition-colors duration-300">
-                  <Flame className="h-5 w-5 text-red-600" />
-                </div>
-                <div className="flex-1">
-                  <p className="text-sm text-muted-foreground font-medium mb-1">Severidade</p>
-                  <p className="font-bold text-foreground text-lg">{selectedIncident.severidade_chamado}</p>
-                </div>
-              </div>
+            <div className="space-y-2">
+              <Label className="text-sm font-medium flex items-center gap-2">
+                <FileText className="h-4 w-4" />
+                Observação *
+              </Label>
+              <Textarea
+                placeholder="Digite a observação para esta etapa..."
+                value={tempObservacao}
+                onChange={(e) => setTempObservacao(e.target.value)}
+                className="min-h-[100px] resize-none"
+                rows={4}
+              />
             </div>
+          </div>
+
+          {/* Botões */}
+          <div className="flex flex-col sm:flex-row gap-2 pt-4 border-t">
+            <Button
+              variant="outline"
+              onClick={() => onOpenChange(false)}
+              className="flex-1"
+            >
+              <X className="h-4 w-4 mr-2" />
+              Cancelar
+            </Button>
+            
+            {currentEtapa > 1 && (
+              <Button
+                variant="secondary"
+                onClick={() => handleAction('voltar')}
+                disabled={!tempOperador || !tempObservacao.trim()}
+                className="flex-1"
+              >
+                <RotateCcw className="h-4 w-4 mr-2" />
+                Voltar Etapa
+              </Button>
+            )}
+            
+            <Button
+              variant="destructive"
+              onClick={() => handleAction('finalizar')}
+              disabled={!tempOperador || !tempObservacao.trim()}
+              className="flex-1"
+            >
+              <CheckCircle className="h-4 w-4 mr-2" />
+              Finalizar
+            </Button>
+            
+            {currentEtapa < 4 && (
+              <Button
+                onClick={() => handleAction('avancar')}
+                disabled={!tempOperador || !tempObservacao.trim()}
+                className="flex-1"
+              >
+                <SkipForward className="h-4 w-4 mr-2" />
+                Próxima Etapa
+              </Button>
+            )}
           </div>
         </div>
       </DialogContent>
