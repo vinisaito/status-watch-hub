@@ -1,339 +1,8 @@
-import { useState, useEffect } from 'react';
-import {
-  Settings,
-  Sun,
-  Moon,
-  AlertTriangle,
-  FileText,
-  MessageSquare,
-  BookOpen
-} from 'lucide-react';
-import { Button } from '@/components/ui/button';
-import { SidebarProvider } from '@/components/ui/sidebar';
-import { toast } from '@/hooks/use-toast';
-import { MonitoringCards } from './MonitoringCards';
-import { ActionTable } from './ActionTable';
-import { CriticalIncidents } from './CriticalIncidents';
-import { RDMTracker } from './RDMTracker';
-import { ShiftNotes } from './ShiftNotes';
-import { WebhookConfig } from './WebhookConfig';
-import { InstructionsSection } from './InstructionsSection';
-import { Sheet, SheetContent } from "@/components/ui/sheet";
-import  MaintenancePage  from './MaintenancePage';
-import { useChatAcionados } from '@/hooks/use-chat-acionados';
-
-export interface AlertData {
-  id: string;
-  chamado: string;
-  tipo_chamado: string;
-  grupo_chamado: string;
-  status_chamado: string;
-  abertura_chamado: string;
-  resumo_chamado: string;
-  severidade_chamado: string;
-  acionado: string;
-  chat: boolean;
-}
-
-const Dashboard = () => {
-  const [isDarkMode, setIsDarkMode] = useState(true);
-  const [showWebhookConfig, setShowWebhookConfig] = useState(false);
-  const [alertData, setAlertData] = useState<AlertData[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [activeSection, setActiveSection] = useState<'incidents' | 'rdm' | 'notes' | 'instructions' | null>(null);
-  const [filter, setFilter] = useState<string | null>(null);
-  
-  const { isAcionado } = useChatAcionados();
-
-  const fetchAlertData = async () => {
-    setLoading(true);
-    try {
-      const response = await fetch('https://f6ffk8e9fe.execute-api.us-east-1.amazonaws.com/prod/dados');
-
-      if (!response.ok) {
-        throw new Error(`HTTP error! status_chamado: ${response.status}`);
-      }
-
-      const data = await response.json();
-      console.log("data from API:", data);
-
-      // Se a API já retorna array
-      const apiData = Array.isArray(data)
-        ? data
-        : data.body
-          ? JSON.parse(data.body)
-          : [];
-
-      if (!apiData || apiData.length === 0) {
-        throw new Error("Nenhum dado encontrado");
-      }
-
-      const transformedData: AlertData[] = apiData.map((item: any, index: number) => ({
-        id: `alert-${index}`,
-        tipo_chamado: item.tipo_chamado || 'N/A',
-        chamado: item.chamado || 'N/A',
-        grupo_chamado: item.grupo_chamado || 'N/A',
-        status_chamado: item.status_chamado || 'N/A',
-        abertura_chamado: item.dat_abertura_chamado || item.abertura_chamado || item.data_abertura || '',
-        resumo_chamado: item.resumo_chamado || 'Título não disponível',
-        severidade_chamado: item.severidade_chamado || 'N/A',
-        acionado: item.acionado || 'N/A',
-        chat: false,
-      }));
-
-      setAlertData(transformedData);
-
-      const unacknowledged = transformedData.filter(alert => !alert.acionado);
-      if (unacknowledged.length > 0) {
-        playAlertSound();
-      }
-    } catch (error) {
-      console.error('Error fetching data:', error);
-      toast({
-        title: "Erro ao buscar dados",
-        description: "Não foi possível conectar com a API",
-        variant: "destructive",
-      });
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const playAlertSound = () => {
-    const audio = new Audio('data:audio/wav;base64,UklGRnoGAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQoGAACBhYqFbF1fdJivrJBhNjVgodDbq2EcBj+a2/LDciUFLIHO8tiJNwgZaLvt559NEAxQp+PwtmMcBjiR1/LMeSwFJHfH8N2QQAoUXrTp66hVFApGn+Dqu2sgBDR+w/PCaWEbEBOa5rWgdyoEKAA=');
-    audio.play().catch(() => {
-      console.log('Alert sound could not be played');
-    });
-  };
-
-  const toggleTheme = () => {
-    setIsDarkMode(!isDarkMode);
-    if (isDarkMode) {
-      document.documentElement.classList.remove('dark');
-      document.documentElement.classList.add('light');
-    } else {
-      document.documentElement.classList.remove('light');
-      document.documentElement.classList.add('dark');
-    }
-  };
-
-  const updateAlertAcknowledgment = (alertId: string, acknowledged: boolean) => {
-    setAlertData(prev =>
-      prev.map(alert =>
-        alert.id === alertId
-          ? { ...alert, chat: acknowledged }
-          : alert
-      )
-    );
-  };
-
-  useEffect(() => {
-    fetchAlertData();
-    const interval = setInterval(fetchAlertData, 600000);
-    return () => clearInterval(interval);
-  }, []);
-
-  useEffect(() => {
-    document.documentElement.classList.add('dark');
-  }, []);
-
-  const sidebarItems = [
-    { title: "Incidentes Críticos", icon: AlertTriangle, key: 'incidents' as const },
-    { title: "Acompanhamento RDMs", icon: FileText, key: 'rdm' as const },
-    { title: "Recados do Turno", icon: MessageSquare, key: 'notes' as const },
-    { title: "Instruções Operacionais", icon: BookOpen, key: 'instructions' as const },
-  ];
-
-  const filteredData = filter
-    ? alertData.filter(alert => {
-      if (filter === 'SEV4_INCIDENT') {
-        return alert.tipo_chamado.toLowerCase().includes('incidente')
-          && alert.severidade_chamado.includes('4')
-          && !isAcionado(alert.chamado);
-      }
-      if (filter === 'SEV4_INCIDENT_TOTAL') {
-        return alert.tipo_chamado.toLowerCase().includes('incidente')
-          && alert.severidade_chamado.includes('4');
-      }
-      if (filter === 'SEV4_ALERT') {
-        return alert.tipo_chamado.toLowerCase().includes('alerta')
-          && alert.severidade_chamado.includes('4')
-          && alert.acionado !== 'OK'
-          && !isAcionado(alert.chamado);
-      }
-      if (filter === 'SEV4_ALERT_TOTAL') {
-        return alert.tipo_chamado.toLowerCase().includes('alerta')
-          && alert.severidade_chamado.includes('4');
-      }
-      if (filter === 'SEV3_INCIDENT') {
-        return alert.tipo_chamado.toLowerCase().includes('incidente')
-          && alert.severidade_chamado.includes('3')
-          && !isAcionado(alert.chamado);
-      }
-      if (filter === 'SEV3_INCIDENT_TOTAL') {
-        return alert.tipo_chamado.toLowerCase().includes('incidente')
-          && alert.severidade_chamado.includes('3');
-      }
-      return true;
-    })
-    : alertData;
-
-  return (
-    <div className="min-h-screen flex bg-background text-foreground">
-      {/* Conteúdo principal */}
-      <div className="flex-1 flex flex-col">
-        {/* Header */}
-        <div className="bg-dashboard-bg border-b border-border p-6 text-center">
-          <h1
-            className="text-3xl font-bold mb-2"
-            style={{
-              color: isDarkMode ? '#d2d3d8ff' : '#4a90e2',
-            }}
-          >
-            PAINEL CIOPS - MONITORAÇÃO
-          </h1>
-        </div>
-
-        {/* Main */}
-        <div className="flex-1 bg-dashboard-bg">
-          <div className="container mx-auto p-6 max-w-7xl">
-            <div className="space-y-8">
-              {/* Cards */}
-              <div className="text-center">
-                <MonitoringCards
-                  alertData={alertData}
-                  onFilterSelect={(filterKey) => setFilter(prev => prev === filterKey ? null : filterKey)}
-                />
-              </div>
-
-              {/* Table */}
-              <ActionTable
-                alertData={filteredData}
-                onUpdateAcknowledgment={updateAlertAcknowledgment}
-                loading={loading}
-              />
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* Sidebar Enhanced */}
-      <div className="w-20 bg-gradient-to-b from-sidebar-background to-sidebar-background/95 border-l border-sidebar-border/50 backdrop-blur-sm flex flex-col justify-between sticky top-0 h-screen shadow-lg" style={{ background: 'var(--sidebar-gradient)', boxShadow: 'var(--sidebar-glow)' }}>
-        {/* Parte superior - Menu items */}
-        <div className="flex flex-col gap-3 p-3 flex-1">
-          {sidebarItems.map((item) => (
-            <Button
-              key={item.key}
-              variant="ghost"
-              size="icon"
-              onClick={() => setActiveSection(activeSection === item.key ? null : item.key)}
-              className={`w-14 h-14 rounded-xl transition-all duration-300 relative group ${activeSection === item.key
-                ? 'bg-gradient-to-br from-sidebar-primary to-sidebar-primary/90 text-sidebar-primary-foreground shadow-lg scale-105'
-                : 'text-sidebar-foreground hover:bg-sidebar-accent/80 hover:text-sidebar-accent-foreground hover:scale-105'
-                }`}
-              style={activeSection === item.key ? { boxShadow: 'var(--sidebar-active-glow)' } : { transition: 'all 0.3s ease' }}
-              title={item.title}
-            >
-              <item.icon className="h-6 w-6 transition-transform duration-300 group-hover:scale-110" />
-              {/* Active indicator */}
-              {activeSection === item.key && (
-                <div className="absolute -right-1 top-1/2 transform -translate-y-1/2 w-1 h-8 bg-sidebar-primary-foreground rounded-full opacity-80"></div>
-              )}
-            </Button>
-          ))}
-        </div>
-
-        {/* Parte inferior - Settings */}
-        <div className="flex flex-col gap-3 p-3 border-t border-sidebar-border/30">
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={() => setShowWebhookConfig(true)}
-            className="w-14 h-14 rounded-xl text-sidebar-foreground hover:bg-sidebar-accent/80 hover:text-sidebar-accent-foreground transition-all duration-300 hover:scale-105 group"
-            title="Configuração de Webhooks"
-            style={{ transition: 'all 0.3s ease' }}
-          >
-            <Settings className="h-5 w-5 transition-transform duration-300 group-hover:rotate-90" />
-          </Button>
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={toggleTheme}
-            className="w-14 h-14 rounded-xl text-sidebar-foreground hover:bg-sidebar-accent/80 hover:text-sidebar-accent-foreground transition-all duration-300 hover:scale-105 group"
-            title="Trocar Tema"
-            style={{ transition: 'all 0.3s ease' }}
-          >
-            <div className="transition-transform duration-500 group-hover:rotate-180">
-              {isDarkMode ? <Sun className="h-5 w-5" /> : <Moon className="h-5 w-5" />}
-            </div>
-          </Button>
-        </div>
-      </div>
-
-      {/* Drawer */}
-      <Sheet open={!!activeSection} onOpenChange={() => setActiveSection(null)}>
-        <SheetContent
-          side="right"
-          className="w-full"
-          style={{ width: '50vw', maxWidth: '1000px' }}
-        >
-          <div className="mt-4">
-            {activeSection === 'incidents' && <CriticalIncidents />}
-            {activeSection === 'rdm' && <RDMTracker />}
-            {activeSection === 'notes' && <ShiftNotes />}
-            {activeSection === 'instructions' && <InstructionsSection />}
-          </div>
-        </SheetContent>
-      </Sheet>
-
-      {/* Webhook Config Modal */}
-      <WebhookConfig
-        open={showWebhookConfig}
-        onOpenChange={setShowWebhookConfig}
-      />
-    </div>
-  );
-};
-
-export default Dashboard;
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-import { useState, useEffect } from 'react';
-import { Button } from '@/components/ui/button';
-import { Textarea } from '@/components/ui/textarea';
-import { Input } from '@/components/ui/input';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { Plus, Edit2, Trash2, Save, X, Calendar, User } from 'lucide-react';
-import { toast } from '@/hooks/use-toast';
+import { Calendar, User, AlertTriangle, Shield, Wrench, Zap, BookOpen } from 'lucide-react';
 
 interface Instruction {
   id: string;
@@ -343,128 +12,118 @@ interface Instruction {
   category: 'operacional' | 'seguranca' | 'manutencao' | 'emergencia';
   createdAt: string;
   author: string;
-  updatedAt?: string;
 }
 
+// Instruções estáticas pré-definidas no código
+const staticInstructions: Instruction[] = [
+  {
+    id: "inst_001",
+    title: "Procedimento de Escalação Sev 1",
+    content: `1. Identificar se é realmente um incidente Sev 1 (impacto total no serviço)
+2. Acionar imediatamente o gerente de plantão via telefone
+3. Criar ticket no ServiceNow com prioridade P1
+4. Notificar equipes técnicas através do canal #emergencia-sev1
+5. Iniciar bridge de emergência em até 5 minutos
+6. Documentar todas as ações tomadas
+7. Seguir protocolo de comunicação externa se necessário`,
+    priority: "critica",
+    category: "emergencia",
+    createdAt: "2024-01-15T10:00:00Z",
+    author: "Coordenação CIOPS"
+  },
+  {
+    id: "inst_002", 
+    title: "Monitoramento de Sistemas Críticos",
+    content: `• Verificar dashboards principais a cada 15 minutos
+• Monitorar alertas do Zabbix e Grafana continuamente
+• Validar status dos serviços essenciais (Base, Portal, APIs)
+• Confirmar funcionamento dos links de comunicação
+• Verificar capacidade dos servidores (CPU, Memória, Disco)
+• Acompanhar logs de erro em tempo real
+• Executar health checks automatizados de hora em hora`,
+    priority: "alta",
+    category: "operacional", 
+    createdAt: "2024-01-15T10:15:00Z",
+    author: "Equipe Monitoramento"
+  },
+  {
+    id: "inst_003",
+    title: "Política de Segurança - Acessos",
+    content: `IMPORTANTE: Todos os acessos devem seguir as diretrizes de segurança:
+
+• Nunca compartilhar credenciais entre operadores
+• Utilizar sempre autenticação de dois fatores (2FA)  
+• Fazer logoff ao final do turno ou ausência prolongada
+• Reportar imediatamente tentativas de acesso não autorizadas
+• Não utilizar dispositivos pessoais para acessos corporativos
+• Manter senhas seguras (mín. 12 caracteres, alfanumérica)
+• Respeitar princípio do menor privilégio necessário`,
+    priority: "alta",
+    category: "seguranca",
+    createdAt: "2024-01-15T10:30:00Z", 
+    author: "Segurança da Informação"
+  },
+  {
+    id: "inst_004",
+    title: "Passagem de Turno - Checklist",
+    content: `Antes de finalizar o turno, verificar:
+
+□ Status de todos os incidentes em aberto
+□ Alertas pendentes que precisam acompanhamento  
+□ Tarefas de manutenção programadas para próximo turno
+□ Atualizações de sistemas ou patches aplicados
+□ Alterações na infraestrutura realizadas
+□ Contatos importantes ou reuniões agendadas
+□ Backup dos logs e relatórios do período
+□ Transferir conhecimento sobre situações específicas`,
+    priority: "media",
+    category: "operacional",
+    createdAt: "2024-01-15T10:45:00Z",
+    author: "Supervisão CIOPS"
+  },
+  {
+    id: "inst_005",
+    title: "Manutenção Preventiva - Servidores",
+    content: `Procedimentos mensais obrigatórios:
+
+1. Verificar espaço em disco nos servidores críticos
+2. Analisar performance e identificar gargalos
+3. Revisar logs de sistema para erros recorrentes
+4. Testar procedimentos de backup e restore
+5. Validar funcionamento do sistema de monitoramento
+6. Atualizar documentação de procedimentos se necessário
+7. Verificar licenças de software próximas ao vencimento
+8. Confirmar funcionamento dos sistemas redundantes`,
+    priority: "media", 
+    category: "manutencao",
+    createdAt: "2024-01-15T11:00:00Z",
+    author: "Equipe Infraestrutura"
+  },
+  {
+    id: "inst_006",
+    title: "Comunicação de Incidentes",
+    content: `Protocolo de comunicação para incidentes:
+
+SEV 1 (Critical): Comunicação imediata
+• Acionar gerência em até 5 min
+• Notificar direção em até 15 min  
+• Comunicado para clientes em até 30 min
+
+SEV 2 (High): Comunicação urgente  
+• Acionar gerência em até 15 min
+• Avaliar necessidade de comunicado externo
+
+SEV 3/4 (Medium/Low): Comunicação normal
+• Informar gerência no próximo horário comercial
+• Documentar no relatório de turno`,
+    priority: "critica",
+    category: "operacional", 
+    createdAt: "2024-01-15T11:15:00Z",
+    author: "Coordenação CIOPS"
+  }
+];
+
 export const InstructionsSection = () => {
-  const [instructions, setInstructions] = useState<Instruction[]>([]);
-  const [isCreating, setIsCreating] = useState(false);
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const [formData, setFormData] = useState<{
-    title: string;
-    content: string;
-    priority: 'baixa' | 'media' | 'alta' | 'critica';
-    category: 'operacional' | 'seguranca' | 'manutencao' | 'emergencia';
-    author: string;
-  }>({
-    title: '',
-    content: '',
-    priority: 'media',
-    category: 'operacional',
-    author: 'Operador'
-  });
-
-  // Carregar instruções do localStorage
-  useEffect(() => {
-    const savedInstructions = localStorage.getItem('dashboard-instructions');
-    if (savedInstructions) {
-      try {
-        setInstructions(JSON.parse(savedInstructions));
-      } catch (error) {
-        console.error('Erro ao carregar instruções:', error);
-      }
-    }
-  }, []);
-
-  // Salvar instruções no localStorage
-  const saveInstructions = (newInstructions: Instruction[]) => {
-    localStorage.setItem('dashboard-instructions', JSON.stringify(newInstructions));
-    setInstructions(newInstructions);
-  };
-
-  const handleSave = () => {
-    if (!formData.title.trim() || !formData.content.trim()) {
-      toast({
-        title: "Campos obrigatórios",
-        description: "Título e conteúdo são obrigatórios.",
-        variant: "destructive",
-      });
-      return;
-    }
-
-    const now = new Date().toISOString();
-
-    if (editingId) {
-      // Editar existente
-      const updated = instructions.map(inst =>
-        inst.id === editingId
-          ? { ...inst, ...formData, updatedAt: now }
-          : inst
-      );
-      saveInstructions(updated);
-      setEditingId(null);
-      toast({
-        title: "Instrução atualizada",
-        description: "A instrução foi atualizada com sucesso.",
-      });
-    } else {
-      // Criar nova
-      const newInstruction: Instruction = {
-        id: `inst_${Date.now()}`,
-        ...formData,
-        createdAt: now,
-      };
-      saveInstructions([newInstruction, ...instructions]);
-      setIsCreating(false);
-      toast({
-        title: "Instrução criada",
-        description: "Nova instrução adicionada com sucesso.",
-      });
-    }
-
-    // Reset form
-    setFormData({
-      title: '',
-      content: '',
-      priority: 'media',
-      category: 'operacional',
-      author: 'Operador'
-    });
-  };
-
-  const handleEdit = (instruction: Instruction) => {
-    setFormData({
-      title: instruction.title,
-      content: instruction.content,
-      priority: instruction.priority,
-      category: instruction.category,
-      author: instruction.author
-    });
-    setEditingId(instruction.id);
-    setIsCreating(true);
-  };
-
-  const handleDelete = (id: string) => {
-    const filtered = instructions.filter(inst => inst.id !== id);
-    saveInstructions(filtered);
-    toast({
-      title: "Instrução removida",
-      description: "A instrução foi removida com sucesso.",
-    });
-  };
-
-  const handleCancel = () => {
-    setIsCreating(false);
-    setEditingId(null);
-    setFormData({
-      title: '',
-      content: '',
-      priority: 'media',
-      category: 'operacional',
-      author: 'Operador'
-    });
-  };
-
   const getPriorityColor = (priority: string) => {
     switch (priority) {
       case 'critica': return 'bg-red-500 text-white';
@@ -477,11 +136,21 @@ export const InstructionsSection = () => {
 
   const getCategoryColor = (category: string) => {
     switch (category) {
-      case 'emergencia': return 'bg-red-100 text-red-800 border-red-200';
-      case 'seguranca': return 'bg-orange-100 text-orange-800 border-orange-200';
-      case 'manutencao': return 'bg-blue-100 text-blue-800 border-blue-200';
-      case 'operacional': return 'bg-green-100 text-green-800 border-green-200';
-      default: return 'bg-gray-100 text-gray-800 border-gray-200';
+      case 'emergencia': return 'bg-red-100 text-red-800 border-red-200 dark:bg-red-900/20 dark:text-red-400';
+      case 'seguranca': return 'bg-orange-100 text-orange-800 border-orange-200 dark:bg-orange-900/20 dark:text-orange-400';
+      case 'manutencao': return 'bg-blue-100 text-blue-800 border-blue-200 dark:bg-blue-900/20 dark:text-blue-400';
+      case 'operacional': return 'bg-green-100 text-green-800 border-green-200 dark:bg-green-900/20 dark:text-green-400';
+      default: return 'bg-gray-100 text-gray-800 border-gray-200 dark:bg-gray-900/20 dark:text-gray-400';
+    }
+  };
+
+  const getCategoryIcon = (category: string) => {
+    switch (category) {
+      case 'emergencia': return <Zap className="h-4 w-4" />;
+      case 'seguranca': return <Shield className="h-4 w-4" />;
+      case 'manutencao': return <Wrench className="h-4 w-4" />;
+      case 'operacional': return <BookOpen className="h-4 w-4" />;
+      default: return <AlertTriangle className="h-4 w-4" />;
     }
   };
 
@@ -491,190 +160,62 @@ export const InstructionsSection = () => {
         <div>
           <h2 className="text-2xl font-bold">Instruções Operacionais</h2>
           <p className="text-muted-foreground">
-            Gerencie instruções e observações importantes para a equipe
+            Procedimentos e diretrizes essenciais para operação do CIOPS
           </p>
         </div>
         
-        {!isCreating && (
-          <Button onClick={() => setIsCreating(true)} className="gap-2">
-            <Plus className="h-4 w-4" />
-            Nova Instrução
-          </Button>
-        )}
+        <div className="flex items-center gap-2 text-sm text-muted-foreground">
+          <BookOpen className="h-4 w-4" />
+          <span>{staticInstructions.length} instruções disponíveis</span>
+        </div>
       </div>
-
-      {/* Formulário de criação/edição */}
-      {isCreating && (
-        <Card>
-          <CardHeader>
-            <CardTitle>
-              {editingId ? 'Editar Instrução' : 'Nova Instrução'}
-            </CardTitle>
-            <CardDescription>
-              Preencha os dados da instrução operacional
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <div>
-                <label className="text-sm font-medium">Autor</label>
-                <Input
-                  value={formData.author}
-                  onChange={(e) => setFormData({ ...formData, author: e.target.value })}
-                  placeholder="Nome do operador"
-                />
-              </div>
-              
-              <div>
-                <label className="text-sm font-medium">Prioridade</label>
-                <select
-                  value={formData.priority}
-                  onChange={(e) => setFormData({ ...formData, priority: e.target.value as any })}
-                  className="w-full p-2 border border-input rounded-md bg-background"
-                >
-                  <option value="baixa">Baixa</option>
-                  <option value="media">Média</option>
-                  <option value="alta">Alta</option>
-                  <option value="critica">Crítica</option>
-                </select>
-              </div>
-              
-              <div>
-                <label className="text-sm font-medium">Categoria</label>
-                <select
-                  value={formData.category}
-                  onChange={(e) => setFormData({ ...formData, category: e.target.value as any })}
-                  className="w-full p-2 border border-input rounded-md bg-background"
-                >
-                  <option value="operacional">Operacional</option>
-                  <option value="seguranca">Segurança</option>
-                  <option value="manutencao">Manutenção</option>
-                  <option value="emergencia">Emergência</option>
-                </select>
-              </div>
-            </div>
-
-            <div>
-              <label className="text-sm font-medium">Título</label>
-              <Input
-                value={formData.title}
-                onChange={(e) => setFormData({ ...formData, title: e.target.value })}
-                placeholder="Título da instrução"
-              />
-            </div>
-
-            <div>
-              <label className="text-sm font-medium">Conteúdo</label>
-              <Textarea
-                value={formData.content}
-                onChange={(e) => setFormData({ ...formData, content: e.target.value })}
-                placeholder="Descreva a instrução detalhadamente..."
-                rows={6}
-              />
-            </div>
-
-            <div className="flex gap-2">
-              <Button onClick={handleSave} className="gap-2">
-                <Save className="h-4 w-4" />
-                Salvar
-              </Button>
-              <Button variant="outline" onClick={handleCancel} className="gap-2">
-                <X className="h-4 w-4" />
-                Cancelar
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
-      )}
 
       {/* Lista de instruções */}
       <ScrollArea className="h-[600px]">
         <div className="space-y-4">
-          {instructions.length === 0 ? (
-            <Card>
-              <CardContent className="pt-6">
-                <div className="text-center py-8">
-                  <p className="text-muted-foreground">
-                    Nenhuma instrução cadastrada ainda.
-                  </p>
-                  <Button 
-                    variant="outline" 
-                    onClick={() => setIsCreating(true)} 
-                    className="mt-4 gap-2"
-                  >
-                    <Plus className="h-4 w-4" />
-                    Criar primeira instrução
-                  </Button>
+          {staticInstructions.map((instruction) => (
+            <Card key={instruction.id} className="transition-all hover:shadow-md">
+              <CardHeader className="pb-3">
+                <div className="flex items-start justify-between">
+                  <div className="space-y-2">
+                    <CardTitle className="text-lg flex items-center gap-2">
+                      {getCategoryIcon(instruction.category)}
+                      {instruction.title}
+                    </CardTitle>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <Badge className={getPriorityColor(instruction.priority)}>
+                        {instruction.priority.toUpperCase()}
+                      </Badge>
+                      <Badge variant="outline" className={getCategoryColor(instruction.category)}>
+                        {instruction.category.toUpperCase()}
+                      </Badge>
+                    </div>
+                  </div>
+                </div>
+              </CardHeader>
+              
+              <CardContent className="pt-0">
+                <div className="whitespace-pre-wrap text-sm mb-4 leading-relaxed">
+                  {instruction.content}
+                </div>
+                
+                <Separator className="my-3" />
+                
+                <div className="flex items-center justify-between text-xs text-muted-foreground">
+                  <div className="flex items-center gap-4">
+                    <div className="flex items-center gap-1">
+                      <User className="h-3 w-3" />
+                      {instruction.author}
+                    </div>
+                    <div className="flex items-center gap-1">
+                      <Calendar className="h-3 w-3" />
+                      {new Date(instruction.createdAt).toLocaleDateString('pt-BR')}
+                    </div>
+                  </div>
                 </div>
               </CardContent>
             </Card>
-          ) : (
-            instructions.map((instruction) => (
-              <Card key={instruction.id}>
-                <CardHeader className="pb-3">
-                  <div className="flex items-start justify-between">
-                    <div className="space-y-2">
-                      <CardTitle className="text-lg">{instruction.title}</CardTitle>
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <Badge className={getPriorityColor(instruction.priority)}>
-                          {instruction.priority.toUpperCase()}
-                        </Badge>
-                        <Badge variant="outline" className={getCategoryColor(instruction.category)}>
-                          {instruction.category.toUpperCase()}
-                        </Badge>
-                      </div>
-                    </div>
-                    
-                    <div className="flex gap-2">
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => handleEdit(instruction)}
-                        className="gap-1"
-                      >
-                        <Edit2 className="h-3 w-3" />
-                      </Button>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => handleDelete(instruction.id)}
-                        className="gap-1 text-red-600 hover:text-red-700"
-                      >
-                        <Trash2 className="h-3 w-3" />
-                      </Button>
-                    </div>
-                  </div>
-                </CardHeader>
-                
-                <CardContent className="pt-0">
-                  <div className="whitespace-pre-wrap text-sm text-muted-foreground mb-4">
-                    {instruction.content}
-                  </div>
-                  
-                  <Separator className="my-3" />
-                  
-                  <div className="flex items-center justify-between text-xs text-muted-foreground">
-                    <div className="flex items-center gap-4">
-                      <div className="flex items-center gap-1">
-                        <User className="h-3 w-3" />
-                        {instruction.author}
-                      </div>
-                      <div className="flex items-center gap-1">
-                        <Calendar className="h-3 w-3" />
-                        {new Date(instruction.createdAt).toLocaleString('pt-BR')}
-                      </div>
-                    </div>
-                    
-                    {instruction.updatedAt && (
-                      <div className="text-xs">
-                        Atualizado: {new Date(instruction.updatedAt).toLocaleString('pt-BR')}
-                      </div>
-                    )}
-                  </div>
-                </CardContent>
-              </Card>
-            ))
-          )}
+          ))}
         </div>
       </ScrollArea>
     </div>
