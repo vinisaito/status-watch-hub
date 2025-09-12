@@ -296,3 +296,387 @@ const Dashboard = () => {
 };
 
 export default Dashboard;
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+import { useState, useEffect } from 'react';
+import { Button } from '@/components/ui/button';
+import { Textarea } from '@/components/ui/textarea';
+import { Input } from '@/components/ui/input';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Badge } from '@/components/ui/badge';
+import { Separator } from '@/components/ui/separator';
+import { ScrollArea } from '@/components/ui/scroll-area';
+import { Plus, Edit2, Trash2, Save, X, Calendar, User } from 'lucide-react';
+import { toast } from '@/hooks/use-toast';
+
+interface Instruction {
+  id: string;
+  title: string;
+  content: string;
+  priority: 'baixa' | 'media' | 'alta' | 'critica';
+  category: 'operacional' | 'seguranca' | 'manutencao' | 'emergencia';
+  createdAt: string;
+  author: string;
+  updatedAt?: string;
+}
+
+export const InstructionsSection = () => {
+  const [instructions, setInstructions] = useState<Instruction[]>([]);
+  const [isCreating, setIsCreating] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [formData, setFormData] = useState<{
+    title: string;
+    content: string;
+    priority: 'baixa' | 'media' | 'alta' | 'critica';
+    category: 'operacional' | 'seguranca' | 'manutencao' | 'emergencia';
+    author: string;
+  }>({
+    title: '',
+    content: '',
+    priority: 'media',
+    category: 'operacional',
+    author: 'Operador'
+  });
+
+  // Carregar instruções do localStorage
+  useEffect(() => {
+    const savedInstructions = localStorage.getItem('dashboard-instructions');
+    if (savedInstructions) {
+      try {
+        setInstructions(JSON.parse(savedInstructions));
+      } catch (error) {
+        console.error('Erro ao carregar instruções:', error);
+      }
+    }
+  }, []);
+
+  // Salvar instruções no localStorage
+  const saveInstructions = (newInstructions: Instruction[]) => {
+    localStorage.setItem('dashboard-instructions', JSON.stringify(newInstructions));
+    setInstructions(newInstructions);
+  };
+
+  const handleSave = () => {
+    if (!formData.title.trim() || !formData.content.trim()) {
+      toast({
+        title: "Campos obrigatórios",
+        description: "Título e conteúdo são obrigatórios.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    const now = new Date().toISOString();
+
+    if (editingId) {
+      // Editar existente
+      const updated = instructions.map(inst =>
+        inst.id === editingId
+          ? { ...inst, ...formData, updatedAt: now }
+          : inst
+      );
+      saveInstructions(updated);
+      setEditingId(null);
+      toast({
+        title: "Instrução atualizada",
+        description: "A instrução foi atualizada com sucesso.",
+      });
+    } else {
+      // Criar nova
+      const newInstruction: Instruction = {
+        id: `inst_${Date.now()}`,
+        ...formData,
+        createdAt: now,
+      };
+      saveInstructions([newInstruction, ...instructions]);
+      setIsCreating(false);
+      toast({
+        title: "Instrução criada",
+        description: "Nova instrução adicionada com sucesso.",
+      });
+    }
+
+    // Reset form
+    setFormData({
+      title: '',
+      content: '',
+      priority: 'media',
+      category: 'operacional',
+      author: 'Operador'
+    });
+  };
+
+  const handleEdit = (instruction: Instruction) => {
+    setFormData({
+      title: instruction.title,
+      content: instruction.content,
+      priority: instruction.priority,
+      category: instruction.category,
+      author: instruction.author
+    });
+    setEditingId(instruction.id);
+    setIsCreating(true);
+  };
+
+  const handleDelete = (id: string) => {
+    const filtered = instructions.filter(inst => inst.id !== id);
+    saveInstructions(filtered);
+    toast({
+      title: "Instrução removida",
+      description: "A instrução foi removida com sucesso.",
+    });
+  };
+
+  const handleCancel = () => {
+    setIsCreating(false);
+    setEditingId(null);
+    setFormData({
+      title: '',
+      content: '',
+      priority: 'media',
+      category: 'operacional',
+      author: 'Operador'
+    });
+  };
+
+  const getPriorityColor = (priority: string) => {
+    switch (priority) {
+      case 'critica': return 'bg-red-500 text-white';
+      case 'alta': return 'bg-orange-500 text-white';
+      case 'media': return 'bg-yellow-500 text-black';
+      case 'baixa': return 'bg-green-500 text-white';
+      default: return 'bg-gray-500 text-white';
+    }
+  };
+
+  const getCategoryColor = (category: string) => {
+    switch (category) {
+      case 'emergencia': return 'bg-red-100 text-red-800 border-red-200';
+      case 'seguranca': return 'bg-orange-100 text-orange-800 border-orange-200';
+      case 'manutencao': return 'bg-blue-100 text-blue-800 border-blue-200';
+      case 'operacional': return 'bg-green-100 text-green-800 border-green-200';
+      default: return 'bg-gray-100 text-gray-800 border-gray-200';
+    }
+  };
+
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="text-2xl font-bold">Instruções Operacionais</h2>
+          <p className="text-muted-foreground">
+            Gerencie instruções e observações importantes para a equipe
+          </p>
+        </div>
+        
+        {!isCreating && (
+          <Button onClick={() => setIsCreating(true)} className="gap-2">
+            <Plus className="h-4 w-4" />
+            Nova Instrução
+          </Button>
+        )}
+      </div>
+
+      {/* Formulário de criação/edição */}
+      {isCreating && (
+        <Card>
+          <CardHeader>
+            <CardTitle>
+              {editingId ? 'Editar Instrução' : 'Nova Instrução'}
+            </CardTitle>
+            <CardDescription>
+              Preencha os dados da instrução operacional
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div>
+                <label className="text-sm font-medium">Autor</label>
+                <Input
+                  value={formData.author}
+                  onChange={(e) => setFormData({ ...formData, author: e.target.value })}
+                  placeholder="Nome do operador"
+                />
+              </div>
+              
+              <div>
+                <label className="text-sm font-medium">Prioridade</label>
+                <select
+                  value={formData.priority}
+                  onChange={(e) => setFormData({ ...formData, priority: e.target.value as any })}
+                  className="w-full p-2 border border-input rounded-md bg-background"
+                >
+                  <option value="baixa">Baixa</option>
+                  <option value="media">Média</option>
+                  <option value="alta">Alta</option>
+                  <option value="critica">Crítica</option>
+                </select>
+              </div>
+              
+              <div>
+                <label className="text-sm font-medium">Categoria</label>
+                <select
+                  value={formData.category}
+                  onChange={(e) => setFormData({ ...formData, category: e.target.value as any })}
+                  className="w-full p-2 border border-input rounded-md bg-background"
+                >
+                  <option value="operacional">Operacional</option>
+                  <option value="seguranca">Segurança</option>
+                  <option value="manutencao">Manutenção</option>
+                  <option value="emergencia">Emergência</option>
+                </select>
+              </div>
+            </div>
+
+            <div>
+              <label className="text-sm font-medium">Título</label>
+              <Input
+                value={formData.title}
+                onChange={(e) => setFormData({ ...formData, title: e.target.value })}
+                placeholder="Título da instrução"
+              />
+            </div>
+
+            <div>
+              <label className="text-sm font-medium">Conteúdo</label>
+              <Textarea
+                value={formData.content}
+                onChange={(e) => setFormData({ ...formData, content: e.target.value })}
+                placeholder="Descreva a instrução detalhadamente..."
+                rows={6}
+              />
+            </div>
+
+            <div className="flex gap-2">
+              <Button onClick={handleSave} className="gap-2">
+                <Save className="h-4 w-4" />
+                Salvar
+              </Button>
+              <Button variant="outline" onClick={handleCancel} className="gap-2">
+                <X className="h-4 w-4" />
+                Cancelar
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Lista de instruções */}
+      <ScrollArea className="h-[600px]">
+        <div className="space-y-4">
+          {instructions.length === 0 ? (
+            <Card>
+              <CardContent className="pt-6">
+                <div className="text-center py-8">
+                  <p className="text-muted-foreground">
+                    Nenhuma instrução cadastrada ainda.
+                  </p>
+                  <Button 
+                    variant="outline" 
+                    onClick={() => setIsCreating(true)} 
+                    className="mt-4 gap-2"
+                  >
+                    <Plus className="h-4 w-4" />
+                    Criar primeira instrução
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+          ) : (
+            instructions.map((instruction) => (
+              <Card key={instruction.id}>
+                <CardHeader className="pb-3">
+                  <div className="flex items-start justify-between">
+                    <div className="space-y-2">
+                      <CardTitle className="text-lg">{instruction.title}</CardTitle>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <Badge className={getPriorityColor(instruction.priority)}>
+                          {instruction.priority.toUpperCase()}
+                        </Badge>
+                        <Badge variant="outline" className={getCategoryColor(instruction.category)}>
+                          {instruction.category.toUpperCase()}
+                        </Badge>
+                      </div>
+                    </div>
+                    
+                    <div className="flex gap-2">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => handleEdit(instruction)}
+                        className="gap-1"
+                      >
+                        <Edit2 className="h-3 w-3" />
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => handleDelete(instruction.id)}
+                        className="gap-1 text-red-600 hover:text-red-700"
+                      >
+                        <Trash2 className="h-3 w-3" />
+                      </Button>
+                    </div>
+                  </div>
+                </CardHeader>
+                
+                <CardContent className="pt-0">
+                  <div className="whitespace-pre-wrap text-sm text-muted-foreground mb-4">
+                    {instruction.content}
+                  </div>
+                  
+                  <Separator className="my-3" />
+                  
+                  <div className="flex items-center justify-between text-xs text-muted-foreground">
+                    <div className="flex items-center gap-4">
+                      <div className="flex items-center gap-1">
+                        <User className="h-3 w-3" />
+                        {instruction.author}
+                      </div>
+                      <div className="flex items-center gap-1">
+                        <Calendar className="h-3 w-3" />
+                        {new Date(instruction.createdAt).toLocaleString('pt-BR')}
+                      </div>
+                    </div>
+                    
+                    {instruction.updatedAt && (
+                      <div className="text-xs">
+                        Atualizado: {new Date(instruction.updatedAt).toLocaleString('pt-BR')}
+                      </div>
+                    )}
+                  </div>
+                </CardContent>
+              </Card>
+            ))
+          )}
+        </div>
+      </ScrollArea>
+    </div>
+  );
+};
