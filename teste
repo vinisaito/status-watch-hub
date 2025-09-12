@@ -1,409 +1,155 @@
-// ActionTable.tsx
-import React, { useState, useMemo, useCallback, useEffect, useRef } from 'react';
-import {
-  Check,
-  AlertTriangle,
-  Timer,
-  Play,
-  CheckCircle,
-  Edit3,
-  Search,
-  ChevronLeft,
-  ChevronRight,
-  ArrowUpDown,
-  ArrowUp,
-  ArrowDown,
-  MessageCircle,
-  PhoneCall,
-} from 'lucide-react';
+import json
+import boto3
+import os
+import uuid
+from datetime import datetime, timezone
+from decimal import Decimal
 
-import { Card, CardContent, CardHeader } from '@/components/ui/card';
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { toast } from '@/hooks/use-toast';
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
+# ---------- Config ----------
+dynamodb = boto3.resource("dynamodb")
+table = dynamodb.Table(os.environ["CHAMADOS_TABLE"])  # Tabela principal (chamados)
+conn_table = dynamodb.Table(os.environ["CONNECTIONS_TABLE"])  # Tabela de conexões
+apigw = boto3.client(
+    "apigatewaymanagementapi",
+    endpoint_url=f"https://{os.environ['WS_API_ID']}.execute-api.{os.environ['AWS_REGION']}.amazonaws.com/{os.environ['WS_STAGE']}"
+)
 
-import { useEscalacao } from '@/hooks/useEscalacao';
-import { useObservacoes } from '@/hooks/useObservacao';
-import { useChatAcionados, useChatAcionadosTimestamps } from '@/hooks/useChatAcionados';
+# ---------- Helpers ----------
+class DecimalEncoder(json.JSONEncoder):
+    def default(self, o):
+        if isinstance(o, Decimal):
+            if o % 1 == 0:
+                return int(o)
+            return float(o)
+        return super(DecimalEncoder, self).default(o)
 
-import { EscalacaoDialog } from './EscalacaoDialog';
-import { ObservacaoDialog } from './ObservacaoDialog';
-import { ChamadoModal } from './ChamadoModal';
+def log(trace, msg, **kwargs):
+    print(json.dumps({"trace": trace, "msg": msg, **kwargs}, cls=DecimalEncoder, default=str))
 
-// --------------------------------------------------
-// Tipos
-// --------------------------------------------------
-interface AlertData {
-  id: string;
-  chamado: string;
-  tipo_chamado: string;
-  grupo_chamado: string;
-  status_chamado: string;
-  abertura_chamado: string;
-  resumo_chamado: string;
-  severidade_chamado: string;
-  acionado: string;
-  chat: boolean;
-}
+def send_to_connection(conn_id, data):
+    """Envia mensagem para uma conexão específica"""
+    try:
+        apigw.post_to_connection(
+            ConnectionId=conn_id,
+            Data=json.dumps(data, cls=DecimalEncoder).encode("utf-8")
+        )
+    except apigw.exceptions.GoneException:
+        # Conexão morta -> remover
+        conn_table.delete_item(Key={"connectionId": conn_id})
+        log("broadcast", "Conexão removida (GoneException)", connectionId=conn_id)
 
-interface ActionTableProps {
-  alertData: AlertData[];
-  onUpdateAcknowledgment: (alertId: string, acknowledged: boolean) => void;
-  loading: boolean;
-}
+def broadcast(data):
+    """Envia mensagem para todos conectados"""
+    conns = conn_table.scan().get("Items", [])
+    for c in conns:
+        send_to_connection(c["connectionId"], data)
 
-type SortField = keyof AlertData;
-type SortDirection = 'asc' | 'desc' | null;
+def update_chamado(trace, chamado, update):
+    """Atualiza DynamoDB no chamado"""
+    log(trace, "Atualizando chamado", chamado=chamado, update=update)
+    resp = table.update_item(
+        Key={"chamado": chamado},
+        UpdateExpression="SET " + ", ".join(f"#{k} = :{k}" for k in update.keys()),
+        ExpressionAttributeNames={f"#{k}": k for k in update.keys()},
+        ExpressionAttributeValues={f":{k}": v for k, v in update.items()},
+        ReturnValues="ALL_NEW"
+    )
+    log(trace, "Chamado atualizado", new_state=resp.get("Attributes"))
+    return resp.get("Attributes")
 
-type TimerEntry = {
-  chamado: string;
-  endTimeMs?: number | null;
-  remainingSeconds?: number | null;
-  updatedAt?: number;
-  source?: string;
-};
+# ---------- Handlers ----------
+def handle_connect(event, trace):
+    conn_id = event["requestContext"]["connectionId"]
+    conn_table.put_item(Item={"connectionId": conn_id, "connectedAt": datetime.now(timezone.utc).isoformat()})
+    log(trace, "Novo cliente conectado", connectionId=conn_id)
+    return {"statusCode": 200}
 
-// --------------------------------------------------
-// Constantes
-// --------------------------------------------------
-const WEBSOCKET_URL = 'wss://rsgjd6wsza.execute-api.us-east-1.amazonaws.com/dev/';
+def handle_disconnect(event, trace):
+    conn_id = event["requestContext"]["connectionId"]
+    conn_table.delete_item(Key={"connectionId": conn_id})
+    log(trace, "Cliente desconectado", connectionId=conn_id)
+    return {"statusCode": 200}
 
-// --------------------------------------------------
-// Componente
-// --------------------------------------------------
-export const ActionTable: React.FC<ActionTableProps> = ({ alertData, onUpdateAcknowledgment }) => {
-  const [currentPage, setCurrentPage] = useState(1);
-  const [searchTerm, setSearchTerm] = useState('');
-  const [itemsPerPage, setItemsPerPage] = useState<number>(() => {
-    const saved = sessionStorage.getItem('itemsPerPage');
-    return saved ? parseInt(saved, 10) : 5;
-  });
-  const [sortField, setSortField] = useState<SortField>('chamado');
-  const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
+def handle_start_timer(event, trace, body):
+    chamado = int(body["chamado"])
+    level = int(body["level"])
+    duration = int(body.get("duration", 1200))  # padrão 20min
+    now = datetime.now(timezone.utc).isoformat()
 
-  const [chamadoModalOpen, setChamadoModalOpen] = useState(false);
-  const [selectedIncident, setSelectedIncident] = useState<AlertData | null>(null);
-  const [observacaoDialogOpen, setObservacaoDialogOpen] = useState(false);
-  const [selectedChamadoForEdit, setSelectedChamadoForEdit] = useState<string>('');
-  const [escalacaoDialogOpen, setEscalacaoDialogOpen] = useState(false);
-  const [selectedChamadoEscalacao, setSelectedChamadoEscalacao] = useState<string>('');
-
-  const { acionadosSet, isAcionado, addAcionado } = useChatAcionados();
-  const { getTimestampForChamado, hasTimestamp } = useChatAcionadosTimestamps();
-  const { observacoesData, saveObservacao } = useObservacoes();
-  const { iniciarEscalacao, formatTime } = useEscalacao();
-
-  // Timers sincronizados
-  const [timers, setTimers] = useState<Record<string, TimerEntry>>({});
-  const wsRef = useRef<WebSocket | null>(null);
-  const reconnectTimeoutRef = useRef<number | null>(null);
-  const reconnectAttemptsRef = useRef(0);
-  const [tick, setTick] = useState(0);
-
-  // --------------------------------------------------
-  // Parser de mensagens WS
-  // --------------------------------------------------
-  const parseIncoming = useCallback((raw: any): TimerEntry[] => {
-    const out: TimerEntry[] = [];
-    if (!raw) return out;
-
-    let payload = raw;
-    if (typeof raw === 'string') {
-      try { payload = JSON.parse(raw); } catch { payload = raw; }
+    update = {
+        f"level{level}_timerStart": now,
+        f"level{level}_duration": duration,
+        f"level{level}_status": "running"
     }
-    if (payload && payload.body) {
-      try {
-        payload = typeof payload.body === 'string' ? JSON.parse(payload.body) : payload.body;
-      } catch {}
-    }
-    if (payload && payload.payload) payload = payload.payload;
+    state = update_chamado(trace, chamado, update)
+    broadcast({"event": "startTimer", "chamado": chamado, "level": level, "state": state})
+    return {"statusCode": 200, "body": json.dumps({"msg": "Timer iniciado"}, cls=DecimalEncoder)}
 
-    const normalizeOne = (obj: any): TimerEntry | null => {
-      if (!obj) return null;
-      const chamadoRaw = obj.chamado ?? obj.id ?? obj.chamado_id ?? obj.pk ?? obj.PK;
-      if (chamadoRaw == null) return null;
-      const chamado = String(chamadoRaw);
-      const now = Date.now();
-      const entry: TimerEntry = { chamado, updatedAt: now };
+def handle_update_observacao(event, trace, body):
+    chamado = int(body["chamado"])
+    level = int(body["level"])
+    obs = body["observacao"]
+    update = {f"level{level}_observacao": obs}
+    state = update_chamado(trace, chamado, update)
+    broadcast({"event": "updateObservacao", "chamado": chamado, "level": level, "state": state})
+    return {"statusCode": 200, "body": json.dumps({"msg": "Observação atualizada"}, cls=DecimalEncoder)}
 
-      if (obj.level1_timerStart || obj.level1_duration) {
-        let startMs: number | undefined;
-        if (typeof obj.level1_timerStart === 'string') {
-          const parsed = Date.parse(obj.level1_timerStart);
-          if (!isNaN(parsed)) startMs = parsed;
-        }
-        let durationMs: number | undefined;
-        if (obj.level1_duration != null) {
-          const d = Number(obj.level1_duration);
-          if (!isNaN(d)) durationMs = d * 1000;
-        }
-        if (startMs != null && durationMs != null) {
-          entry.endTimeMs = startMs + durationMs;
-          entry.source = 'level1';
-          return entry;
-        }
-      }
+def handle_update_operador(event, trace, body):
+    chamado = int(body["chamado"])
+    operador = body["operador"]
+    update = {"operador": operador}
+    state = update_chamado(trace, chamado, update)
+    broadcast({"event": "updateOperador", "chamado": chamado, "state": state})
+    return {"statusCode": 200, "body": json.dumps({"msg": "Operador atualizado"}, cls=DecimalEncoder)}
 
-      if (obj.level2_timerStart || obj.level2_duration) {
-        let startMs: number | undefined;
-        if (typeof obj.level2_timerStart === 'string') {
-          const parsed = Date.parse(obj.level2_timerStart);
-          if (!isNaN(parsed)) startMs = parsed;
-        }
-        let durationMs: number | undefined;
-        if (obj.level2_duration != null) {
-          const d = Number(obj.level2_duration);
-          if (!isNaN(d)) durationMs = d * 1000;
-        }
-        if (startMs != null && durationMs != null) {
-          entry.endTimeMs = startMs + durationMs;
-          entry.source = 'level2';
-          return entry;
-        }
-      }
+def handle_update_status_final(event, trace, body):
+    chamado = int(body["chamado"])
+    status = body["status"]
+    update = {"statusFinal": status}
+    state = update_chamado(trace, chamado, update)
+    broadcast({"event": "updateStatusFinal", "chamado": chamado, "state": state})
+    return {"statusCode": 200, "body": json.dumps({"msg": "Status final atualizado"}, cls=DecimalEncoder)}
 
-      return null;
-    };
+def handle_get_state(event, trace, body):
+    chamado = int(body["chamado"])
+    resp = table.get_item(Key={"chamado": chamado})
+    state = resp.get("Item", {})
+    log(trace, "Estado retornado", chamado=chamado, state=state)
+    return {"statusCode": 200, "body": json.dumps(state, cls=DecimalEncoder)}
 
-    if (Array.isArray(payload)) {
-      for (const item of payload) {
-        const norm = normalizeOne(item);
-        if (norm) out.push(norm);
-      }
-      return out;
-    }
+# ---------- Main ----------
+def lambda_handler(event, context):
+    trace = str(uuid.uuid4())[:8]
 
-    const single = normalizeOne(payload);
-    if (single) out.push(single);
-    return out;
-  }, []);
+    # Segurança: alguns invokes (ex. test console) podem não ter requestContext
+    req_ctx = event.get("requestContext", {})
+    route = req_ctx.get("routeKey", "UNKNOWN")
+    conn_id = req_ctx.get("connectionId", "N/A")
 
-  const upsertTimerEntries = useCallback((entries: TimerEntry[]) => {
-    if (!entries.length) return;
-    setTimers(prev => {
-      const next = { ...prev };
-      for (const e of entries) {
-        const key = e.chamado;
-        const existing = next[key];
-        if (!existing || (e.updatedAt && (!existing.updatedAt || e.updatedAt >= existing.updatedAt))) {
-          next[key] = { ...existing, ...e, updatedAt: e.updatedAt ?? Date.now() };
-        }
-      }
-      return next;
-    });
-  }, []);
+    log(trace, "invoke", routeKey=route, connectionId=conn_id, body=event.get("body"))
 
-  // --------------------------------------------------
-  // WebSocket
-  // --------------------------------------------------
-  useEffect(() => {
-    let closedByUs = false;
+    try:
+        if route == "$connect":
+            return handle_connect(event, trace)
+        elif route == "$disconnect":
+            return handle_disconnect(event, trace)
+        else:
+            # Mensagens normais -> parse body
+            body = json.loads(event.get("body") or "{}")
 
-    function connect() {
-      const ws = new WebSocket(WEBSOCKET_URL);
-      wsRef.current = ws;
-
-      ws.onopen = () => {
-        reconnectAttemptsRef.current = 0;
-        toast({ title: 'WS conectado', description: 'Conexão WebSocket estabelecida' });
-      };
-
-      ws.onmessage = (ev) => {
-        let raw: any;
-        try { raw = JSON.parse(ev.data); } catch { raw = ev.data; }
-        const parsed = parseIncoming(raw);
-        if (parsed && parsed.length) upsertTimerEntries(parsed);
-      };
-
-      ws.onclose = () => {
-        if (!closedByUs) {
-          reconnectAttemptsRef.current++;
-          const backoff = Math.min(30000, 1000 * Math.pow(1.5, reconnectAttemptsRef.current));
-          if (reconnectTimeoutRef.current) window.clearTimeout(reconnectTimeoutRef.current);
-          reconnectTimeoutRef.current = window.setTimeout(connect, backoff);
-        }
-      };
-    }
-
-    connect();
-    return () => {
-      closedByUs = true;
-      if (reconnectTimeoutRef.current) {
-        window.clearTimeout(reconnectTimeoutRef.current);
-        reconnectTimeoutRef.current = null;
-      }
-      if (wsRef.current) {
-        try { wsRef.current.close(); } catch {}
-        wsRef.current = null;
-      }
-    };
-  }, [parseIncoming, upsertTimerEntries]);
-
-  useEffect(() => {
-    const id = window.setInterval(() => setTick(t => t + 1), 1000);
-    return () => clearInterval(id);
-  }, []);
-
-  const getRemainingSeconds = useCallback((chamado: string) => {
-    const t = timers[chamado];
-    if (!t) return null;
-    if (t.endTimeMs != null) {
-      const ms = t.endTimeMs - Date.now();
-      return Math.max(0, Math.ceil(ms / 1000));
-    }
-    return null;
-  }, [timers, tick]);
-
-  const formatDuration = useCallback((seconds: number | null) => {
-    if (seconds == null) return '00:00';
-    const s = Math.max(0, Math.floor(seconds));
-    const h = Math.floor(s / 3600);
-    const m = Math.floor((s % 3600) / 60);
-    const sec = s % 60;
-    return h > 0
-      ? `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(sec).padStart(2, '0')}`
-      : `${String(m).padStart(2, '0')}:${String(sec).padStart(2, '0')}`;
-  }, []);
-
-  // --------------------------------------------------
-  // Render da Tabela
-  // --------------------------------------------------
-  const filteredData = useMemo(() => {
-    if (!searchTerm.trim()) return alertData;
-    const searchLower = searchTerm.toLowerCase();
-    return alertData.filter(alert =>
-      Object.values(alert).some(value =>
-        String(value).toLowerCase().includes(searchLower)
-      )
-    );
-  }, [alertData, searchTerm]);
-
-  const { sortedAndPaginatedData, totalPages } = useMemo(() => {
-    let sortedData = [...filteredData];
-    if (sortField && sortDirection) {
-      sortedData.sort((a, b) => {
-        let aValue: any = a[sortField];
-        let bValue: any = b[sortField];
-        if (sortField === 'chamado') {
-          aValue = parseInt(a.chamado) || 0;
-          bValue = parseInt(b.chamado) || 0;
-        } else if (sortField === 'abertura_chamado') {
-          aValue = new Date(a.abertura_chamado).getTime() || 0;
-          bValue = new Date(b.abertura_chamado).getTime() || 0;
-        } else {
-          aValue = String(aValue).toLowerCase();
-          bValue = String(bValue).toLowerCase();
-        }
-        if (aValue < bValue) return sortDirection === 'asc' ? -1 : 1;
-        if (aValue > bValue) return sortDirection === 'asc' ? 1 : -1;
-        return 0;
-      });
-    }
-    const startIndex = (currentPage - 1) * itemsPerPage;
-    const paginatedData = sortedData.slice(startIndex, startIndex + itemsPerPage);
-    const totalPages = Math.ceil(sortedData.length / itemsPerPage);
-    return { sortedAndPaginatedData: paginatedData, totalPages };
-  }, [filteredData, currentPage, itemsPerPage, sortField, sortDirection]);
-
-  return (
-    <TooltipProvider>
-      <Card className="bg-card border-border">
-        <CardHeader>
-          <div className="relative mb-4">
-            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-            <Input
-              placeholder="Pesquisar por chamado, tipo, grupo, status, título..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              className="pl-10"
-            />
-          </div>
-        </CardHeader>
-        <CardContent>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Chamado</TableHead>
-                <TableHead>Resumo</TableHead>
-                <TableHead>Grupo</TableHead>
-                <TableHead>Severidade</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead>Acionamento</TableHead>
-                <TableHead>Observação</TableHead>
-                <TableHead>Escalação</TableHead>
-                <TableHead>Chat</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {sortedAndPaginatedData.map(alert => {
-                const remaining = getRemainingSeconds(alert.chamado);
-                return (
-                  <TableRow key={alert.id}>
-                    <TableCell>{alert.chamado}</TableCell>
-                    <TableCell>{alert.resumo_chamado}</TableCell>
-                    <TableCell>{alert.grupo_chamado}</TableCell>
-                    <TableCell>{alert.severidade_chamado}</TableCell>
-                    <TableCell>
-                      <Badge>{alert.status_chamado}</Badge>
-                    </TableCell>
-                    <TableCell className="font-mono">
-                      {remaining != null ? formatDuration(remaining) : '00:00'}
-                    </TableCell>
-                    <TableCell>
-                      <Button
-                        size="icon"
-                        variant="ghost"
-                        onClick={() => {
-                          setSelectedChamadoForEdit(alert.chamado);
-                          setObservacaoDialogOpen(true);
-                        }}
-                      >
-                        <Edit3 className="h-4 w-4" />
-                      </Button>
-                    </TableCell>
-                    <TableCell>
-                      <Button
-                        size="icon"
-                        variant="ghost"
-                        onClick={() => {
-                          setSelectedChamadoEscalacao(alert.chamado);
-                          setEscalacaoDialogOpen(true);
-                        }}
-                      >
-                        <PhoneCall className="h-4 w-4" />
-                      </Button>
-                    </TableCell>
-                    <TableCell>
-                      <Button
-                        size="icon"
-                        variant="ghost"
-                        onClick={() => {
-                          setSelectedIncident(alert);
-                          setChamadoModalOpen(true);
-                        }}
-                      >
-                        <MessageCircle className="h-4 w-4" />
-                      </Button>
-                    </TableCell>
-                  </TableRow>
-                );
-              })}
-            </TableBody>
-          </Table>
-        </CardContent>
-      </Card>
-
-      {/* Modais */}
-      <ChamadoModal open={chamadoModalOpen} onOpenChange={setChamadoModalOpen} incident={selectedIncident} />
-      <ObservacaoDialog open={observacaoDialogOpen} onOpenChange={setObservacaoDialogOpen} chamado={selectedChamadoForEdit} />
-      <EscalacaoDialog open={escalacaoDialogOpen} onOpenChange={setEscalacaoDialogOpen} chamado={selectedChamadoEscalacao} />
-    </TooltipProvider>
-  );
-};
-
-export default ActionTable;
+            if route == "startTimer":
+                return handle_start_timer(event, trace, body)
+            elif route == "updateObservacao":
+                return handle_update_observacao(event, trace, body)
+            elif route == "updateOperador":
+                return handle_update_operador(event, trace, body)
+            elif route == "updateStatusFinal":
+                return handle_update_status_final(event, trace, body)
+            elif route == "getState":
+                return handle_get_state(event, trace, body)
+            else:
+                log(trace, "Rota inválida", route=route)
+                return {"statusCode": 400, "body": json.dumps({"error": "Invalid route"}, cls=DecimalEncoder)}
+    except Exception as e:
+        log(trace, "Erro na execução", error=str(e))
+        return {"statusCode": 500, "body": json.dumps({"error": str(e)}, cls=DecimalEncoder)}
