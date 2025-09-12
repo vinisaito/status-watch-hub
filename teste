@@ -1,24 +1,5 @@
-import { useState, useMemo, useCallback } from 'react';
-import { Check, AlertTriangle, Timer, Play, CheckCircle, Edit3, Search, ChevronLeft, ChevronRight, ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-react';
-import { Card, CardContent, CardHeader } from '@/components/ui/card';
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { toast } from '@/hooks/use-toast';
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
-
-// Hooks customizados
-import { useEscalacao } from '@/hooks/useEscalacao';
-import { useObservacoes } from '@/hooks/useObservacoes';
-import { useChatAcionados, useChatAcionadosTimestamps } from '@/hooks/useChatAcionados';
-
-// Componentes
-import { EscalacaoDialog } from './EscalacaoDialog';
-import { ObservacaoDialog } from './ObservacaoDialog';
-import { ChamadoModal } from './ChamadoModal';
+import { AlertTriangle, Zap, Group, Calendar, Info, Flame, Check, XCircle } from 'lucide-react';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 
 interface AlertData {
   id: string;
@@ -33,803 +14,165 @@ interface AlertData {
   chat: boolean;
 }
 
-interface ActionTableProps {
-  alertData: AlertData[];
-  onUpdateAcknowledgment: (alertId: string, acknowledged: boolean) => void;
-  loading: boolean;
+interface ChamadoModalProps {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  selectedIncident: AlertData | null;
+  observacoesData: Map<string, any>;
+  formatDate: (date: string) => string;
 }
 
-type SortField = keyof AlertData;
-type SortDirection = 'asc' | 'desc' | null;
+export const ChamadoModal = ({
+  open,
+  onOpenChange,
+  selectedIncident,
+  observacoesData,
+  formatDate
+}: ChamadoModalProps) => {
+  if (!selectedIncident) return null;
 
-export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: ActionTableProps) => {
-  // Estados principais
-  const [currentPage, setCurrentPage] = useState(1);
-  const [searchTerm, setSearchTerm] = useState('');
-  const [itemsPerPage, setItemsPerPage] = useState<number>(() => {
-    const saved = sessionStorage.getItem("itemsPerPage");
-    return saved ? parseInt(saved, 10) : 5;
-  });
-  const [sortField, setSortField] = useState<SortField>('chamado');
-  const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
+  const getStatusBadgeClass = (chat: boolean) =>
+    chat
+      ? 'bg-green-500/90 text-white border-green-500/50 shadow-md'
+      : 'bg-red-500/90 text-white border-red-500/50 shadow-md';
 
-  // Estados dos modais
-  const [chamadoModalOpen, setChamadoModalOpen] = useState(false);
-  const [selectedIncident, setSelectedIncident] = useState<AlertData | null>(null);
-  const [observacaoDialogOpen, setObservacaoDialogOpen] = useState(false);
-  const [selectedChamadoForEdit, setSelectedChamadoForEdit] = useState<string>('');
-  const [escalacaoDialogOpen, setEscalacaoDialogOpen] = useState(false);
-  const [selectedChamadoEscalacao, setSelectedChamadoEscalacao] = useState<string>('');
+  const getStatusIcon = (chat: boolean) =>
+    chat ? <Check className="h-4 w-4" /> : <XCircle className="h-4 w-4" />;
 
-  // Hooks customizados
-  const { acionadosSet, isAcionado, addAcionado } = useChatAcionados();
-  const { getTimestampForChamado, hasTimestamp } = useChatAcionadosTimestamps();
-  const { observacoesData, saveObservacao } = useObservacoes();
-  const {
-    escalacaoData,
-    currentTimer,
-    isTimerActive,
-    currentEtapa,
-    setCurrentEtapa,
-    formatTime,
-    iniciarEscalacao,
-    avancarEtapa,
-    voltarEtapa,
-    finalizarEscalacao
-  } = useEscalacao();
+  const getStatusText = (chat: boolean) =>
+    chat ? 'ACIONADO VIA CHAT' : 'NÃO ACIONADO VIA CHAT';
 
-  // Funções utilitárias
-  const formatDate = useCallback((dateString: string) => {
-    if (!dateString || dateString === '' || dateString === 'null' || dateString === 'undefined') {
-      return '-';
-    }
-
-    try {
-      let date: Date;
-      const cleanString = String(dateString).trim();
-
-      if (/^\d{13}$/.test(cleanString)) {
-        date = new Date(parseInt(cleanString));
-      } else if (/^\d{10}$/.test(cleanString)) {
-        date = new Date(parseInt(cleanString) * 1000);
-      } else if (/^\d{2}\/\d{2}\/\d{4}/.test(cleanString)) {
-        const parts = cleanString.split(' ');
-        const datePart = parts[0];
-        const timePart = parts[1] || '00:00:00';
-        const [day, month, year] = datePart.split('/');
-        const [hour, minute, second] = timePart.split(':');
-
-        date = new Date(
-          parseInt(year),
-          parseInt(month) - 1,
-          parseInt(day),
-          parseInt(hour || '0'),
-          parseInt(minute || '0'),
-          parseInt(second || '0')
-        );
-      } else {
-        date = new Date(cleanString);
-      }
-
-      if (isNaN(date.getTime())) return cleanString;
-
-      const year = date.getFullYear();
-      if (year < 1900 || year > 2100) return cleanString;
-
-      return date.toLocaleString('pt-BR', {
-        day: '2-digit',
-        month: '2-digit',
-        year: 'numeric',
-        hour: '2-digit',
-        minute: '2-digit',
-        second: '2-digit',
-      });
-    } catch (error) {
-      return String(dateString);
-    }
-  }, []);
-
-  const getSeverityColor = useCallback((severity: string) => {
-    return severity.includes('4')
-      ? 'bg-destructive text-destructive-foreground'
-      : 'bg-yellow-500 text-yellow-950';
-  }, []);
-
-  const truncateText = useCallback((text: string, maxLength: number) => {
-    return text.length > maxLength ? text.substring(0, maxLength) + '...' : text;
-  }, []);
-
-  // Handlers para acionamento
-  const handleAcknowledgment = useCallback(async (alert: AlertData) => {
-    try {
-      const response = await fetch("https://f6ffk8e9fe.execute-api.us-east-1.amazonaws.com/prod/webhook");
-      const data = await response.json();
-
-      const grupoEntry = data.grupos.find(
-        (g: any) => g.grupo_chamado === alert.grupo_chamado
-      );
-
-      if (!grupoEntry || !grupoEntry.webhooks.length) {
-        toast({
-          title: "Webhook não configurado",
-          description: `Configure o webhook para o Grupo: ${alert.grupo_chamado}`,
-          variant: "destructive",
-        });
-        return;
-      }
-
-      const activeWebhook = grupoEntry.webhooks.find((w: any) => w.ativo);
-      if (!activeWebhook) {
-        toast({
-          title: "Nenhum webhook ativo",
-          description: `O grupo ${alert.grupo_chamado} não possui webhooks ativos`,
-          variant: "destructive",
-        });
-        return;
-      }
-
-      const message = {
-        cards: [{
-          header: { title: "<b>🚨 O CIOPs precisa da sua atenção! <b>" },
-          sections: [
-            {
-              widgets: [{
-                textParagraph: {
-                  text: `É necessário confirmação de recebimento e ciência pelo grupo responsável.`
-                }
-              }]
-            },
-            {
-              widgets: [{
-                textParagraph: {
-                  text:
-                    "<b>Detalhes do Evento:</b><br><br>" +
-                    "<b>📌 Chamado: </b>" + alert.chamado + "<br><br>" +
-                    "<b>⚠️ Severidade: </b>" + alert.severidade_chamado + "<br><br>" +
-                    "<b>📰 Título: </b>" + alert.resumo_chamado + "<br><br>" +
-                    "<b>📅 Abertura: </b>" + alert.abertura_chamado + "<br><br>" +
-                    "<b>👥 Grupo: </b>" + alert.grupo_chamado
-                }
-              }]
-            }
-          ]
-        }]
-      };
-
-      await fetch(activeWebhook.url, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(message),
-      });
-
-      const res = await fetch(
-        "https://f6ffk8e9fe.execute-api.us-east-1.amazonaws.com/prod/chatacionados",
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ chamado: alert.chamado.toString() }),
-        }
-      );
-
-      if (!res.ok) {
-        const errorData = await res.json();
-        throw new Error(errorData.message || "Erro ao marcar como acionado");
-      }
-
-      addAcionado(alert.chamado.toString());
-      onUpdateAcknowledgment(alert.id, true);
-
-      toast({
-        title: "Alerta acionado com sucesso",
-        description: `Mensagem enviada para o Grupo: ${alert.grupo_chamado}`,
-      });
-
-    } catch (error: any) {
-      toast({
-        title: "Erro ao acionar alerta",
-        description: error.message || "Não foi possível concluir o acionamento",
-        variant: "destructive",
-      });
-    }
-  }, [addAcionado, onUpdateAcknowledgment]);
-
-  // Handlers para modais
-  const handleOpenObservacao = useCallback((chamado: string) => {
-    setSelectedChamadoForEdit(chamado);
-    setObservacaoDialogOpen(true);
-  }, []);
-
-  const handleChamadoClick = useCallback((alert: AlertData) => {
-    setSelectedIncident(alert);
-    setChamadoModalOpen(true);
-  }, []);
-
-  const handleIniciarEscalacao = useCallback((chamado: string) => {
-    iniciarEscalacao(chamado);
-    setSelectedChamadoEscalacao(chamado);
-    setEscalacaoDialogOpen(true);
-  }, [iniciarEscalacao]);
-
-  // Handlers para ordenação
-  const handleSort = useCallback((field: SortField) => {
-    if (sortField === field) {
-      if (sortDirection === 'asc') {
-        setSortDirection('desc');
-      } else if (sortDirection === 'desc') {
-        setSortDirection(null);
-        setSortField('chamado');
-      } else {
-        setSortDirection('asc');
-      }
-    } else {
-      setSortField(field);
-      setSortDirection('asc');
-    }
-  }, [sortField, sortDirection]);
-
-  const getSortIcon = useCallback((field: SortField) => {
-    if (sortField !== field) {
-      return <ArrowUpDown className="h-4 w-4 ml-1 opacity-50" />;
-    }
-    if (sortDirection === 'asc') {
-      return <ArrowUp className="h-4 w-4 ml-1" />;
-    }
-    if (sortDirection === 'desc') {
-      return <ArrowDown className="h-4 w-4 ml-1" />;
-    }
-    return <ArrowUpDown className="h-4 w-4 ml-1 opacity-50" />;
-  }, [sortField, sortDirection]);
-
-  // Dados filtrados e paginados
-  const filteredData = useMemo(() => {
-    if (!searchTerm.trim()) return alertData;
-
-    const searchLower = searchTerm.toLowerCase().trim();
-    return alertData.filter(alert =>
-      Object.values(alert).some(value => 
-        String(value).toLowerCase().includes(searchLower)
-      )
-    );
-  }, [alertData, searchTerm]);
-
-  const { sortedAndPaginatedData, totalPages } = useMemo(() => {
-    let sortedData = [...filteredData];
-
-    if (sortField && sortDirection) {
-      sortedData.sort((a, b) => {
-        let aValue: any = a[sortField];
-        let bValue: any = b[sortField];
-
-        if (sortField === 'chamado') {
-          aValue = parseInt(a.chamado) || 0;
-          bValue = parseInt(b.chamado) || 0;
-        } else if (sortField === 'abertura_chamado') {
-          aValue = new Date(a.abertura_chamado).getTime() || 0;
-          bValue = new Date(b.abertura_chamado).getTime() || 0;
-        } else {
-          aValue = String(aValue).toLowerCase();
-          bValue = String(bValue).toLowerCase();
-        }
-
-        if (aValue < bValue) return sortDirection === 'asc' ? -1 : 1;
-        if (aValue > bValue) return sortDirection === 'asc' ? 1 : -1;
-        return 0;
-      });
-    } else {
-      sortedData.sort((a, b) => {
-        const chamadoA = parseInt(a.chamado) || 0;
-        const chamadoB = parseInt(b.chamado) || 0;
-        return chamadoB - chamadoA;
-      });
-    }
-
-    const startIndex = (currentPage - 1) * itemsPerPage;
-    const endIndex = startIndex + itemsPerPage;
-    const paginatedData = sortedData.slice(startIndex, endIndex);
-    const totalPages = Math.ceil(sortedData.length / itemsPerPage);
-
-    return { sortedAndPaginatedData: paginatedData, totalPages };
-  }, [filteredData, currentPage, itemsPerPage, sortField, sortDirection]);
-
-  // Handlers para paginação
-  const handleItemsPerPageChange = useCallback((value: string) => {
-    const num = parseInt(value, 10);
-    setItemsPerPage(num);
-    setCurrentPage(1);
-    sessionStorage.setItem("itemsPerPage", num.toString());
-  }, []);
-
-  const handlePageChange = useCallback((page: number) => {
-    setCurrentPage(page);
-  }, []);
+  const obsData = observacoesData.get(selectedIncident.chamado);
 
   return (
-    <TooltipProvider>
-      <Card className="bg-card border-border">
-        <CardHeader>
-          {/* Campo de Pesquisa */}
-          <div className="relative mb-4">
-            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-            <Input
-              placeholder="Pesquisar por chamado, tipo, grupo, status, título..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              className="pl-10"
-            />
-          </div>
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-3xl max-h-[80vh] overflow-y-auto">
+        <DialogHeader className="pb-6 border-b">
+          <DialogTitle>
+            <div className="relative overflow-hidden rounded-2xl p-6 mb-4 bg-gradient-to-r from-primary to-primary/80">
+              <div className="relative z-10 flex items-start gap-4">
+                <div className="p-3 rounded-xl bg-white/20 backdrop-blur-sm border border-white/30 shadow-lg">
+                  {selectedIncident.tipo_chamado === "Solicitação" ? (
+                    <Zap className="h-6 w-6 text-white drop-shadow-sm" />
+                  ) : selectedIncident.tipo_chamado === "Incidente" ? (
+                    <AlertTriangle className="h-6 w-6 text-white drop-shadow-sm" />
+                  ) : (
+                    <Zap className="h-6 w-6 text-white drop-shadow-sm" />
+                  )}
+                </div>
 
-          {searchTerm && (
-            <div className="text-sm text-muted-foreground">
-              {filteredData.length === 0 ? (
-                <span>Nenhum resultado encontrado para "{searchTerm}"</span>
-              ) : (
-                <span>
-                  {filteredData.length} resultado{filteredData.length !== 1 ? 's' : ''}
-                  {filteredData.length !== alertData.length && ` de ${alertData.length} `}
-                  para "{searchTerm}"
-                </span>
-              )}
+                <div className="flex-1">
+                  <div className="flex items-center gap-3 mb-2">
+                    <span className="text-2xl font-bold text-white drop-shadow-sm">
+                      {selectedIncident.chamado}
+                    </span>
+                    <div className="h-1 flex-1 bg-white/20 rounded-full">
+                      <div className="h-full w-3/4 bg-white/40 rounded-full"></div>
+                    </div>
+                  </div>
+
+                  <h2 className="text-lg font-medium text-white/95 leading-relaxed drop-shadow-sm">
+                    {selectedIncident.resumo_chamado}
+                  </h2>
+                </div>
+              </div>
+
+              <div className="relative z-10 flex flex-wrap items-center gap-3 mt-6">
+                <div className={`${getStatusBadgeClass(selectedIncident.chat)} flex items-center gap-2 px-4 py-2 rounded-xl 
+                    backdrop-blur-sm border border-white/20 shadow-lg`}>
+                  {getStatusIcon(selectedIncident.chat)}
+                  <span className="font-medium text-sm">
+                    {getStatusText(selectedIncident.chat)}
+                  </span>
+                </div>
+
+                <div className="bg-white/20 text-white flex items-center gap-2 px-4 py-2 rounded-xl 
+                    backdrop-blur-sm border border-white/30 shadow-lg">
+                  <span className="font-medium text-sm">{selectedIncident.tipo_chamado}</span>
+                </div>
+              </div>
             </div>
-          )}
-        </CardHeader>
+          </DialogTitle>
+        </DialogHeader>
 
-        <CardContent>
-          {/* Mobile Layout */}
-          <div className="block lg:hidden space-y-4">
-            {loading ? (
-              <div className="text-center py-8">
-                <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary mb-4"></div>
-                <p>Carregando dados...</p>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mt-6">
+          <div className="space-y-4">
+            <div className="group relative overflow-hidden rounded-xl bg-card border p-5 
+                shadow-lg hover:shadow-xl transition-all duration-300 hover:-translate-y-1">
+              <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-primary to-blue-500"></div>
+              <div className="flex items-start gap-4">
+                <div className="p-2 rounded-lg bg-primary/10 group-hover:bg-primary/20 transition-colors duration-300">
+                  <Group className="h-5 w-5 text-primary" />
+                </div>
+                <div className="flex-1">
+                  <p className="text-sm text-muted-foreground font-medium mb-1">Grupo</p>
+                  <p className="font-bold text-foreground text-lg">{selectedIncident.grupo_chamado}</p>
+                </div>
               </div>
-            ) : sortedAndPaginatedData.length === 0 ? (
-              <div className="text-center py-8 text-muted-foreground">
-                {searchTerm ? 'Nenhum resultado encontrado' : 'Nenhum dado disponível'}
+            </div>
+
+            <div className="group relative overflow-hidden rounded-xl bg-card border p-5 
+                shadow-lg hover:shadow-xl transition-all duration-300 hover:-translate-y-1">
+              <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-green-500 to-emerald-500"></div>
+              <div className="flex items-start gap-4">
+                <div className="p-2 rounded-lg bg-green-500/10 group-hover:bg-green-500/20 transition-colors duration-300">
+                  <Calendar className="h-5 w-5 text-green-600" />
+                </div>
+                <div className="flex-1">
+                  <p className="text-sm text-muted-foreground font-medium mb-1">Data de Abertura</p>
+                  <p className="font-bold text-foreground text-lg">{formatDate(selectedIncident.abertura_chamado)}</p>
+                </div>
               </div>
-            ) : (
-              sortedAndPaginatedData.map((alert) => {
-                const isChat = isAcionado(alert.chamado);
-                const observacao = observacoesData.get(alert.chamado);
-                const escalacao = escalacaoData.get(alert.chamado);
+            </div>
 
-                return (
-                  <Card key={alert.id} className="bg-secondary border-border">
-                    <CardContent className="p-3 sm:p-4">
-                      <div className="flex items-center justify-between mb-3 gap-2 flex-wrap">
-                        <div className="flex items-center gap-1 sm:gap-2 flex-wrap">
-                          <Badge variant="outline" className="text-xs">
-                            <Button
-                              variant="link"
-                              size="sm"
-                              className="text-xs p-0 hover:underline"
-                              onClick={() => handleChamadoClick(alert)}
-                            >
-                              {alert.chamado}
-                            </Button>
-                          </Badge>
-                          <Badge variant="outline" className="text-xs max-w-[100px] truncate">
-                            {alert.tipo_chamado}
-                          </Badge>
-                          <Badge className={`${getSeverityColor(alert.severidade_chamado)} text-xs`}>
-                            {alert.severidade_chamado}
-                          </Badge>
-                        </div>
-                      </div>
-
-                      <div className="space-y-2">
-                        <p className="text-sm font-medium break-words">
-                          {truncateText(alert.resumo_chamado, 60)}
-                        </p>
-
-                        <div className="flex items-center justify-between text-xs text-muted-foreground gap-2">
-                          <span className="text-sm font-semibold text-foreground truncate flex-1">
-                            {alert.grupo_chamado}
-                          </span>
-                          <span className="truncate">{alert.status_chamado}</span>
-                        </div>
-
-                        <div className="text-xs text-muted-foreground">
-                          {formatDate(alert.abertura_chamado)}
-                        </div>
-
-                        {/* Seção Acionamento Mobile */}
-                        <div className="border-t pt-3 mt-3">
-                          <div className="flex items-center justify-between mb-2">
-                            <span className="text-xs font-medium text-muted-foreground">Acionamento</span>
-                            {escalacao && escalacao.isActive && (
-                              <Badge variant="secondary" className="text-xs">
-                                Etapa {escalacao.etapa}/4
-                              </Badge>
-                            )}
-                          </div>
-                          
-                          {escalacao && escalacao.isActive ? (
-                            <div className="space-y-2">
-                              <div className="flex items-center gap-2">
-                                <Timer className="h-4 w-4 text-orange-500" />
-                                <span className="text-sm font-mono">
-                                  {selectedChamadoEscalacao === alert.chamado && isTimerActive 
-                                    ? formatTime(currentTimer)
-                                    : '00:00'
-                                  }
-                                </span>
-                                <Button
-                                  variant="outline"
-                                  size="sm"
-                                  onClick={() => {
-                                    setSelectedChamadoEscalacao(alert.chamado);
-                                    setCurrentEtapa(escalacao.etapa);
-                                    setEscalacaoDialogOpen(true);
-                                  }}
-                                  className="h-6 px-2 text-xs"
-                                >
-                                  Gerenciar
-                                </Button>
-                              </div>
-                            </div>
-                          ) : (
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={() => handleIniciarEscalacao(alert.chamado)}
-                              className="h-7 px-3 text-xs w-full"
-                            >
-                              <Play className="h-3 w-3 mr-1" />
-                              Iniciar Escalação
-                            </Button>
-                          )}
-                        </div>
-
-                        <div className="flex items-center justify-between pt-3 gap-2">
-                          <div className="flex gap-2">
-                            <Button
-                              variant={isChat ? 'default' : 'outline'}
-                              size="sm"
-                              onClick={() => !isChat && handleAcknowledgment(alert)}
-                              disabled={isChat}
-                              className={`h-7 px-2 sm:px-3 text-xs flex-shrink-0 ${isChat
-                                ? 'bg-green-600 text-white hover:bg-green-700'
-                                : 'border-border hover:bg-accent'
-                                }`}
-                            >
-                              {isChat ? (
-                                <>
-                                  <Check className="h-3 w-3 mr-1" />
-                                  <span className="hidden sm:inline">Acionado</span>
-                                </>
-                              ) : (
-                                <>
-                                  <AlertTriangle className="h-3 w-3 mr-1" />
-                                  <span className="hidden sm:inline">Acionar</span>
-                                </>
-                              )}
-                            </Button>
-
-                            <Button
-                              variant={observacao ? "default" : "outline"}
-                              size="sm"
-                              onClick={() => handleOpenObservacao(alert.chamado)}
-                              className={`h-7 px-2 text-xs ${observacao
-                                ? 'bg-green-600 text-white hover:bg-green-700'
-                                : 'border-border hover:bg-accent'
-                                }`}
-                            >
-                              {observacao ? (
-                                <>
-                                  <CheckCircle className="h-3 w-3 mr-1" />
-                                  <span className="hidden sm:inline">Finalizado</span>
-                                </>
-                              ) : (
-                                <>
-                                  <Edit3 className="h-3 w-3 mr-1" />
-                                  <span className="hidden sm:inline">Observação</span>
-                                </>
-                              )}
-                            </Button>
-                          </div>
-                        </div>
-                      </div>
-                    </CardContent>
-                  </Card>
-                );
-              })
+            {obsData?.CreatedAt && (
+              <div className="group relative overflow-hidden rounded-xl bg-card border p-5 
+                  shadow-lg hover:shadow-xl transition-all duration-300 hover:-translate-y-1">
+                <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-purple-500 to-pink-500"></div>
+                <div className="flex items-start gap-4">
+                  <div className="p-2 rounded-lg bg-purple-500/10 group-hover:bg-purple-500/20 transition-colors duration-300">
+                    <Calendar className="h-5 w-5 text-purple-600" />
+                  </div>
+                  <div className="flex-1">
+                    <p className="text-sm text-muted-foreground font-medium mb-1">Data da Confirmação</p>
+                    <p className="font-bold text-foreground text-lg">{formatDate(obsData.CreatedAt)}</p>
+                  </div>
+                </div>
+              </div>
             )}
           </div>
 
-          {/* Desktop Layout */}
-          <div className="hidden lg:block overflow-x-auto">
-            <Table className="min-w-[1200px]">
-              <TableHeader>
-                <TableRow className="border-border hover:bg-accent">
-                  {[
-                    { key: 'chamado' as SortField, label: 'Chamado', width: 'w-20' },
-                    { key: 'tipo_chamado' as SortField, label: 'Classificação', width: 'w-24' },
-                    { key: 'grupo_chamado' as SortField, label: 'Grupo', width: 'w-20' },
-                    { key: 'status_chamado' as SortField, label: 'Status', width: 'w-20' },
-                    { key: 'abertura_chamado' as SortField, label: 'Abertura', width: 'w-28' },
-                    { key: 'resumo_chamado' as SortField, label: 'Título', width: 'flex-1 min-w-40' },
-                    { key: 'severidade_chamado' as SortField, label: 'Severidade', width: 'w-20' }
-                  ].map(({ key, label, width }) => (
-                    <TableHead key={key} className={`text-muted-foreground ${width}`}>
-                      <Button
-                        variant="ghost"
-                        className="h-auto p-0 font-medium text-muted-foreground hover:text-foreground text-xs"
-                        onClick={() => handleSort(key)}
-                      >
-                        {label}
-                        {getSortIcon(key)}
-                      </Button>
-                    </TableHead>
-                  ))}
-                  <TableHead className="text-muted-foreground w-40 text-center">
-                    <span className="text-xs font-medium">Acionamento</span>
-                  </TableHead>
-                  <TableHead className="text-muted-foreground w-16 text-center">Chat</TableHead>
-                  <TableHead className="text-muted-foreground w-32 text-center">Observação</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {loading ? (
-                  <TableRow>
-                    <TableCell colSpan={11} className="text-center py-8">
-                      Carregando dados...
-                    </TableCell>
-                  </TableRow>
-                ) : sortedAndPaginatedData.length === 0 ? (
-                  <TableRow>
-                    <TableCell colSpan={11} className="text-center py-8 text-muted-foreground">
-                      {searchTerm ? 'Nenhum resultado encontrado' : 'Nenhum dado disponível'}
-                    </TableCell>
-                  </TableRow>
-                ) : (
-                  sortedAndPaginatedData.map((alert) => {
-                    const isChat = isAcionado(alert.chamado);
-                    const observacao = observacoesData.get(alert.chamado);
-                    const escalacao = escalacaoData.get(alert.chamado);
-                    
-                    return (
-                      <TableRow key={alert.id} className="border-border hover:bg-accent transition-colors">
-                        <TableCell className="font-medium">
-                          <Button
-                            variant="link"
-                            size="sm"
-                            className="p-0 text-foreground hover:underline text-xs"
-                            onClick={() => handleChamadoClick(alert)}
-                          >
-                            {alert.chamado}
-                          </Button>
-                        </TableCell>
-                        <TableCell>
-                          <Tooltip>
-                            <TooltipTrigger asChild>
-                              <span className="truncate block max-w-[80px] text-xs">
-                                {alert.tipo_chamado}
-                              </span>
-                            </TooltipTrigger>
-                            <TooltipContent>
-                              <p className="max-w-xs">{alert.tipo_chamado}</p>
-                            </TooltipContent>
-                          </Tooltip>
-                        </TableCell>
-                        <TableCell className="text-xs">{alert.grupo_chamado}</TableCell>
-                        <TableCell className="text-xs">{alert.status_chamado}</TableCell>
-                        <TableCell className="text-xs">{formatDate(alert.abertura_chamado)}</TableCell>
-                        <TableCell>
-                          <Tooltip>
-                            <TooltipTrigger asChild>
-                              <span className="truncate block max-w-[120px] text-xs">
-                                {alert.resumo_chamado}
-                              </span>
-                            </TooltipTrigger>
-                            <TooltipContent>
-                              <p className="max-w-md">{alert.resumo_chamado}</p>
-                            </TooltipContent>
-                          </Tooltip>
-                        </TableCell>
-                        <TableCell>
-                          <Badge className={`${getSeverityColor(alert.severidade_chamado)} text-xs`}>
-                            {alert.severidade_chamado}
-                          </Badge>
-                        </TableCell>
-                        <TableCell>
-                          <div className="flex flex-col items-center gap-2">
-                            {escalacao && escalacao.isActive ? (
-                              <div className="space-y-1">
-                                <div className="flex items-center gap-2">
-                                  <Badge variant="secondary" className="text-xs">
-                                    Etapa {escalacao.etapa}/4
-                                  </Badge>
-                                </div>
-                                <div className="flex items-center gap-1">
-                                  <Timer className="h-3 w-3 text-orange-500" />
-                                  <span className="text-xs font-mono">
-                                    {selectedChamadoEscalacao === alert.chamado && isTimerActive 
-                                      ? formatTime(currentTimer)
-                                      : '00:00'
-                                    }
-                                  </span>
-                                </div>
-                                <Button
-                                  variant="outline"
-                                  size="sm"
-                                  onClick={() => {
-                                    setSelectedChamadoEscalacao(alert.chamado);
-                                    setCurrentEtapa(escalacao.etapa);
-                                    setEscalacaoDialogOpen(true);
-                                  }}
-                                  className="h-6 px-2 text-xs w-full"
-                                >
-                                  Gerenciar
-                                </Button>
-                              </div>
-                            ) : (
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                onClick={() => handleIniciarEscalacao(alert.chamado)}
-                                className="h-7 px-2 text-xs"
-                              >
-                                <Play className="h-3 w-3 mr-1" />
-                                Iniciar
-                              </Button>
-                            )}
-                          </div>
-                        </TableCell>
-                        <TableCell>
-                          <Button
-                            variant={isChat ? "default" : "outline"}
-                            size="sm"
-                            onClick={() => !isChat && handleAcknowledgment(alert)}
-                            disabled={isChat}
-                            className={`${isChat
-                              ? 'bg-green-600 text-white hover:bg-green-700'
-                              : 'border-border hover:bg-accent'
-                              } h-7 w-7 p-0`}
-                          >
-                            {isChat ? (
-                              <Check className="h-3 w-3" />
-                            ) : (
-                              <AlertTriangle className="h-3 w-3" />
-                            )}
-                          </Button>
-                        </TableCell>
-                        <TableCell>
-                          <Button
-                            variant={observacao ? "default" : "outline"}
-                            size="sm"
-                            onClick={() => handleOpenObservacao(alert.chamado)}
-                            className={`${observacao
-                              ? 'bg-green-600 text-white hover:bg-green-700'
-                              : 'border-border hover:bg-accent'
-                              } h-7 w-7 p-0`}
-                          >
-                            {observacao ? (
-                              <CheckCircle className="h-3 w-3" />
-                            ) : (
-                              <Edit3 className="h-3 w-3" />
-                            )}
-                          </Button>
-                        </TableCell>
-                      </TableRow>
-                    );
-                  })
-                )}
-              </TableBody>
-            </Table>
-          </div>
-
-          {/* Paginação */}
-          {!loading && sortedAndPaginatedData.length > 0 && totalPages > 1 && (
-            <div className="flex items-center justify-between mt-4 pt-4 border-t border-border">
-              <div className="text-sm text-muted-foreground">
-                Mostrando {((currentPage - 1) * itemsPerPage) + 1} a {Math.min(currentPage * itemsPerPage, filteredData.length)} de {filteredData.length} registros
-                {searchTerm && filteredData.length !== alertData.length && ` (filtrados de ${alertData.length})`}
-              </div>
-              
-              <div className="flex items-center gap-2">
-                <Label htmlFor="itemsPerPage" className="text-sm font-medium whitespace-nowrap">
-                  Por Página:
-                </Label>
-                <Select value={itemsPerPage.toString()} onValueChange={handleItemsPerPageChange}>
-                  <SelectTrigger className="w-20">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="5">5</SelectItem>
-                    <SelectItem value="10">10</SelectItem>
-                    <SelectItem value="15">15</SelectItem>
-                    <SelectItem value="20">20</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <div className="flex items-center gap-2">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => handlePageChange(currentPage - 1)}
-                  disabled={currentPage === 1}
-                  className="h-8 px-3"
-                >
-                  <ChevronLeft className="h-4 w-4 mr-1" />
-                  Anterior
-                </Button>
-
-                <div className="flex items-center gap-1">
-                  {[...Array(Math.min(totalPages, 5))].map((_, index) => {
-                    let page;
-                    if (totalPages <= 5) {
-                      page = index + 1;
-                    } else if (currentPage <= 3) {
-                      page = index + 1;
-                    } else if (currentPage >= totalPages - 2) {
-                      page = totalPages - 4 + index;
-                    } else {
-                      page = currentPage - 2 + index;
-                    }
-
-                    return (
-                      <Button
-                        key={page}
-                        variant={currentPage === page ? "default" : "outline"}
-                        size="sm"
-                        onClick={() => handlePageChange(page)}
-                        className="h-8 w-8 p-0"
-                      >
-                        {page}
-                      </Button>
-                    );
-                  })}
+          <div className="space-y-4">
+            <div className="group relative overflow-hidden rounded-xl bg-card border p-5 
+                shadow-lg hover:shadow-xl transition-all duration-300 hover:-translate-y-1">
+              <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-blue-500 to-cyan-500"></div>
+              <div className="flex items-start gap-4">
+                <div className="p-2 rounded-lg bg-blue-500/10 group-hover:bg-blue-500/20 transition-colors duration-300">
+                  <Info className="h-5 w-5 text-blue-600" />
                 </div>
-
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => handlePageChange(currentPage + 1)}
-                  disabled={currentPage === totalPages}
-                  className="h-8 px-3"
-                >
-                  Próximo
-                  <ChevronRight className="h-4 w-4 ml-1" />
-                </Button>
+                <div className="flex-1">
+                  <p className="text-sm text-muted-foreground font-medium mb-1">Status</p>
+                  <p className="font-bold text-foreground text-lg">{selectedIncident.status_chamado}</p>
+                </div>
               </div>
             </div>
-          )}
 
-          {/* Modals */}
-          <EscalacaoDialog
-            open={escalacaoDialogOpen}
-            onOpenChange={setEscalacaoDialogOpen}
-            selectedChamado={selectedChamadoEscalacao}
-            currentEtapa={currentEtapa}
-            currentTimer={currentTimer}
-            formatTime={formatTime}
-            escalacaoData={escalacaoData}
-            onAvancarEtapa={(obs, op) => avancarEtapa(selectedChamadoEscalacao, obs, op)}
-            onVoltarEtapa={(obs, op) => voltarEtapa(selectedChamadoEscalacao, obs, op)}
-            onFinalizarEscalacao={(obs, op) => finalizarEscalacao(selectedChamadoEscalacao, obs, op)}
-          />
-
-          <ObservacaoDialog
-            open={observacaoDialogOpen}
-            onOpenChange={setObservacaoDialogOpen}
-            selectedChamado={selectedChamadoForEdit}
-            onSave={(obs, op) => saveObservacao(selectedChamadoForEdit, obs, op)}
-            hasTimestamp={hasTimestamp}
-            getTimestamp={getTimestampForChamado}
-            alertData={alertData}
-            initialOperador={observacoesData.get(selectedChamadoForEdit)?.operador || ''}
-            initialObservacao={observacoesData.get(selectedChamadoForEdit)?.observacao || ''}
-          />
-
-          <ChamadoModal
-            open={chamadoModalOpen}
-            onOpenChange={setChamadoModalOpen}
-            selectedIncident={selectedIncident}
-            observacoesData={observacoesData}
-            formatDate={formatDate}
-          />
-        </CardContent>
-      </Card>
-    </TooltipProvider>
+            <div className="group relative overflow-hidden rounded-xl bg-card border p-5 
+                shadow-lg hover:shadow-xl transition-all duration-300 hover:-translate-y-1">
+              <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-red-500 to-orange-500"></div>
+              <div className="flex items-start gap-4">
+                <div className="p-2 rounded-lg bg-red-500/10 group-hover:bg-red-500/20 transition-colors duration-300">
+                  <Flame className="h-5 w-5 text-red-600" />
+                </div>
+                <div className="flex-1">
+                  <p className="text-sm text-muted-foreground font-medium mb-1">Severidade</p>
+                  <p className="font-bold text-foreground text-lg">{selectedIncident.severidade_chamado}</p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
   );
 };
