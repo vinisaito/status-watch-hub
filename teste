@@ -1,223 +1,49 @@
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
-import { Separator } from '@/components/ui/separator';
-import { ScrollArea } from '@/components/ui/scroll-area';
-import { Calendar, User, AlertTriangle, Shield, Wrench, Zap, BookOpen } from 'lucide-react';
+import { useWebSocketTimer } from "@/hooks/useWebSocketTimer";
 
-interface Instruction {
-  id: string;
-  title: string;
-  content: string;
-  priority: 'baixa' | 'media' | 'alta' | 'critica';
-  category: 'operacional' | 'seguranca' | 'manutencao' | 'emergencia';
-  createdAt: string;
-  author: string;
-}
+export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: ActionTableProps) => {
+  const timers = useWebSocketTimer("wss://rsgjd6wsza.execute-api.us-east-1.amazonaws.com/dev/");
 
-// Instruções estáticas pré-definidas no código
-const staticInstructions: Instruction[] = [
-  {
-    id: "inst_001",
-    title: "Procedimento de Escalação Sev 1",
-    content: `1. Identificar se é realmente um incidente Sev 1 (impacto total no serviço)
-2. Acionar imediatamente o gerente de plantão via telefone
-3. Criar ticket no ServiceNow com prioridade P1
-4. Notificar equipes técnicas através do canal #emergencia-sev1
-5. Iniciar bridge de emergência em até 5 minutos
-6. Documentar todas as ações tomadas
-7. Seguir protocolo de comunicação externa se necessário`,
-    priority: "critica",
-    category: "emergencia",
-    createdAt: "2024-01-15T10:00:00Z",
-    author: "Coordenação CIOPS"
-  },
-  {
-    id: "inst_002", 
-    title: "Monitoramento de Sistemas Críticos",
-    content: `• Verificar dashboards principais a cada 15 minutos
-• Monitorar alertas do Zabbix e Grafana continuamente
-• Validar status dos serviços essenciais (Base, Portal, APIs)
-• Confirmar funcionamento dos links de comunicação
-• Verificar capacidade dos servidores (CPU, Memória, Disco)
-• Acompanhar logs de erro em tempo real
-• Executar health checks automatizados de hora em hora`,
-    priority: "alta",
-    category: "operacional", 
-    createdAt: "2024-01-15T10:15:00Z",
-    author: "Equipe Monitoramento"
-  },
-  {
-    id: "inst_003",
-    title: "Política de Segurança - Acessos",
-    content: `IMPORTANTE: Todos os acessos devem seguir as diretrizes de segurança:
+  const formatRemainingTime = (startTime: number, duration: number) => {
+    const now = Math.floor(Date.now() / 1000);
+    const elapsed = now - startTime;
+    const remaining = duration - elapsed;
+    if (remaining <= 0) return "00:00";
 
-• Nunca compartilhar credenciais entre operadores
-• Utilizar sempre autenticação de dois fatores (2FA)  
-• Fazer logoff ao final do turno ou ausência prolongada
-• Reportar imediatamente tentativas de acesso não autorizadas
-• Não utilizar dispositivos pessoais para acessos corporativos
-• Manter senhas seguras (mín. 12 caracteres, alfanumérica)
-• Respeitar princípio do menor privilégio necessário`,
-    priority: "alta",
-    category: "seguranca",
-    createdAt: "2024-01-15T10:30:00Z", 
-    author: "Segurança da Informação"
-  },
-  {
-    id: "inst_004",
-    title: "Passagem de Turno - Checklist",
-    content: `Antes de finalizar o turno, verificar:
-
-□ Status de todos os incidentes em aberto
-□ Alertas pendentes que precisam acompanhamento  
-□ Tarefas de manutenção programadas para próximo turno
-□ Atualizações de sistemas ou patches aplicados
-□ Alterações na infraestrutura realizadas
-□ Contatos importantes ou reuniões agendadas
-□ Backup dos logs e relatórios do período
-□ Transferir conhecimento sobre situações específicas`,
-    priority: "media",
-    category: "operacional",
-    createdAt: "2024-01-15T10:45:00Z",
-    author: "Supervisão CIOPS"
-  },
-  {
-    id: "inst_005",
-    title: "Manutenção Preventiva - Servidores",
-    content: `Procedimentos mensais obrigatórios:
-
-1. Verificar espaço em disco nos servidores críticos
-2. Analisar performance e identificar gargalos
-3. Revisar logs de sistema para erros recorrentes
-4. Testar procedimentos de backup e restore
-5. Validar funcionamento do sistema de monitoramento
-6. Atualizar documentação de procedimentos se necessário
-7. Verificar licenças de software próximas ao vencimento
-8. Confirmar funcionamento dos sistemas redundantes`,
-    priority: "media", 
-    category: "manutencao",
-    createdAt: "2024-01-15T11:00:00Z",
-    author: "Equipe Infraestrutura"
-  },
-  {
-    id: "inst_006",
-    title: "Comunicação de Incidentes",
-    content: `Protocolo de comunicação para incidentes:
-
-SEV 1 (Critical): Comunicação imediata
-• Acionar gerência em até 5 min
-• Notificar direção em até 15 min  
-• Comunicado para clientes em até 30 min
-
-SEV 2 (High): Comunicação urgente  
-• Acionar gerência em até 15 min
-• Avaliar necessidade de comunicado externo
-
-SEV 3/4 (Medium/Low): Comunicação normal
-• Informar gerência no próximo horário comercial
-• Documentar no relatório de turno`,
-    priority: "critica",
-    category: "operacional", 
-    createdAt: "2024-01-15T11:15:00Z",
-    author: "Coordenação CIOPS"
-  }
-];
-
-export const InstructionsSection = () => {
-  const getPriorityColor = (priority: string) => {
-    switch (priority) {
-      case 'critica': return 'bg-red-500 text-white';
-      case 'alta': return 'bg-orange-500 text-white';
-      case 'media': return 'bg-yellow-500 text-black';
-      case 'baixa': return 'bg-green-500 text-white';
-      default: return 'bg-gray-500 text-white';
-    }
+    const min = String(Math.floor(remaining / 60)).padStart(2, "0");
+    const sec = String(remaining % 60).padStart(2, "0");
+    return `${min}:${sec}`;
   };
 
-  const getCategoryColor = (category: string) => {
-    switch (category) {
-      case 'emergencia': return 'bg-red-100 text-red-800 border-red-200 dark:bg-red-900/20 dark:text-red-400';
-      case 'seguranca': return 'bg-orange-100 text-orange-800 border-orange-200 dark:bg-orange-900/20 dark:text-orange-400';
-      case 'manutencao': return 'bg-blue-100 text-blue-800 border-blue-200 dark:bg-blue-900/20 dark:text-blue-400';
-      case 'operacional': return 'bg-green-100 text-green-800 border-green-200 dark:bg-green-900/20 dark:text-green-400';
-      default: return 'bg-gray-100 text-gray-800 border-gray-200 dark:bg-gray-900/20 dark:text-gray-400';
-    }
-  };
 
-  const getCategoryIcon = (category: string) => {
-    switch (category) {
-      case 'emergencia': return <Zap className="h-4 w-4" />;
-      case 'seguranca': return <Shield className="h-4 w-4" />;
-      case 'manutencao': return <Wrench className="h-4 w-4" />;
-      case 'operacional': return <BookOpen className="h-4 w-4" />;
-      default: return <AlertTriangle className="h-4 w-4" />;
-    }
-  };
 
-  return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h2 className="text-2xl font-bold">Instruções Operacionais</h2>
-          <p className="text-muted-foreground">
-            Procedimentos e diretrizes essenciais para operação do CIOPS
-          </p>
-        </div>
-        
-        <div className="flex items-center gap-2 text-sm text-muted-foreground">
-          <BookOpen className="h-4 w-4" />
-          <span>{staticInstructions.length} instruções disponíveis</span>
-        </div>
-      </div>
 
-      {/* Lista de instruções */}
-      <ScrollArea className="h-[600px]">
-        <div className="space-y-4">
-          {staticInstructions.map((instruction) => (
-            <Card key={instruction.id} className="transition-all hover:shadow-md">
-              <CardHeader className="pb-3">
-                <div className="flex items-start justify-between">
-                  <div className="space-y-2">
-                    <CardTitle className="text-lg flex items-center gap-2">
-                      {getCategoryIcon(instruction.category)}
-                      {instruction.title}
-                    </CardTitle>
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <Badge className={getPriorityColor(instruction.priority)}>
-                        {instruction.priority.toUpperCase()}
-                      </Badge>
-                      <Badge variant="outline" className={getCategoryColor(instruction.category)}>
-                        {instruction.category.toUpperCase()}
-                      </Badge>
-                    </div>
-                  </div>
-                </div>
-              </CardHeader>
-              
-              <CardContent className="pt-0">
-                <div className="whitespace-pre-wrap text-sm mb-4 leading-relaxed">
-                  {instruction.content}
-                </div>
-                
-                <Separator className="my-3" />
-                
-                <div className="flex items-center justify-between text-xs text-muted-foreground">
-                  <div className="flex items-center gap-4">
-                    <div className="flex items-center gap-1">
-                      <User className="h-3 w-3" />
-                      {instruction.author}
-                    </div>
-                    <div className="flex items-center gap-1">
-                      <Calendar className="h-3 w-3" />
-                      {new Date(instruction.createdAt).toLocaleDateString('pt-BR')}
-                    </div>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-          ))}
-        </div>
-      </ScrollArea>
-    </div>
-  );
-};
+
+
+
+
+
+
+
+
+
+
+<TableCell>
+  <div className="flex flex-col items-center gap-1">
+    {timers[alert.chamado] ? (
+      <>
+        <span className="text-xs font-mono text-orange-600 flex items-center gap-1">
+          <Timer className="h-3 w-3" />
+          {formatRemainingTime(
+            timers[alert.chamado].startTime,
+            timers[alert.chamado].duration
+          )}
+        </span>
+        <Badge variant="secondary" className="text-xs">
+          {timers[alert.chamado].status}
+        </Badge>
+      </>
+    ) : (
+      <span className="text-xs text-muted-foreground">--:--</span>
+    )}
+  </div>
+</TableCell>
