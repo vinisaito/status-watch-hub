@@ -195,7 +195,7 @@ export const useWebsocketTimers = () => {
   }, [sendMessage]);
 
   const getState = useCallback((chamado: number) => {
-    return sendMessage({ action: 'getState', chamado });
+    return sendMessage({ action: 'getState', chamado});
   }, [sendMessage]);
 
   // Cálculo de tempo restante (sem logs)
