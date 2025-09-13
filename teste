@@ -42,21 +42,17 @@ export const useWebsocketTimers = () => {
 
   const connect = useCallback(() => {
     try {
-      // Verifica se já existe uma conexão
       if (ws.current && ws.current.readyState === WebSocket.CONNECTING) {
-        console.log('WebSocket já está tentando conectar, aguardando...');
         return;
       }
 
       const wsUrl = 'wss://rsgjd6wsza.execute-api.us-east-1.amazonaws.com/dev';
-      console.log(`Tentando conectar no WebSocket: ${wsUrl}`);
-      
+      console.log(`🔌 Tentando conectar no WebSocket: ${wsUrl}`);
+
       ws.current = new WebSocket(wsUrl);
-      
-      // Timeout para conexão
+
       const connectionTimeout = setTimeout(() => {
         if (ws.current && ws.current.readyState === WebSocket.CONNECTING) {
-          console.error('Timeout na conexão WebSocket');
           ws.current.close();
           toast({
             title: "Timeout de Conexão",
@@ -68,13 +64,10 @@ export const useWebsocketTimers = () => {
 
       ws.current.onopen = () => {
         clearTimeout(connectionTimeout);
-        console.log('WebSocket conectado com sucesso');
         setIsConnected(true);
         reconnectAttempts.current = 0;
-        
-        // Recuperar estados dos timers ativos ao reconectar
-        console.log('WebSocket conectado, não há timers conhecidos para recuperar');
-        
+
+        console.log('✅ WebSocket conectado com sucesso');
         toast({
           title: "Conectado",
           description: "WebSocket conectado com sucesso",
@@ -83,76 +76,43 @@ export const useWebsocketTimers = () => {
 
       ws.current.onmessage = (event) => {
         try {
-          console.log('=== MENSAGEM WEBSOCKET RECEBIDA ===');
-          console.log('Raw data:', event.data);
-          
           const message: WebSocketMessage = JSON.parse(event.data);
-          console.log('Mensagem parseada:', JSON.stringify(message, null, 2));
-          
+
           if (message.state && message.chamado) {
-            console.log(`Atualizando timer para chamado ${message.chamado}`);
-            console.log('Estado recebido:', JSON.stringify(message.state, null, 2));
-            
             setTimers(prev => {
+              const oldState = prev.get(message.chamado);
+              const isDifferent = JSON.stringify(oldState) !== JSON.stringify(message.state);
+
+              if (isDifferent) {
+                console.log(`🔔 Novo evento para chamado ${message.chamado}`, message.state);
+              }
+
               const newTimers = new Map(prev);
               newTimers.set(message.chamado, message.state!);
-              
-              console.log('Timers antes da atualização:', Array.from(prev.entries()));
-              console.log('Timers após atualização:', Array.from(newTimers.entries()));
-              
               return newTimers;
-            });
-          } else {
-            console.log('Mensagem não possui state ou chamado válidos:', {
-              hasState: !!message.state,
-              hasChamado: !!message.chamado,
-              message
             });
           }
         } catch (error) {
-          console.error('Erro ao processar mensagem WebSocket:', error);
-          console.error('Dados brutos que causaram erro:', event.data);
+          console.error('❌ Erro ao processar mensagem WebSocket:', error);
         }
       };
 
       ws.current.onclose = (event) => {
         clearTimeout(connectionTimeout);
-        console.error('WebSocket desconectado - Código:', event.code, 'Motivo:', event.reason);
         setIsConnected(false);
 
-        // Log detalhado dos códigos de erro
-        const closeMessages = {
-          1000: 'Fechamento normal',
-          1001: 'Endpoint foi removido',
-          1002: 'Erro de protocolo', 
-          1003: 'Tipo de dados não aceito',
-          1006: 'Fechamento anormal - possível problema de rede ou servidor',
-          1007: 'Dados inconsistentes',
-          1008: 'Violação de política',
-          1009: 'Mensagem muito grande',
-          1010: 'Extensão não negociada',
-          1011: 'Erro interno do servidor',
-          1012: 'Reinicialização do serviço',
-          1013: 'Tente novamente mais tarde',
-          1014: 'Gateway inválido',
-          1015: 'Falha na negociação TLS'
-        };
-        
-        const closeMessage = closeMessages[event.code as keyof typeof closeMessages] || `Código desconhecido: ${event.code}`;
-        console.error(`Motivo do fechamento: ${closeMessage}`);
+        console.warn('⚠️ WebSocket desconectado - Código:', event.code, 'Motivo:', event.reason);
 
-        // Tentar reconectar apenas se não foi um fechamento intencional
         if (event.code !== 1000 && reconnectAttempts.current < maxReconnectAttempts) {
           reconnectAttempts.current++;
           const delay = Math.min(1000 * Math.pow(2, reconnectAttempts.current), 30000);
-          
-          console.log(`Tentando reconectar em ${delay}ms (tentativa ${reconnectAttempts.current}/${maxReconnectAttempts})`);
-          
+          console.log(`🔄 Tentando reconectar em ${delay}ms (tentativa ${reconnectAttempts.current}/${maxReconnectAttempts})`);
+
           reconnectTimeout.current = setTimeout(() => {
             connect();
           }, delay);
         } else if (reconnectAttempts.current >= maxReconnectAttempts) {
-          console.error('Máximo de tentativas de reconexão atingido');
+          console.error('❌ Máximo de tentativas de reconexão atingido');
           toast({
             title: "Falha na Conexão",
             description: "Não foi possível conectar ao WebSocket após várias tentativas",
@@ -161,28 +121,13 @@ export const useWebsocketTimers = () => {
         }
       };
 
-      ws.current.onerror = (error) => {
+      ws.current.onerror = () => {
         clearTimeout(connectionTimeout);
-        console.error('Erro WebSocket detalhado:', {
-          error,
-          readyState: ws.current?.readyState,
-          url: ws.current?.url,
-          protocol: ws.current?.protocol,
-          timestamp: new Date().toISOString()
-        });
-        
-        const readyStateMessages = {
-          [WebSocket.CONNECTING]: 'Conectando',
-          [WebSocket.OPEN]: 'Conectado',
-          [WebSocket.CLOSING]: 'Fechando',
-          [WebSocket.CLOSED]: 'Fechado'
-        };
-        
-        console.error(`Estado da conexão: ${readyStateMessages[ws.current?.readyState || WebSocket.CLOSED]}`);
+        console.error('❌ Erro WebSocket detectado');
       };
 
     } catch (error) {
-      console.error('Erro ao conectar WebSocket:', error);
+      console.error('❌ Erro ao conectar WebSocket:', error);
       toast({
         title: "Erro de Inicialização",
         description: "Erro ao inicializar conexão WebSocket",
@@ -196,28 +141,24 @@ export const useWebsocketTimers = () => {
       clearTimeout(reconnectTimeout.current);
       reconnectTimeout.current = null;
     }
-    
+
     if (ws.current) {
       ws.current.close(1000, 'Desconexão intencional');
       ws.current = null;
     }
-    
+
     setIsConnected(false);
+    console.log('🔌 WebSocket desconectado manualmente');
   }, []);
 
   const sendMessage = useCallback((message: SendMessage) => {
     if (ws.current && ws.current.readyState === WebSocket.OPEN) {
       try {
-        console.log('=== ENVIANDO MENSAGEM WEBSOCKET ===');
-        console.log('Mensagem a ser enviada:', JSON.stringify(message, null, 2));
-        console.log('Estado da conexão:', ws.current.readyState);
-        
         ws.current.send(JSON.stringify(message));
-        
-        console.log('Mensagem enviada com sucesso');
+        console.log(`📤 Mensagem enviada: ${message.action} (chamado ${message.chamado})`);
         return true;
       } catch (error) {
-        console.error('Erro ao enviar mensagem:', error);
+        console.error('❌ Erro ao enviar mensagem:', error);
         toast({
           title: "Erro ao Enviar",
           description: "Não foi possível enviar a mensagem",
@@ -226,7 +167,6 @@ export const useWebsocketTimers = () => {
         return false;
       }
     } else {
-      console.warn('WebSocket não está conectado. ReadyState:', ws.current?.readyState);
       toast({
         title: "Não Conectado",
         description: "WebSocket não está conectado. Tentando reconectar...",
@@ -237,134 +177,79 @@ export const useWebsocketTimers = () => {
     }
   }, [connect]);
 
-  // Funções específicas para cada ação
+  // Ações
   const startTimer = useCallback((chamado: number, level: number, duration: number = 1200) => {
-    return sendMessage({
-      action: 'startTimer',
-      chamado,
-      level,
-      duration
-    });
+    return sendMessage({ action: 'startTimer', chamado, level, duration });
   }, [sendMessage]);
 
   const updateObservacao = useCallback((chamado: number, level: number, observacao: string) => {
-    return sendMessage({
-      action: 'updateObservacao',
-      chamado,
-      level,
-      observacao
-    });
+    return sendMessage({ action: 'updateObservacao', chamado, level, observacao });
   }, [sendMessage]);
 
   const updateOperador = useCallback((chamado: number, operador: string) => {
-    return sendMessage({
-      action: 'updateOperador',
-      chamado,
-      operador
-    });
+    return sendMessage({ action: 'updateOperador', chamado, operador });
   }, [sendMessage]);
 
   const updateStatusFinal = useCallback((chamado: number, statusFinal: string) => {
-    return sendMessage({
-      action: 'updateStatusFinal',
-      chamado,
-      statusFinal
-    });
+    return sendMessage({ action: 'updateStatusFinal', chamado, statusFinal });
   }, [sendMessage]);
 
   const getState = useCallback((chamado: number) => {
-    return sendMessage({
-      action: 'getState',
-      chamado
-    });
+    return sendMessage({ action: 'getState', chamado });
   }, [sendMessage]);
 
-  // Função para calcular tempo restante
+  // Cálculo de tempo restante (sem logs)
   const getRemainingTime = useCallback((chamado: number, level: number): number => {
     const timerState = timers.get(chamado);
-    console.log(`getRemainingTime para chamado ${chamado}, level ${level}:`, timerState);
-    
-    if (!timerState) {
-      console.log(`Nenhum timer encontrado para chamado ${chamado}`);
-      return 0;
-    }
+    if (!timerState) return 0;
 
     const levelPrefix = `level${level}` as 'level1' | 'level2';
     const timerStart = timerState[`${levelPrefix}_timerStart`];
     const duration = timerState[`${levelPrefix}_duration`];
     const status = timerState[`${levelPrefix}_status`];
 
-    console.log(`Timer details para ${chamado}:`, {
-      timerStart,
-      duration,
-      status,
-      levelPrefix
-    });
-
-    if (!timerStart || !duration || status !== 'running') {
-      console.log(`Timer não está rodando para chamado ${chamado}: start=${timerStart}, duration=${duration}, status=${status}`);
-      return 0;
-    }
+    if (!timerStart || !duration || status !== 'running') return 0;
 
     try {
       const startTime = new Date(timerStart).getTime();
       const endTime = startTime + (duration * 1000);
       const now = Date.now();
-      const remaining = Math.max(0, Math.floor((endTime - now) / 1000));
-      
-      console.log(`Cálculo de tempo para ${chamado}:`, {
-        startTime: new Date(startTime).toISOString(),
-        endTime: new Date(endTime).toISOString(),
-        now: new Date(now).toISOString(),
-        remaining
-      });
-      
-      return remaining;
-    } catch (error) {
-      console.error('Erro ao calcular tempo restante:', error);
+      return Math.max(0, Math.floor((endTime - now) / 1000));
+    } catch {
       return 0;
     }
   }, [timers]);
 
-  // Formatar tempo para exibição
   const formatTime = useCallback((seconds: number): string => {
     const hours = Math.floor(seconds / 3600);
     const minutes = Math.floor((seconds % 3600) / 60);
     const secs = seconds % 60;
-    
+
     if (hours > 0) {
       return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
     }
     return `${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
   }, []);
 
-  // Verificar se um timer está ativo
   const isTimerActive = useCallback((chamado: number, level: number): boolean => {
     const timerState = timers.get(chamado);
     if (!timerState) return false;
 
     const levelPrefix = `level${level}` as 'level1' | 'level2';
-    const status = timerState[`${levelPrefix}_status`];
-    
-    return status === 'running';
+    return timerState[`${levelPrefix}_status`] === 'running';
   }, [timers]);
 
-  // Conectar automaticamente quando o hook é montado
+  // Conectar ao montar
   useEffect(() => {
     connect();
-    
-    return () => {
-      disconnect();
-    };
+    return () => disconnect();
   }, [connect, disconnect]);
 
-  // Timer para atualizar o display a cada segundo
+  // Força re-render a cada segundo
   useEffect(() => {
     const interval = setInterval(() => {
-      // Força re-render para atualizar os timers na tela
       setTimers(prev => new Map(prev));
     }, 1000);
-
     return () => clearInterval(interval);
   }, []);
 
