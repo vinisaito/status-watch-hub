@@ -83,20 +83,35 @@ export const useWebsocketTimers = () => {
 
       ws.current.onmessage = (event) => {
         try {
-          console.log('Mensagem WebSocket recebida:', event.data);
+          console.log('=== MENSAGEM WEBSOCKET RECEBIDA ===');
+          console.log('Raw data:', event.data);
+          
           const message: WebSocketMessage = JSON.parse(event.data);
-          console.log('Mensagem processada:', message);
+          console.log('Mensagem parseada:', JSON.stringify(message, null, 2));
           
           if (message.state && message.chamado) {
+            console.log(`Atualizando timer para chamado ${message.chamado}`);
+            console.log('Estado recebido:', JSON.stringify(message.state, null, 2));
+            
             setTimers(prev => {
               const newTimers = new Map(prev);
               newTimers.set(message.chamado, message.state!);
-              console.log('Timer atualizado para chamado:', message.chamado, message.state);
+              
+              console.log('Timers antes da atualização:', Array.from(prev.entries()));
+              console.log('Timers após atualização:', Array.from(newTimers.entries()));
+              
               return newTimers;
+            });
+          } else {
+            console.log('Mensagem não possui state ou chamado válidos:', {
+              hasState: !!message.state,
+              hasChamado: !!message.chamado,
+              message
             });
           }
         } catch (error) {
           console.error('Erro ao processar mensagem WebSocket:', error);
+          console.error('Dados brutos que causaram erro:', event.data);
         }
       };
 
@@ -193,8 +208,13 @@ export const useWebsocketTimers = () => {
   const sendMessage = useCallback((message: SendMessage) => {
     if (ws.current && ws.current.readyState === WebSocket.OPEN) {
       try {
-        console.log('Enviando mensagem:', message);
+        console.log('=== ENVIANDO MENSAGEM WEBSOCKET ===');
+        console.log('Mensagem a ser enviada:', JSON.stringify(message, null, 2));
+        console.log('Estado da conexão:', ws.current.readyState);
+        
         ws.current.send(JSON.stringify(message));
+        
+        console.log('Mensagem enviada com sucesso');
         return true;
       } catch (error) {
         console.error('Erro ao enviar mensagem:', error);
@@ -206,7 +226,7 @@ export const useWebsocketTimers = () => {
         return false;
       }
     } else {
-      console.warn('WebSocket não está conectado');
+      console.warn('WebSocket não está conectado. ReadyState:', ws.current?.readyState);
       toast({
         title: "Não Conectado",
         description: "WebSocket não está conectado. Tentando reconectar...",
