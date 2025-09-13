@@ -42,11 +42,33 @@ export const useWebsocketTimers = () => {
 
   const connect = useCallback(() => {
     try {
-      const wsUrl = 'wss://rsgjd6wsza.execute-api.us-east-1.amazonaws.com';
+      // Verifica se já existe uma conexão
+      if (ws.current && ws.current.readyState === WebSocket.CONNECTING) {
+        console.log('WebSocket já está tentando conectar, aguardando...');
+        return;
+      }
+
+      const wsUrl = 'wss://rsgjd6wsza.execute-api.us-east-1.amazonaws.com/prod';
+      console.log(`Tentando conectar no WebSocket: ${wsUrl}`);
+      
       ws.current = new WebSocket(wsUrl);
+      
+      // Timeout para conexão
+      const connectionTimeout = setTimeout(() => {
+        if (ws.current && ws.current.readyState === WebSocket.CONNECTING) {
+          console.error('Timeout na conexão WebSocket');
+          ws.current.close();
+          toast({
+            title: "Timeout de Conexão",
+            description: "WebSocket demorou muito para conectar. Tentando novamente...",
+            variant: "destructive",
+          });
+        }
+      }, 10000);
 
       ws.current.onopen = () => {
-        console.log('WebSocket conectado');
+        clearTimeout(connectionTimeout);
+        console.log('WebSocket conectado com sucesso');
         setIsConnected(true);
         reconnectAttempts.current = 0;
         
@@ -58,13 +80,15 @@ export const useWebsocketTimers = () => {
 
       ws.current.onmessage = (event) => {
         try {
+          console.log('Mensagem WebSocket recebida:', event.data);
           const message: WebSocketMessage = JSON.parse(event.data);
-          console.log('Mensagem recebida:', message);
+          console.log('Mensagem processada:', message);
           
           if (message.state && message.chamado) {
             setTimers(prev => {
               const newTimers = new Map(prev);
               newTimers.set(message.chamado, message.state!);
+              console.log('Timer atualizado para chamado:', message.chamado, message.state);
               return newTimers;
             });
           }
@@ -74,33 +98,78 @@ export const useWebsocketTimers = () => {
       };
 
       ws.current.onclose = (event) => {
-        console.log('WebSocket desconectado:', event.code, event.reason);
+        clearTimeout(connectionTimeout);
+        console.error('WebSocket desconectado - Código:', event.code, 'Motivo:', event.reason);
         setIsConnected(false);
+
+        // Log detalhado dos códigos de erro
+        const closeMessages = {
+          1000: 'Fechamento normal',
+          1001: 'Endpoint foi removido',
+          1002: 'Erro de protocolo', 
+          1003: 'Tipo de dados não aceito',
+          1006: 'Fechamento anormal - possível problema de rede ou servidor',
+          1007: 'Dados inconsistentes',
+          1008: 'Violação de política',
+          1009: 'Mensagem muito grande',
+          1010: 'Extensão não negociada',
+          1011: 'Erro interno do servidor',
+          1012: 'Reinicialização do serviço',
+          1013: 'Tente novamente mais tarde',
+          1014: 'Gateway inválido',
+          1015: 'Falha na negociação TLS'
+        };
+        
+        const closeMessage = closeMessages[event.code as keyof typeof closeMessages] || `Código desconhecido: ${event.code}`;
+        console.error(`Motivo do fechamento: ${closeMessage}`);
 
         // Tentar reconectar apenas se não foi um fechamento intencional
         if (event.code !== 1000 && reconnectAttempts.current < maxReconnectAttempts) {
           reconnectAttempts.current++;
           const delay = Math.min(1000 * Math.pow(2, reconnectAttempts.current), 30000);
           
-          console.log(`Tentando reconectar em ${delay}ms (tentativa ${reconnectAttempts.current})`);
+          console.log(`Tentando reconectar em ${delay}ms (tentativa ${reconnectAttempts.current}/${maxReconnectAttempts})`);
           
           reconnectTimeout.current = setTimeout(() => {
             connect();
           }, delay);
+        } else if (reconnectAttempts.current >= maxReconnectAttempts) {
+          console.error('Máximo de tentativas de reconexão atingido');
+          toast({
+            title: "Falha na Conexão",
+            description: "Não foi possível conectar ao WebSocket após várias tentativas",
+            variant: "destructive",
+          });
         }
       };
 
       ws.current.onerror = (error) => {
-        console.error('Erro WebSocket:', error);
-        toast({
-          title: "Erro de Conexão",
-          description: "Erro na conexão WebSocket. Tentando reconectar...",
-          variant: "destructive",
+        clearTimeout(connectionTimeout);
+        console.error('Erro WebSocket detalhado:', {
+          error,
+          readyState: ws.current?.readyState,
+          url: ws.current?.url,
+          protocol: ws.current?.protocol,
+          timestamp: new Date().toISOString()
         });
+        
+        const readyStateMessages = {
+          [WebSocket.CONNECTING]: 'Conectando',
+          [WebSocket.OPEN]: 'Conectado',
+          [WebSocket.CLOSING]: 'Fechando',
+          [WebSocket.CLOSED]: 'Fechado'
+        };
+        
+        console.error(`Estado da conexão: ${readyStateMessages[ws.current?.readyState || WebSocket.CLOSED]}`);
       };
 
     } catch (error) {
       console.error('Erro ao conectar WebSocket:', error);
+      toast({
+        title: "Erro de Inicialização",
+        description: "Erro ao inicializar conexão WebSocket",
+        variant: "destructive",
+      });
     }
   }, []);
 
