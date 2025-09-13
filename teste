@@ -1,19 +1,20 @@
-def handle_get_state(event, trace, body):
-    chamado = int(body["chamado"])
-    resp = table.get_item(Key={"chamado": chamado})
-    state = resp.get("Item", {})
-    log(trace, "Estado retornado", chamado=chamado, state=state)
+useEffect(() => {
+  if (isConnected) {
+    console.log("🔌 Conectado, pedindo estado...");
+    getState(10513539); // seu chamado de teste
+  }
+}, [isConnected, getState]);
 
-    # Enviar resposta padronizada só para o cliente que pediu
-    conn_id = event["requestContext"]["connectionId"]
-    payload = {
-        "event": "getState",
-        "chamado": chamado,
-        "state": state
-    }
-    send_to_connection(conn_id, payload)
 
-    return {
-        "statusCode": 200,
-        "body": json.dumps({"msg": "Estado enviado"}, cls=DecimalEncoder)
-    }
+
+
+
+
+
+
+
+ws.current.onmessage = (event) => {
+  const message = JSON.parse(event.data);
+  console.log("📩 Mensagem recebida do WS:", message);
+  ...
+};
