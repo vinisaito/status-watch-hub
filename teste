@@ -33,12 +33,34 @@ export interface SendMessage {
 }
 
 export const useWebsocketTimers = () => {
-  const [timers, setTimers] = useState<Map<number, TimerState>>(new Map());
+  const [timers, setTimers] = useState<Map<number, TimerState>>(() => {
+    // Recuperar timers do localStorage ao inicializar
+    try {
+      const savedTimers = localStorage.getItem('websocket-timers');
+      if (savedTimers) {
+        const parsed = JSON.parse(savedTimers);
+        return new Map(Object.entries(parsed).map(([key, value]) => [parseInt(key), value as TimerState]));
+      }
+    } catch (error) {
+      console.error('Erro ao recuperar timers do localStorage:', error);
+    }
+    return new Map();
+  });
   const [isConnected, setIsConnected] = useState(false);
   const ws = useRef<WebSocket | null>(null);
   const reconnectAttempts = useRef(0);
   const maxReconnectAttempts = 5;
   const reconnectTimeout = useRef<NodeJS.Timeout | null>(null);
+
+  // Salvar timers no localStorage sempre que houver mudança
+  useEffect(() => {
+    try {
+      const timersObject = Object.fromEntries(timers);
+      localStorage.setItem('websocket-timers', JSON.stringify(timersObject));
+    } catch (error) {
+      console.error('Erro ao salvar timers no localStorage:', error);
+    }
+  }, [timers]);
 
   const connect = useCallback(() => {
     try {
@@ -48,7 +70,7 @@ export const useWebsocketTimers = () => {
         return;
       }
 
-      const wsUrl = 'wss://rsgjd6wsza.execute-api.us-east-1.amazonaws.com/prod';
+      const wsUrl = 'wss://rsgjd6wsza.execute-api.us-east-1.amazonaws.com/dev';
       console.log(`Tentando conectar no WebSocket: ${wsUrl}`);
       
       ws.current = new WebSocket(wsUrl);
@@ -71,6 +93,23 @@ export const useWebsocketTimers = () => {
         console.log('WebSocket conectado com sucesso');
         setIsConnected(true);
         reconnectAttempts.current = 0;
+        
+        // Recuperar estados dos timers ativos ao reconectar
+        const activeChamados = Array.from(timers.keys());
+        console.log('Recuperando estados para chamados conhecidos:', activeChamados);
+        
+        // Solicitar estado de cada chamado conhecido após conectar
+        setTimeout(() => {
+          activeChamados.forEach(chamado => {
+            if (ws.current && ws.current.readyState === WebSocket.OPEN) {
+              console.log(`Solicitando estado do chamado ${chamado}`);
+              ws.current.send(JSON.stringify({
+                action: 'getState',
+                chamado: chamado
+              }));
+            }
+          });
+        }, 500); // Pequeno delay para garantir que a conexão está estável
         
         toast({
           title: "Conectado",
@@ -171,7 +210,7 @@ export const useWebsocketTimers = () => {
         variant: "destructive",
       });
     }
-  }, []);
+  }, [timers]);
 
   const disconnect = useCallback(() => {
     if (reconnectTimeout.current) {
