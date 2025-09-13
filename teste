@@ -1,2 +1,18 @@
-< {"event": "getState", "chamado": 10513539, "state": {"level1_timerStart": "2025-09-13T23:04:06.622064+00:00", "chamado": 10513539, "level1_status": "running", "level1_duration": 1200}}
-< {"msg": "Estado enviado"}
+ws.current.onopen = () => {
+  clearTimeout(connectionTimeout);
+  setIsConnected(true);
+  reconnectAttempts.current = 0;
+
+  console.log('✅ WebSocket conectado com sucesso');
+  toast({
+    title: "Conectado",
+    description: "WebSocket conectado com sucesso",
+  });
+
+  // 🔥 Assim que conectar, solicitar o estado atual
+  // Aqui você decide se busca todos os chamados ativos ou só um em específico
+  // Exemplo pedindo o estado de todos os chamados que você conhece:
+  timers.forEach((_, chamado) => {
+    sendMessage({ action: 'getState', chamado });
+  });
+};
