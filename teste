@@ -1,6 +1,10 @@
+// dentro de useWebsocketTimers.ts
+
 useEffect(() => {
-  if (alertData && alertData.length > 0) {
-    // Passa todos os IDs de chamados para o hook
-    setWatchedChamados(alertData.map(a => parseInt(a.chamado)));
+  if (isConnected && watchedChamados.length > 0) {
+    console.log("🔄 Solicitando estados iniciais via getState...");
+    watchedChamados.forEach(chamado => {
+      getState(chamado);
+    });
   }
-}, [alertData, setWatchedChamados]);
+}, [isConnected, watchedChamados, getState]);
