@@ -271,7 +271,7 @@ export const ModernTimerModal: React.FC<ModernTimerModalProps> = ({
               {currentLevel > 1 && (
                 <Button
                   variant="outline"
-                  size="xl"
+                  size="sm"
                 onClick={() => handleAction('previous')}
                 disabled={!observacao.trim() || isProcessing}
                   className="h-16 border-2 hover:border-primary/50 transition-all duration-200"
@@ -287,7 +287,7 @@ export const ModernTimerModal: React.FC<ModernTimerModalProps> = ({
               {/* Finalizar Chamado */}
               <Button
                 variant="destructive"
-                size="xl"
+                size="sm"
                 onClick={() => handleAction('finish')}
                 disabled={!observacao.trim() || isProcessing}
                 className="h-16 md:col-span-1"
@@ -302,7 +302,7 @@ export const ModernTimerModal: React.FC<ModernTimerModalProps> = ({
               {/* Próxima Etapa ou Finalizar (se último nível) */}
               <Button
                 variant={currentLevel >= 5 ? "success" : "timer"}
-                size="xl"
+                size="sm"
                 onClick={() => handleAction('next')}
                 disabled={!observacao.trim() || isProcessing}
                 className="h-16 animate-glow"
