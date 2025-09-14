@@ -1,7 +1,6 @@
-await Promise.all([
-  updateStatusFinal(chamado, levelStatusKey, "finished"),
-  updateObservacao(chamado, currentLevel, trimmedObservacao)
-]);
-
-
-setFinalizado(true);
+{
+  action: "updateStatusFinal",
+  chamado: 123,
+  levelStatusKey: "level1_status",
+  status: "finished"
+}
