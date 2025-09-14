@@ -1,12 +1,15 @@
-const [finalizado, setFinalizado] = useState(chamadoData?.[levelStatusKey] === "finished");
-
-React.useEffect(() => {
-  setFinalizado(chamadoData?.[levelStatusKey] === "finished");
-}, [chamadoData, levelStatusKey]);
-
-
-
-
-
+const levelStatusKey = `level${currentLevel}_status`; // Ex: "level1_status"
 await updateStatusFinal(chamado, levelStatusKey, "finished");
-setFinalizado(true);
+
+
+case 'finish':
+  await Promise.all([
+    updateStatusFinal(chamado, levelStatusKey, "finished"),
+    updateObservacao(chamado, currentLevel, trimmedObservacao)
+  ]);
+  setFinalizado(true);
+  toast({
+    title: "✅ Chamado Finalizado",
+    description: `Chamado ${chamado} foi finalizado com sucesso!`,
+  });
+  break;
