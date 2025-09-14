@@ -1,5 +1,5 @@
 import { useState, useMemo, useCallback } from 'react';
-import { Check, AlertTriangle, Timer, Play, Pause, CheckCircle, Edit3, Search, ChevronLeft, ChevronRight, ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-react';
+import { Check, AlertTriangle, Timer, Play, Pause, CheckCircle, Edit3, Search, ChevronLeft, ChevronRight, ArrowUpDown, ArrowUp, ArrowDown, SkipForward, RotateCcw, Square } from 'lucide-react';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
@@ -9,7 +9,7 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { toast } from '@/hooks/use-toast';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { Textarea } from '@/components/ui/textarea';
 import { useEffect } from 'react';
 
@@ -35,10 +35,16 @@ interface ActionTableProps {
   loading: boolean;
 }
 
-
-
 type SortField = keyof AlertData;
 type SortDirection = 'asc' | 'desc' | null;
+
+const TIMER_STAGES = {
+  1: 'Primeiro Acionamento',
+  2: '1ª Escalação',
+  3: '2ª Escalação', 
+  4: '3ª Escalação',
+  5: '4ª Escalação'
+} as const;
 
 export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: ActionTableProps) => {
   // Estados principais
@@ -54,6 +60,12 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
   const [observacaoText, setObservacaoText] = useState('');
   const [operadorText, setOperadorText] = useState('');
 
+  // Estados do modal de gerenciamento de etapas
+  const [timerManagementDialogOpen, setTimerManagementDialogOpen] = useState(false);
+  const [selectedChamadoForTimer, setSelectedChamadoForTimer] = useState<string>('');
+  const [timerObservacaoText, setTimerObservacaoText] = useState('');
+  const [currentTimerLevel, setCurrentTimerLevel] = useState<number>(1);
+
   // WebSocket
   const {
     timers,
@@ -68,7 +80,6 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
     setWatchedChamados
   } = useWebsocketTimers();
 
-
   // Primeiro registrar os chamados que queremos monitorar
   useEffect(() => {
     if (!alertData || alertData.length === 0) return;
@@ -79,9 +90,6 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
     // Forçar getState imediatamente
     chamadosNum.forEach(chamado => getState(chamado));
   }, [alertData, setWatchedChamados, getState]);
-
-
-
 
   // Estados locais para observações
   const [localObservacoes, setLocalObservacoes] = useState<Map<string, { observacao: string; operador: string }>>(new Map());
@@ -143,10 +151,6 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
       : 'bg-yellow-500 text-yellow-950';
   }, []);
 
-  const truncateText = useCallback((text: string, maxLength: number) => {
-    return text.length > maxLength ? text.substring(0, maxLength) + '...' : text;
-  }, []);
-
   // Handlers para acionamento
   const handleAcknowledgment = useCallback(async (alert: AlertData) => {
     try {
@@ -177,8 +181,8 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
 
     if (success) {
       toast({
-        title: "Timer Iniciado",
-        description: `Timer de ${duration / 60} minutos iniciado para chamado ${chamado}`,
+        title: "Timer Iniciado", 
+        description: `${TIMER_STAGES[level as keyof typeof TIMER_STAGES]} iniciado - ${duration / 60} minutos`,
       });
 
       // Solicitar o estado após iniciar para garantir sincronização
@@ -188,6 +192,95 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
       }, 1000);
     }
   }, [startTimer, getState]);
+
+  // Handlers para o modal de gerenciamento de timer
+  const handleOpenTimerManagement = useCallback((chamado: string) => {
+    const chamadoNum = parseInt(chamado);
+    const timerState = timers.get(chamadoNum);
+    
+    setSelectedChamadoForTimer(chamado);
+    setTimerObservacaoText('');
+    
+    // Determinar o nível atual baseado no estado do timer
+    let level = 1;
+    if (timerState) {
+      if (timerState.level5_status) level = 5;
+      else if (timerState.level4_status) level = 4;
+      else if (timerState.level3_status) level = 3;
+      else if (timerState.level2_status) level = 2;
+      else if (timerState.level1_status) level = 1;
+    }
+    
+    setCurrentTimerLevel(level);
+    setTimerManagementDialogOpen(true);
+  }, [timers]);
+
+  const handleTimerAction = useCallback((action: 'next' | 'back' | 'finish') => {
+    if (!selectedChamadoForTimer || !timerObservacaoText.trim()) {
+      toast({
+        title: "Observação obrigatória",
+        description: "Você deve preencher o campo de observações para continuar.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    const chamadoNum = parseInt(selectedChamadoForTimer);
+    
+    // Salvar observação atual
+    updateObservacao(chamadoNum, currentTimerLevel, timerObservacaoText.trim());
+    
+    switch (action) {
+      case 'next':
+        if (currentTimerLevel < 5) {
+          const nextLevel = currentTimerLevel + 1;
+          handleStartTimer(selectedChamadoForTimer, nextLevel);
+          setCurrentTimerLevel(nextLevel);
+          
+          toast({
+            title: "Etapa Avançada",
+            description: `Avançado para ${TIMER_STAGES[nextLevel as keyof typeof TIMER_STAGES]}`,
+          });
+        } else {
+          toast({
+            title: "Última Etapa",
+            description: "Você já está na última etapa. Use 'Finalizar' para concluir.",
+            variant: "destructive",
+          });
+        }
+        break;
+        
+      case 'back':
+        if (currentTimerLevel > 1) {
+          const prevLevel = currentTimerLevel - 1;
+          handleStartTimer(selectedChamadoForTimer, prevLevel);
+          setCurrentTimerLevel(prevLevel);
+          
+          toast({
+            title: "Etapa Retrocedida",
+            description: `Retornado para ${TIMER_STAGES[prevLevel as keyof typeof TIMER_STAGES]}`,
+          });
+        } else {
+          toast({
+            title: "Primeira Etapa",
+            description: "Você já está na primeira etapa.",
+            variant: "destructive",
+          });
+        }
+        break;
+        
+      case 'finish':
+        // Implementar lógica para finalizar o timer
+        toast({
+          title: "Timer Finalizado",
+          description: `Chamado ${selectedChamadoForTimer} foi finalizado com sucesso`,
+        });
+        break;
+    }
+    
+    setTimerManagementDialogOpen(false);
+    setTimerObservacaoText('');
+  }, [selectedChamadoForTimer, timerObservacaoText, currentTimerLevel, updateObservacao, handleStartTimer]);
 
   // Handlers para observação
   const handleOpenObservacao = useCallback((chamado: string) => {
@@ -430,6 +523,18 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
                     const remainingTime = getRemainingTime(chamadoNum, 1);
                     const timerState = timers.get(chamadoNum);
 
+                    // Determinar etapa atual
+                    let currentStage = 'Primeiro Acionamento';
+                    let currentLevel = 1;
+                    
+                    if (timerState) {
+                      if (timerState.level5_status) { currentStage = TIMER_STAGES[5]; currentLevel = 5; }
+                      else if (timerState.level4_status) { currentStage = TIMER_STAGES[4]; currentLevel = 4; }
+                      else if (timerState.level3_status) { currentStage = TIMER_STAGES[3]; currentLevel = 3; }
+                      else if (timerState.level2_status) { currentStage = TIMER_STAGES[2]; currentLevel = 2; }
+                      else if (timerState.level1_status) { currentStage = TIMER_STAGES[1]; currentLevel = 1; }
+                    }
+
                     return (
                       <TableRow key={alert.id} className="border-border hover:bg-accent transition-colors">
                         <TableCell className="font-medium">
@@ -480,7 +585,7 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
                                 <div className="flex items-center gap-2 justify-center">
                                   <Timer className="h-4 w-4 text-timer-active animate-pulse" />
                                   <Badge className="timer-active text-xs font-semibold px-3 py-1">
-                                    Level 1 • {timerState.level1_status?.toUpperCase()}
+                                    {currentStage}
                                   </Badge>
                                 </div>
                                 <div className="text-2xl font-mono font-black text-timer-active tracking-wide">
@@ -491,9 +596,9 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
                                     👤 {timerState.operador}
                                   </div>
                                 )}
-                                {timerState.level1_observacao && (
+                                {timerState[`level${currentLevel}_observacao` as keyof typeof timerState] && (
                                   <div className="text-xs text-muted-foreground max-w-[200px] truncate">
-                                    📝 {timerState.level1_observacao}
+                                    📝 {String(timerState[`level${currentLevel}_observacao` as keyof typeof timerState])}
                                   </div>
                                 )}
                                 {remainingTime <= 300 && remainingTime > 0 && (
@@ -501,6 +606,14 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
                                     ⚠️ Últimos 5 min
                                   </Badge>
                                 )}
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() => handleOpenTimerManagement(alert.chamado)}
+                                  className="h-6 px-2 text-xs"
+                                >
+                                  Gerenciar
+                                </Button>
                               </div>
                             ) : (
                               <div className="flex flex-col items-center gap-2">
@@ -655,6 +768,81 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
               </div>
             </div>
           )}
+
+          {/* Modal de Gerenciamento de Timer */}
+          <Dialog open={timerManagementDialogOpen} onOpenChange={setTimerManagementDialogOpen}>
+            <DialogContent className="sm:max-w-lg border-border bg-card">
+              <DialogHeader className="text-left">
+                <DialogTitle className="text-xl gradient-primary bg-clip-text text-transparent">
+                  ⏱️ Gerenciar Timer - Chamado {selectedChamadoForTimer}
+                </DialogTitle>
+                <DialogDescription className="text-muted-foreground">
+                  Etapa atual: <strong>{TIMER_STAGES[currentTimerLevel as keyof typeof TIMER_STAGES]}</strong>
+                </DialogDescription>
+              </DialogHeader>
+              <div className="space-y-6 pt-2">
+                <div className="space-y-2">
+                  <Label htmlFor="timer-observacao" className="text-sm font-semibold text-foreground">
+                    📄 Observações (Obrigatório)
+                  </Label>
+                  <Textarea
+                    id="timer-observacao"
+                    value={timerObservacaoText}
+                    onChange={(e) => setTimerObservacaoText(e.target.value)}
+                    placeholder="Descreva as ações tomadas, status atual, próximos passos..."
+                    rows={4}
+                    className="border-border focus:border-timer-active transition-colors resize-none"
+                    required
+                  />
+                  <div className="text-xs text-muted-foreground">
+                    {timerObservacaoText.length}/500 caracteres
+                  </div>
+                </div>
+              </div>
+              <DialogFooter className="flex flex-col gap-3 pt-4 border-t border-border">
+                <div className="flex justify-between gap-2 w-full">
+                  <Button
+                    variant="outline"
+                    onClick={() => handleTimerAction('back')}
+                    disabled={currentTimerLevel <= 1 || !timerObservacaoText.trim()}
+                    className="flex-1"
+                  >
+                    <RotateCcw className="h-4 w-4 mr-2" />
+                    Voltar Etapa
+                  </Button>
+                  
+                  <Button
+                    variant="outline"
+                    onClick={() => handleTimerAction('next')}
+                    disabled={currentTimerLevel >= 5 || !timerObservacaoText.trim()}
+                    className="flex-1"
+                  >
+                    <SkipForward className="h-4 w-4 mr-2" />
+                    Passar Etapa
+                  </Button>
+                </div>
+                
+                <div className="flex justify-between gap-2 w-full">
+                  <Button
+                    variant="outline"
+                    onClick={() => setTimerManagementDialogOpen(false)}
+                    className="flex-1"
+                  >
+                    Cancelar
+                  </Button>
+                  
+                  <Button
+                    onClick={() => handleTimerAction('finish')}
+                    disabled={!timerObservacaoText.trim()}
+                    className="flex-1 bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                  >
+                    <Square className="h-4 w-4 mr-2" />
+                    Finalizar Timer
+                  </Button>
+                </div>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
 
           {/* Modal de Observação */}
           <Dialog open={observacaoDialogOpen} onOpenChange={setObservacaoDialogOpen}>
