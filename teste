@@ -1,850 +1,306 @@
-import { useState, useMemo, useCallback } from 'react';
-import { Check, AlertTriangle, Timer, Play, Pause, CheckCircle, Edit3, Search, ChevronLeft, ChevronRight, ArrowUpDown, ArrowUp, ArrowDown, Settings } from 'lucide-react';
-import { Card, CardContent, CardHeader } from '@/components/ui/card';
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { toast } from '@/hooks/use-toast';
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
+import { useState, useCallback } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
+import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
-import { useEffect } from 'react';
+import { Label } from '@/components/ui/label';
+import { Badge } from '@/components/ui/badge';
+import { AlertTriangle, CheckCircle, ArrowRight, ArrowLeft, Clock, Users, Shield } from 'lucide-react';
+import { toast } from '@/hooks/use-toast';
 
-// WebSocket hook
-import { useWebsocketTimers } from "@/hooks/useWebsocketTimers";
-
-// Timer Management Modal
-import { TimerManagementModal } from '@/components/TimerManagementModal';
-
-interface AlertData {
-  id: string;
+interface TimerManagementModalProps {
+  isOpen: boolean;
+  onClose: () => void;
   chamado: string;
-  tipo_chamado: string;
-  grupo_chamado: string;
-  status_chamado: string;
-  abertura_chamado: string;
-  resumo_chamado: string;
-  severidade_chamado: string;
-  acionado: string;
-  chat: boolean;
+  currentLevel: number;
+  remainingTime: number;
+  formatTime: (seconds: number) => string;
+  onNextLevel: (chamado: string, level: number, observacao: string) => void;
+  onPreviousLevel: (chamado: string, level: number, observacao: string) => void;
+  onFinalize: (chamado: string, observacao: string) => void;
 }
 
-interface ActionTableProps {
-  alertData: AlertData[];
-  onUpdateAcknowledgment: (alertId: string, acknowledged: boolean) => void;
-  loading: boolean;
-}
-
-type SortField = keyof AlertData;
-type SortDirection = 'asc' | 'desc' | null;
-
-// Informações dos níveis de escalação
-const LEVEL_NAMES = {
-  1: "Primeiro Acionamento",
-  2: "1ª Escalação", 
-  3: "2ª Escalação",
-  4: "3ª Escalação",
-  5: "4ª Escalação"
+const LEVEL_INFO = {
+  1: {
+    title: "Primeiro Acionamento",
+    description: "Verificação inicial e primeiros procedimentos",
+    icon: Clock,
+    color: "bg-blue-500",
+    nextLevel: "1ª Escalação"
+  },
+  2: {
+    title: "1ª Escalação",
+    description: "Primeiro nível de escalação técnica",
+    icon: Users,
+    color: "bg-orange-500",
+    nextLevel: "2ª Escalação"
+  },
+  3: {
+    title: "2ª Escalação", 
+    description: "Segundo nível de escalação técnica",
+    icon: Shield,
+    color: "bg-red-500",
+    nextLevel: "3ª Escalação"
+  },
+  4: {
+    title: "3ª Escalação",
+    description: "Terceiro nível de escalação técnica",
+    icon: AlertTriangle,
+    color: "bg-purple-500",
+    nextLevel: "4ª Escalação"
+  },
+  5: {
+    title: "4ª Escalação",
+    description: "Quarto nível de escalação técnica",
+    icon: AlertTriangle,
+    color: "bg-red-700",
+    nextLevel: "Finalização"
+  }
 };
 
-export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: ActionTableProps) => {
-  // Estados principais
-  const [currentPage, setCurrentPage] = useState(1);
-  const [searchTerm, setSearchTerm] = useState('');
-  const [itemsPerPage, setItemsPerPage] = useState<number>(5);
-  const [sortField, setSortField] = useState<SortField>('chamado');
-  const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
+export const TimerManagementModal = ({
+  isOpen,
+  onClose,
+  chamado,
+  currentLevel,
+  remainingTime,
+  formatTime,
+  onNextLevel,
+  onPreviousLevel,
+  onFinalize
+}: TimerManagementModalProps) => {
+  const [observacao, setObservacao] = useState('');
+  const [isProcessing, setIsProcessing] = useState(false);
 
-  // Estados dos modais
-  const [observacaoDialogOpen, setObservacaoDialogOpen] = useState(false);
-  const [timerManagementOpen, setTimerManagementOpen] = useState(false);
-  const [selectedChamadoForEdit, setSelectedChamadoForEdit] = useState<string>('');
-  const [selectedChamadoForTimer, setSelectedChamadoForTimer] = useState<string>('');
-  const [observacaoText, setObservacaoText] = useState('');
-  const [operadorText, setOperadorText] = useState('');
+  const levelInfo = LEVEL_INFO[currentLevel as keyof typeof LEVEL_INFO];
+  const IconComponent = levelInfo?.icon || Clock;
 
-  // WebSocket
-  const {
-    timers,
-    isConnected,
-    startTimer,
-    updateObservacao,
-    updateOperador,
-    updateStatusFinal,
-    getRemainingTime,
-    formatTime,
-    isTimerActive,
-    getState,
-    setWatchedChamados
-  } = useWebsocketTimers();
-
-  // Primeiro registrar os chamados que queremos monitorar
-  useEffect(() => {
-    if (!alertData || alertData.length === 0) return;
-
-    const chamadosNum = alertData.map(a => parseInt(a.chamado));
-    setWatchedChamados(chamadosNum);
-
-    // Forçar getState imediatamente
-    chamadosNum.forEach(chamado => getState(chamado));
-  }, [alertData, setWatchedChamados, getState]);
-
-  // Estados locais para observações
-  const [localObservacoes, setLocalObservacoes] = useState<Map<string, { observacao: string; operador: string }>>(new Map());
-
-  // Funções utilitárias
-  const formatDate = useCallback((dateString: string) => {
-    if (!dateString || dateString === '' || dateString === 'null' || dateString === 'undefined') {
-      return '-';
-    }
-
-    try {
-      let date: Date;
-      const cleanString = String(dateString).trim();
-
-      if (/^\d{13}$/.test(cleanString)) {
-        date = new Date(parseInt(cleanString));
-      } else if (/^\d{10}$/.test(cleanString)) {
-        date = new Date(parseInt(cleanString) * 1000);
-      } else if (/^\d{2}\/\d{2}\/\d{4}/.test(cleanString)) {
-        const parts = cleanString.split(' ');
-        const datePart = parts[0];
-        const timePart = parts[1] || '00:00:00';
-        const [day, month, year] = datePart.split('/');
-        const [hour, minute, second] = timePart.split(':');
-
-        date = new Date(
-          parseInt(year),
-          parseInt(month) - 1,
-          parseInt(day),
-          parseInt(hour || '0'),
-          parseInt(minute || '0'),
-          parseInt(second || '0')
-        );
-      } else {
-        date = new Date(cleanString);
-      }
-
-      if (isNaN(date.getTime())) return cleanString;
-
-      const year = date.getFullYear();
-      if (year < 1900 || year > 2100) return cleanString;
-
-      return date.toLocaleString('pt-BR', {
-        day: '2-digit',
-        month: '2-digit',
-        year: 'numeric',
-        hour: '2-digit',
-        minute: '2-digit',
-        second: '2-digit',
-      });
-    } catch (error) {
-      return String(dateString);
-    }
-  }, []);
-
-  const getSeverityColor = useCallback((severity: string) => {
-    return severity.includes('4')
-      ? 'bg-destructive text-destructive-foreground'
-      : 'bg-yellow-500 text-yellow-950';
-  }, []);
-
-  // Função para obter o nível atual ativo do timer
-  const getCurrentActiveLevel = useCallback((chamado: number) => {
-    const timerState = timers.get(chamado);
-    if (!timerState) return null;
-    
-    // Verificar levels de 1 a 5 para encontrar o ativo
-    for (let level = 1; level <= 5; level++) {
-      const statusKey = `level${level}_status` as keyof typeof timerState;
-      if (timerState[statusKey] === 'running') {
-        return level;
-      }
-    }
-    return null;
-  }, [timers]);
-
-  // Handlers para acionamento
-  const handleAcknowledgment = useCallback(async (alert: AlertData) => {
-    try {
+  const handleAction = useCallback(async (action: 'next' | 'previous' | 'finish') => {
+    if (!observacao.trim()) {
       toast({
-        title: "Alerta acionado",
-        description: `Chamado ${alert.chamado} foi acionado com sucesso`,
-      });
-
-      onUpdateAcknowledgment(alert.id, true);
-    } catch (error: any) {
-      toast({
-        title: "Erro ao acionar alerta",
-        description: error.message || "Não foi possível concluir o acionamento",
+        title: "Observação Obrigatória",
+        description: "É obrigatório preencher o campo de observações para continuar",
         variant: "destructive",
       });
+      return;
     }
-  }, [onUpdateAcknowledgment]);
 
-  // Handlers para timer
-  const handleStartTimer = useCallback((chamado: string) => {
-    const chamadoNum = parseInt(chamado);
-    const duration = 1200; // 20 minutos em segundos
-
-    console.log(`Iniciando Primeiro Acionamento para chamado ${chamado}`);
-
-    const success = startTimer(chamadoNum, 1, duration);
-
-    if (success) {
+    if (observacao.trim().length < 10) {
       toast({
-        title: "Primeiro Acionamento Iniciado",
-        description: `Timer de 20 minutos iniciado para chamado ${chamado}`,
+        title: "Observação Muito Curta",
+        description: "A observação deve ter pelo menos 10 caracteres",
+        variant: "destructive",
       });
-
-      setTimeout(() => {
-        getState(chamadoNum);
-      }, 1000);
-    }
-  }, [startTimer, getState]);
-
-  // Handlers para gerenciamento de etapas
-  const handleOpenTimerManagement = useCallback((chamado: string) => {
-    setSelectedChamadoForTimer(chamado);
-    setTimerManagementOpen(true);
-  }, []);
-
-  const handleNextLevel = useCallback((chamado: string, nextLevel: number, observacao: string) => {
-    const chamadoNum = parseInt(chamado);
-    const duration = 1200; // 20 minutos para cada etapa
-    
-    // Primeiro salvar a observação do nível atual
-    const currentLevel = getCurrentActiveLevel(chamadoNum);
-    if (currentLevel) {
-      updateObservacao(chamadoNum, currentLevel, observacao);
-    }
-    
-    // Iniciar o próximo nível
-    const success = startTimer(chamadoNum, nextLevel, duration);
-    
-    if (success) {
-      const levelName = LEVEL_NAMES[nextLevel as keyof typeof LEVEL_NAMES] || `Nível ${nextLevel}`;
-      toast({
-        title: `${levelName} Iniciado`,
-        description: `Timer de 20 minutos iniciado para ${levelName}`,
-      });
-      
-      setTimeout(() => {
-        getState(chamadoNum);
-      }, 1000);
-    }
-  }, [startTimer, updateObservacao, getState, getCurrentActiveLevel]);
-
-  const handlePreviousLevel = useCallback((chamado: string, previousLevel: number, observacao: string) => {
-    const chamadoNum = parseInt(chamado);
-    
-    // Salvar observação e voltar para o nível anterior
-    const currentLevel = getCurrentActiveLevel(chamadoNum);
-    if (currentLevel) {
-      updateObservacao(chamadoNum, currentLevel, observacao);
-    }
-    
-    // Iniciar o nível anterior
-    const duration = 1200; // 20 minutos
-    const success = startTimer(chamadoNum, previousLevel, duration);
-    
-    if (success) {
-      const levelName = LEVEL_NAMES[previousLevel as keyof typeof LEVEL_NAMES] || `Nível ${previousLevel}`;
-      toast({
-        title: `Retornando para ${levelName}`,
-        description: `Timer reiniciado para ${levelName}`,
-      });
-      
-      setTimeout(() => {
-        getState(chamadoNum);
-      }, 1000);
-    }
-  }, [startTimer, updateObservacao, getState, getCurrentActiveLevel]);
-
-  const handleFinalize = useCallback((chamado: string, observacao: string) => {
-    const chamadoNum = parseInt(chamado);
-    
-    // Salvar observação final e finalizar
-    const currentLevel = getCurrentActiveLevel(chamadoNum);
-    if (currentLevel) {
-      updateObservacao(chamadoNum, currentLevel, observacao);
-    }
-    
-    updateStatusFinal(chamadoNum, 'finalizado');
-    
-    toast({
-      title: "Chamado Finalizado",
-      description: `Chamado ${chamado} foi finalizado com sucesso`,
-    });
-    
-    setTimeout(() => {
-      getState(chamadoNum);
-    }, 1000);
-  }, [updateObservacao, updateStatusFinal, getState, getCurrentActiveLevel]);
-
-  // Handlers para observação
-  const handleOpenObservacao = useCallback((chamado: string) => {
-    setSelectedChamadoForEdit(chamado);
-    const existing = localObservacoes.get(chamado);
-    setObservacaoText(existing?.observacao || '');
-    setOperadorText(existing?.operador || '');
-    setObservacaoDialogOpen(true);
-  }, [localObservacoes]);
-
-  const handleSaveObservacao = useCallback(() => {
-    if (!selectedChamadoForEdit) return;
-
-    const chamadoNum = parseInt(selectedChamadoForEdit);
-
-    if (observacaoText.trim()) {
-      updateObservacao(chamadoNum, 1, observacaoText.trim());
+      return;
     }
 
-    if (operadorText.trim()) {
-      updateOperador(chamadoNum, operadorText.trim());
-    }
+    setIsProcessing(true);
 
-    setLocalObservacoes(prev => {
-      const newMap = new Map(prev);
-      newMap.set(selectedChamadoForEdit, {
-        observacao: observacaoText.trim(),
-        operador: operadorText.trim()
-      });
-      return newMap;
-    });
-
-    setObservacaoDialogOpen(false);
-    setObservacaoText('');
-    setOperadorText('');
-
-    toast({
-      title: "Observação Salva",
-      description: `Observação do chamado ${selectedChamadoForEdit} foi salva`,
-    });
-  }, [selectedChamadoForEdit, observacaoText, operadorText, updateObservacao, updateOperador]);
-
-  // Handlers para ordenação
-  const handleSort = useCallback((field: SortField) => {
-    if (sortField === field) {
-      if (sortDirection === 'asc') {
-        setSortDirection('desc');
-      } else if (sortDirection === 'desc') {
-        setSortDirection(null);
-        setSortField('chamado');
-      } else {
-        setSortDirection('asc');
+    try {
+      switch (action) {
+        case 'next':
+          if (currentLevel >= 5) {
+            onFinalize(chamado, observacao.trim());
+          } else {
+            onNextLevel(chamado, currentLevel + 1, observacao.trim());
+          }
+          break;
+        case 'previous':
+          if (currentLevel > 1) {
+            onPreviousLevel(chamado, currentLevel - 1, observacao.trim());
+          }
+          break;
+        case 'finish':
+          onFinalize(chamado, observacao.trim());
+          break;
       }
-    } else {
-      setSortField(field);
-      setSortDirection('asc');
+      
+      setObservacao('');
+      onClose();
+    } finally {
+      setIsProcessing(false);
     }
-  }, [sortField, sortDirection]);
+  }, [observacao, currentLevel, chamado, onNextLevel, onPreviousLevel, onFinalize, onClose]);
 
-  const getSortIcon = useCallback((field: SortField) => {
-    if (sortField !== field) {
-      return <ArrowUpDown className="h-4 w-4 ml-1 opacity-50" />;
-    }
-    if (sortDirection === 'asc') {
-      return <ArrowUp className="h-4 w-4 ml-1" />;
-    }
-    if (sortDirection === 'desc') {
-      return <ArrowDown className="h-4 w-4 ml-1" />;
-    }
-    return <ArrowUpDown className="h-4 w-4 ml-1 opacity-50" />;
-  }, [sortField, sortDirection]);
+  const getTimeStatusColor = () => {
+    if (remainingTime <= 300) return "text-red-500"; // Últimos 5 minutos
+    if (remainingTime <= 600) return "text-orange-500"; // Últimos 10 minutos
+    return "text-green-500";
+  };
 
-  // Dados filtrados e paginados
-  const filteredData = useMemo(() => {
-    if (!searchTerm.trim()) return alertData;
+  const getTimeStatusBadge = () => {
+    if (remainingTime <= 300) return { text: "CRÍTICO", variant: "destructive" as const };
+    if (remainingTime <= 600) return { text: "ATENÇÃO", variant: "default" as const };
+    return { text: "NORMAL", variant: "secondary" as const };
+  };
 
-    const searchLower = searchTerm.toLowerCase().trim();
-    return alertData.filter(alert =>
-      Object.values(alert).some(value =>
-        String(value).toLowerCase().includes(searchLower)
-      )
-    );
-  }, [alertData, searchTerm]);
-
-  const { sortedAndPaginatedData, totalPages } = useMemo(() => {
-    let sortedData = [...filteredData];
-
-    if (sortField && sortDirection) {
-      sortedData.sort((a, b) => {
-        let aValue: any = a[sortField];
-        let bValue: any = b[sortField];
-
-        if (sortField === 'chamado') {
-          aValue = parseInt(a.chamado) || 0;
-          bValue = parseInt(b.chamado) || 0;
-        } else if (sortField === 'abertura_chamado') {
-          aValue = new Date(a.abertura_chamado).getTime() || 0;
-          bValue = new Date(b.abertura_chamado).getTime() || 0;
-        } else {
-          aValue = String(aValue).toLowerCase();
-          bValue = String(bValue).toLowerCase();
-        }
-
-        if (aValue < bValue) return sortDirection === 'asc' ? -1 : 1;
-        if (aValue > bValue) return sortDirection === 'asc' ? 1 : -1;
-        return 0;
-      });
-    } else {
-      sortedData.sort((a, b) => {
-        const chamadoA = parseInt(a.chamado) || 0;
-        const chamadoB = parseInt(b.chamado) || 0;
-        return chamadoB - chamadoA;
-      });
-    }
-
-    const startIndex = (currentPage - 1) * itemsPerPage;
-    const endIndex = startIndex + itemsPerPage;
-    const paginatedData = sortedData.slice(startIndex, endIndex);
-    const totalPages = Math.ceil(sortedData.length / itemsPerPage);
-
-    return { sortedAndPaginatedData: paginatedData, totalPages };
-  }, [filteredData, currentPage, itemsPerPage, sortField, sortDirection]);
-
-  // Handlers para paginação
-  const handleItemsPerPageChange = useCallback((value: string) => {
-    const num = parseInt(value, 10);
-    setItemsPerPage(num);
-    setCurrentPage(1);
-  }, []);
-
-  const handlePageChange = useCallback((page: number) => {
-    setCurrentPage(page);
-  }, []);
+  const timeStatus = getTimeStatusBadge();
 
   return (
-    <TooltipProvider>
-      <Card className="bg-card border-border">
-        <CardHeader>
-          {/* Status da Conexão WebSocket */}
-          <div className="flex items-center justify-between mb-4">
-            <div className="flex items-center gap-3 px-4 py-2 rounded-lg border bg-card">
-              <div className={`relative h-4 w-4 rounded-full ${isConnected ? 'bg-websocket-connected animate-pulse-slow' : 'bg-websocket-disconnected'}`}>
-                {isConnected && (
-                  <div className="absolute inset-0 rounded-full bg-websocket-connected animate-ping opacity-30" />
-                )}
+    <Dialog open={isOpen} onOpenChange={onClose}>
+      <DialogContent className="sm:max-w-2xl border-border bg-card max-h-[90vh] overflow-y-auto">
+        <DialogHeader className="text-left">
+          <div className="flex items-center gap-3 mb-2">
+            <div className={`p-3 rounded-lg ${levelInfo?.color || 'bg-gray-500'} text-white`}>
+              <IconComponent className="h-6 w-6" />
+            </div>
+            <div>
+              <DialogTitle className="text-2xl font-bold gradient-primary bg-clip-text text-transparent">
+                {levelInfo?.title || `Nível ${currentLevel}`}
+              </DialogTitle>
+              <DialogDescription className="text-muted-foreground text-base">
+                Chamado {chamado} • {levelInfo?.description || 'Gerenciamento de escalação'}
+              </DialogDescription>
+            </div>
+          </div>
+
+          {/* Status do Timer */}
+          <div className="flex items-center justify-between p-4 rounded-lg bg-accent/50 border border-border">
+            <div className="flex items-center gap-3">
+              <Clock className={`h-5 w-5 ${getTimeStatusColor()}`} />
+              <div>
+                <div className="text-sm font-medium text-foreground">Tempo Restante</div>
+                <div className={`text-2xl font-mono font-bold ${getTimeStatusColor()}`}>
+                  {formatTime(remainingTime)}
+                </div>
               </div>
-              <span className={`text-sm font-medium ${isConnected ? 'text-websocket-connected' : 'text-websocket-disconnected'}`}>
-                WebSocket: {isConnected ? 'Conectado e Sincronizado' : 'Desconectado - Tentando Reconectar...'}
-              </span>
-              {!isConnected && (
-                <div className="h-3 w-3 border-2 border-websocket-disconnected border-t-transparent rounded-full animate-spin" />
-              )}
+            </div>
+            <Badge variant={timeStatus.variant} className="text-sm font-semibold">
+              {timeStatus.text}
+            </Badge>
+          </div>
+
+          {/* Progress Indicator */}
+          <div className="space-y-3">
+            <div className="text-sm font-medium text-foreground">Progresso da Escalação</div>
+            <div className="flex items-center gap-2">
+              {[1, 2, 3, 4, 5].map((level) => (
+                <div key={level} className="flex items-center">
+                  <div className={`
+                    w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold
+                    ${level === currentLevel 
+                      ? 'bg-primary text-primary-foreground ring-2 ring-primary ring-offset-2' 
+                      : level < currentLevel
+                        ? 'bg-green-500 text-white'
+                        : 'bg-muted text-muted-foreground'
+                    }
+                  `}>
+                    {level < currentLevel ? <CheckCircle className="h-4 w-4" /> : level}
+                  </div>
+                  {level < 5 && (
+                    <div className={`w-6 h-0.5 mx-1 ${level < currentLevel ? 'bg-green-500' : 'bg-border'}`} />
+                  )}
+                </div>
+              ))}
             </div>
             <div className="text-xs text-muted-foreground">
-              URL: wss://rsgjd6wsza.execute-api.us-east-1.amazonaws.com
+              Nível {currentLevel} de 5 • {levelInfo?.title}
             </div>
           </div>
+        </DialogHeader>
 
-          {/* Campo de Pesquisa */}
-          <div className="relative mb-4">
-            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-            <Input
-              placeholder="Pesquisar por chamado, tipo, grupo, status, título..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              className="pl-10"
+        <div className="space-y-6 pt-4">
+          {/* Campo de Observação */}
+          <div className="space-y-3">
+            <Label htmlFor="observacao" className="text-sm font-semibold text-foreground flex items-center gap-2">
+              📝 Observações Obrigatórias
+              <Badge variant="destructive" className="text-xs">OBRIGATÓRIO</Badge>
+            </Label>
+            <Textarea
+              id="observacao"
+              value={observacao}
+              onChange={(e) => setObservacao(e.target.value)}
+              placeholder={`Descreva as ações realizadas no ${levelInfo?.title.toLowerCase()}, status atual, próximos passos...`}
+              rows={6}
+              className="border-border focus:border-primary transition-colors resize-none"
+              disabled={isProcessing}
             />
-          </div>
-
-          {searchTerm && (
-            <div className="text-sm text-muted-foreground">
-              {filteredData.length === 0 ? (
-                <span>Nenhum resultado encontrado para "{searchTerm}"</span>
-              ) : (
-                <span>
-                  {filteredData.length} resultado{filteredData.length !== 1 ? 's' : ''}
-                  {filteredData.length !== alertData.length && ` de ${alertData.length} `}
-                  para "{searchTerm}"
-                </span>
+            <div className="flex justify-between items-center text-xs">
+              <span className={`${observacao.length < 10 ? 'text-red-500' : 'text-muted-foreground'}`}>
+                {observacao.length}/500 caracteres {observacao.length < 10 && '(mínimo 10 caracteres)'}
+              </span>
+              {observacao.trim() && (
+                <span className="text-green-600 font-medium">✓ Observação preenchida</span>
               )}
             </div>
-          )}
-        </CardHeader>
-
-        <CardContent>
-          {/* Desktop Layout */}
-          <div className="overflow-x-auto">
-            <Table className="min-w-[1200px]">
-              <TableHeader>
-                <TableRow className="border-border hover:bg-accent">
-                  {[
-                    { key: 'chamado' as SortField, label: 'Chamado', width: 'w-20' },
-                    { key: 'tipo_chamado' as SortField, label: 'Classificação', width: 'w-24' },
-                    { key: 'grupo_chamado' as SortField, label: 'Grupo', width: 'w-20' },
-                    { key: 'status_chamado' as SortField, label: 'Status', width: 'w-20' },
-                    { key: 'abertura_chamado' as SortField, label: 'Abertura', width: 'w-28' },
-                    { key: 'resumo_chamado' as SortField, label: 'Título', width: 'flex-1 min-w-40' },
-                    { key: 'severidade_chamado' as SortField, label: 'Severidade', width: 'w-20' }
-                  ].map(({ key, label, width }) => (
-                    <TableHead key={key} className={`text-muted-foreground ${width}`}>
-                      <Button
-                        variant="ghost"
-                        className="h-auto p-0 font-medium text-muted-foreground hover:text-foreground text-xs"
-                        onClick={() => handleSort(key)}
-                      >
-                        {label}
-                        {getSortIcon(key)}
-                      </Button>
-                    </TableHead>
-                  ))}
-                  <TableHead className="text-muted-foreground w-48 text-center">
-                    <span className="text-xs font-medium">Timer WebSocket</span>
-                  </TableHead>
-                  <TableHead className="text-muted-foreground w-16 text-center">Chat</TableHead>
-                  <TableHead className="text-muted-foreground w-32 text-center">Observação</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {loading ? (
-                  <TableRow>
-                    <TableCell colSpan={10} className="text-center py-8">
-                      <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary mb-4"></div>
-                      <p>Carregando dados...</p>
-                    </TableCell>
-                  </TableRow>
-                ) : sortedAndPaginatedData.length === 0 ? (
-                  <TableRow>
-                    <TableCell colSpan={10} className="text-center py-8 text-muted-foreground">
-                      {searchTerm ? 'Nenhum resultado encontrado' : 'Nenhum dado disponível'}
-                    </TableCell>
-                  </TableRow>
-                ) : (
-                  sortedAndPaginatedData.map((alert) => {
-                    const isChat = alert.acionado === 'true' || alert.chat;
-                    const observacao = localObservacoes.get(alert.chamado);
-                    const chamadoNum = parseInt(alert.chamado);
-                    const activeLevel = getCurrentActiveLevel(chamadoNum);
-                    const timerState = timers.get(chamadoNum);
-                    const remainingTime = activeLevel ? getRemainingTime(chamadoNum, activeLevel) : 0;
-                    const isFinalized = timerState?.statusFinal === 'finalizado';
-
-                    return (
-                      <TableRow key={alert.id} className="border-border hover:bg-accent transition-colors">
-                        <TableCell className="font-medium">
-                          <Button
-                            variant="link"
-                            size="sm"
-                            className="p-0 text-foreground hover:underline text-xs"
-                          >
-                            {alert.chamado}
-                          </Button>
-                        </TableCell>
-                        <TableCell>
-                          <Tooltip>
-                            <TooltipTrigger asChild>
-                              <span className="truncate block max-w-[80px] text-xs">
-                                {alert.tipo_chamado}
-                              </span>
-                            </TooltipTrigger>
-                            <TooltipContent>
-                              <p className="max-w-xs">{alert.tipo_chamado}</p>
-                            </TooltipContent>
-                          </Tooltip>
-                        </TableCell>
-                        <TableCell className="text-xs">{alert.grupo_chamado}</TableCell>
-                        <TableCell className="text-xs">{alert.status_chamado}</TableCell>
-                        <TableCell className="text-xs">{formatDate(alert.abertura_chamado)}</TableCell>
-                        <TableCell>
-                          <Tooltip>
-                            <TooltipTrigger asChild>
-                              <span className="truncate block max-w-[120px] text-xs">
-                                {alert.resumo_chamado}
-                              </span>
-                            </TooltipTrigger>
-                            <TooltipContent>
-                              <p className="max-w-md">{alert.resumo_chamado}</p>
-                            </TooltipContent>
-                          </Tooltip>
-                        </TableCell>
-                        <TableCell>
-                          <Badge className={`${getSeverityColor(alert.severidade_chamado)} text-xs`}>
-                            {alert.severidade_chamado}
-                          </Badge>
-                        </TableCell>
-                        <TableCell>
-                          <div className="flex flex-col items-center gap-2">
-                            {isFinalized ? (
-                              <div className="space-y-2 text-center">
-                                <Badge className="bg-green-600 text-white text-xs font-semibold px-3 py-1">
-                                  ✅ FINALIZADO
-                                </Badge>
-                                {timerState?.operador && (
-                                  <div className="text-xs text-muted-foreground bg-muted rounded px-2 py-1">
-                                    👤 {timerState.operador}
-                                  </div>
-                                )}
-                              </div>
-                            ) : activeLevel && timerState ? (
-                              <div className="space-y-2 text-center">
-                                <div className="flex items-center gap-2 justify-center">
-                                  <Timer className="h-4 w-4 text-timer-active animate-pulse" />
-                                  <Badge className="timer-active text-xs font-semibold px-3 py-1">
-                                    {LEVEL_NAMES[activeLevel as keyof typeof LEVEL_NAMES]}
-                                  </Badge>
-                                </div>
-                                <div className="text-2xl font-mono font-black text-timer-active tracking-wide">
-                                  {formatTime(remainingTime)}
-                                </div>
-                                <Button
-                                  variant="outline"
-                                  size="sm"
-                                  onClick={() => handleOpenTimerManagement(alert.chamado)}
-                                  className="h-7 px-3 text-xs font-semibold border-timer-active text-timer-active hover:bg-timer-active hover:text-white transition-all duration-300"
-                                >
-                                  <Settings className="h-3 w-3 mr-1" />
-                                  Gerenciar
-                                </Button>
-                                {timerState.operador && (
-                                  <div className="text-xs text-muted-foreground bg-muted rounded px-2 py-1">
-                                    👤 {timerState.operador}
-                                  </div>
-                                )}
-                                {remainingTime <= 300 && remainingTime > 0 && (
-                                  <Badge variant="destructive" className="text-xs animate-pulse">
-                                    ⚠️ Últimos 5 min
-                                  </Badge>
-                                )}
-                              </div>
-                            ) : (
-                              <div className="flex flex-col items-center gap-2">
-                                <Button
-                                  variant="outline"
-                                  size="sm"
-                                  onClick={() => handleStartTimer(alert.chamado)}
-                                  className="h-8 px-4 text-xs font-semibold gradient-primary text-primary-foreground border-none hover:opacity-90 transition-all duration-300"
-                                  disabled={!isConnected}
-                                >
-                                  <Play className="h-4 w-4 mr-2" />
-                                  Iniciar (20min)
-                                </Button>
-                                {!isConnected && (
-                                  <span className="text-xs text-destructive">WebSocket desconectado</span>
-                                )}
-                              </div>
-                            )}
-                          </div>
-                        </TableCell>
-                        <TableCell>
-                          <Tooltip>
-                            <TooltipTrigger asChild>
-                              <Button
-                                variant={isChat ? "default" : "outline"}
-                                size="sm"
-                                onClick={() => !isChat && handleAcknowledgment(alert)}
-                                disabled={isChat}
-                                className={`${isChat
-                                  ? 'bg-websocket-connected text-white hover:bg-websocket-connected/90 shadow-lg'
-                                  : 'border-border hover:bg-accent hover:border-timer-active transition-all duration-300'
-                                  } h-8 w-8 p-0`}
-                              >
-                                {isChat ? (
-                                  <Check className="h-4 w-4" />
-                                ) : (
-                                  <AlertTriangle className="h-4 w-4" />
-                                )}
-                              </Button>
-                            </TooltipTrigger>
-                            <TooltipContent>
-                              <p>{isChat ? 'Já acionado' : 'Acionar grupo'}</p>
-                            </TooltipContent>
-                          </Tooltip>
-                        </TableCell>
-                        <TableCell>
-                          <Tooltip>
-                            <TooltipTrigger asChild>
-                              <Button
-                                variant={observacao ? "default" : "outline"}
-                                size="sm"
-                                onClick={() => handleOpenObservacao(alert.chamado)}
-                                className={`${observacao
-                                  ? 'bg-websocket-connected text-white hover:bg-websocket-connected/90 shadow-lg'
-                                  : 'border-border hover:bg-accent hover:border-timer-active transition-all duration-300'
-                                  } h-8 w-8 p-0`}
-                              >
-                                {observacao ? (
-                                  <CheckCircle className="h-4 w-4" />
-                                ) : (
-                                  <Edit3 className="h-4 w-4" />
-                                )}
-                              </Button>
-                            </TooltipTrigger>
-                            <TooltipContent>
-                              <p>{observacao ? 'Observação salva' : 'Adicionar observação'}</p>
-                            </TooltipContent>
-                          </Tooltip>
-                        </TableCell>
-                      </TableRow>
-                    );
-                  })
-                )}
-              </TableBody>
-            </Table>
           </div>
 
-          {/* Paginação */}
-          {!loading && sortedAndPaginatedData.length > 0 && totalPages > 1 && (
-            <div className="flex items-center justify-between mt-4 pt-4 border-t border-border">
-              <div className="text-sm text-muted-foreground">
-                Mostrando {((currentPage - 1) * itemsPerPage) + 1} a {Math.min(currentPage * itemsPerPage, filteredData.length)} de {filteredData.length} registros
-                {searchTerm && filteredData.length !== alertData.length && ` (filtrados de ${alertData.length})`}
-              </div>
-
-              <div className="flex items-center gap-2">
-                <Label htmlFor="itemsPerPage" className="text-sm font-medium whitespace-nowrap">
-                  Por Página:
-                </Label>
-                <Select value={itemsPerPage.toString()} onValueChange={handleItemsPerPageChange}>
-                  <SelectTrigger className="w-20">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="5">5</SelectItem>
-                    <SelectItem value="10">10</SelectItem>
-                    <SelectItem value="15">15</SelectItem>
-                    <SelectItem value="20">20</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <div className="flex items-center gap-2">
+          {/* Actions */}
+          <div className="flex flex-col gap-4 pt-4 border-t border-border">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              {/* Voltar Etapa */}
+              {currentLevel > 1 && (
                 <Button
                   variant="outline"
-                  size="sm"
-                  onClick={() => handlePageChange(currentPage - 1)}
-                  disabled={currentPage === 1}
-                  className="h-8 px-3"
+                  onClick={() => handleAction('previous')}
+                  disabled={!observacao.trim() || observacao.length < 10 || isProcessing}
+                  className="flex items-center gap-2 h-12"
                 >
-                  <ChevronLeft className="h-4 w-4 mr-1" />
-                  Anterior
+                  <ArrowLeft className="h-4 w-4" />
+                  Voltar Etapa
                 </Button>
+              )}
 
-                <div className="flex items-center gap-1">
-                  {[...Array(Math.min(totalPages, 5))].map((_, index) => {
-                    let page;
-                    if (totalPages <= 5) {
-                      page = index + 1;
-                    } else if (currentPage <= 3) {
-                      page = index + 1;
-                    } else if (currentPage >= totalPages - 2) {
-                      page = totalPages - 4 + index;
-                    } else {
-                      page = currentPage - 2 + index;
-                    }
+              {/* Finalizar */}
+              <Button
+                variant="destructive"
+                onClick={() => handleAction('finish')}
+                disabled={!observacao.trim() || observacao.length < 10 || isProcessing}
+                className="flex items-center gap-2 h-12"
+              >
+                <CheckCircle className="h-4 w-4" />
+                Finalizar Chamado
+              </Button>
 
-                    return (
-                      <Button
-                        key={page}
-                        variant={currentPage === page ? "default" : "outline"}
-                        size="sm"
-                        onClick={() => handlePageChange(page)}
-                        className="h-8 w-8 p-0"
-                      >
-                        {page}
-                      </Button>
-                    );
-                  })}
-                </div>
-
+              {/* Próxima Etapa */}
+              {currentLevel < 5 && (
                 <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => handlePageChange(currentPage + 1)}
-                  disabled={currentPage === totalPages}
-                  className="h-8 px-3"
+                  onClick={() => handleAction('next')}
+                  disabled={!observacao.trim() || observacao.length < 10 || isProcessing}
+                  className="flex items-center gap-2 h-12 gradient-primary text-primary-foreground border-none hover:opacity-90"
                 >
-                  Próximo
-                  <ChevronRight className="h-4 w-4 ml-1" />
+                  {levelInfo?.nextLevel || 'Próxima Etapa'}
+                  <ArrowRight className="h-4 w-4" />
                 </Button>
-              </div>
+              )}
+
+              {/* Se está no último nível, botão especial para finalizar */}
+              {currentLevel >= 5 && (
+                <Button
+                  onClick={() => handleAction('next')}
+                  disabled={!observacao.trim() || observacao.length < 10 || isProcessing}
+                  className="flex items-center gap-2 h-12 bg-green-600 hover:bg-green-700 text-white sm:col-span-2"
+                >
+                  <CheckCircle className="h-4 w-4" />
+                  Concluir Escalação Final
+                </Button>
+              )}
             </div>
-          )}
 
-          {/* Timer Management Modal */}
-          {selectedChamadoForTimer && (
-            <TimerManagementModal
-              isOpen={timerManagementOpen}
-              onClose={() => {
-                setTimerManagementOpen(false);
-                setSelectedChamadoForTimer('');
-              }}
-              chamado={selectedChamadoForTimer}
-              currentLevel={getCurrentActiveLevel(parseInt(selectedChamadoForTimer)) || 1}
-              remainingTime={getCurrentActiveLevel(parseInt(selectedChamadoForTimer)) ? getRemainingTime(parseInt(selectedChamadoForTimer), getCurrentActiveLevel(parseInt(selectedChamadoForTimer))!) : 0}
-              formatTime={formatTime}
-              onNextLevel={handleNextLevel}
-              onPreviousLevel={handlePreviousLevel}
-              onFinalize={handleFinalize}
-            />
-          )}
+            {/* Botão Cancelar */}
+            <Button
+              variant="ghost"
+              onClick={onClose}
+              disabled={isProcessing}
+              className="w-full"
+            >
+              Cancelar
+            </Button>
+          </div>
 
-          {/* Modal de Observação */}
-          <Dialog open={observacaoDialogOpen} onOpenChange={setObservacaoDialogOpen}>
-            <DialogContent className="sm:max-w-lg border-border bg-card">
-              <DialogHeader className="text-left">
-                <DialogTitle className="text-xl gradient-primary bg-clip-text text-transparent">
-                  📝 Observação - Chamado {selectedChamadoForEdit}
-                </DialogTitle>
-                <DialogDescription className="text-muted-foreground">
-                  Registre observações importantes e defina o operador responsável pelo chamado
-                </DialogDescription>
-              </DialogHeader>
-              <div className="space-y-6 pt-2">
-                <div className="space-y-2">
-                  <Label htmlFor="operador" className="text-sm font-semibold text-foreground">
-                    👤 Operador Responsável
-                  </Label>
-                  <Input
-                    id="operador"
-                    value={operadorText}
-                    onChange={(e) => setOperadorText(e.target.value)}
-                    placeholder="Ex: João Silva"
-                    className="border-border focus:border-timer-active transition-colors"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="observacao" className="text-sm font-semibold text-foreground">
-                    📄 Observações
-                  </Label>
-                  <Textarea
-                    id="observacao"
-                    value={observacaoText}
-                    onChange={(e) => setObservacaoText(e.target.value)}
-                    placeholder="Descreva o status atual, ações tomadas, próximos passos..."
-                    rows={5}
-                    className="border-border focus:border-timer-active transition-colors resize-none"
-                  />
-                  <div className="text-xs text-muted-foreground">
-                    {observacaoText.length}/500 caracteres
-                  </div>
-                </div>
-                <div className="flex justify-end gap-3 pt-4 border-t border-border">
-                  <Button
-                    variant="outline"
-                    onClick={() => setObservacaoDialogOpen(false)}
-                    className="px-6"
-                  >
-                    Cancelar
-                  </Button>
-                  <Button
-                    onClick={handleSaveObservacao}
-                    className="px-6 gradient-primary text-primary-foreground border-none hover:opacity-90 transition-all duration-300"
-                    disabled={!operadorText.trim() && !observacaoText.trim()}
-                  >
-                    💾 Salvar Observação
-                  </Button>
-                </div>
-              </div>
-            </DialogContent>
-          </Dialog>
-        </CardContent>
-      </Card>
-    </TooltipProvider>
+          {/* Dicas */}
+          <div className="bg-muted/50 p-4 rounded-lg border border-border">
+            <div className="text-sm space-y-2">
+              <div className="font-medium text-foreground mb-2">💡 Dicas Importantes:</div>
+              <ul className="text-muted-foreground space-y-1 list-disc list-inside">
+                <li>Observações são obrigatórias para qualquer ação</li>
+                <li>Descreva claramente as ações realizadas e próximos passos</li>
+                <li>Use "Finalizar" apenas quando o chamado estiver resolvido</li>
+                <li>Cada escalação reinicia o timer de 20 minutos</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
   );
 };
