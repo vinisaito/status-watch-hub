@@ -1,4 +1,351 @@
-await Promise.all([
-  updateStatusFinal(chamado, "finalizado"),
-  updateObservacao(chamado, currentLevel, trimmedObservacao)
-]);
+import React, { useState, useCallback } from 'react';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Button } from '@/components/ui/button';
+import { Textarea } from '@/components/ui/textarea';
+import { Label } from '@/components/ui/label';
+import { Badge } from '@/components/ui/badge';
+import { Separator } from '@/components/ui/separator';
+import { ProgressIndicator } from '@/components/ui/progress-indicator';
+import { TimerDisplay } from '@/components/ui/timer-display';
+import {
+  ArrowRight,
+  ArrowLeft,
+  CheckCircle,
+  X,
+  AlertTriangle,
+  Lightbulb,
+  MessageSquare,
+  Timer
+} from 'lucide-react';
+import { toast } from '@/hooks/use-toast';
+import { cn } from '@/lib/utils';
+
+// Tipagem corrigida: chamado deve ser number
+interface ModernTimerModalProps {
+  isOpen: boolean;
+  onClose: () => void;
+  chamado: number;
+  currentLevel: number;
+  remainingTime: number;
+  formatTime: (seconds: number) => string;
+  onNextLevel: (chamado: number, level: number, observacao: string) => void;
+  onPreviousLevel: (chamado: number, level: number, observacao: string) => void;
+  updateStatusFinal: (chamado: number, status: string) => void;
+  updateObservacao: (chamado: number, level: number, observacao: string) => void;
+}
+
+const LEVEL_INFO = {
+  1: {
+    title: "Primeiro Acionamento",
+    description: "Análise inicial e primeiros procedimentos de diagnóstico",
+    nextAction: "Avançar para 1ª Escalação",
+    color: "from-blue-500 to-blue-600",
+    bgColor: "bg-blue-500/5 border-blue-200"
+  },
+  2: {
+    title: "1ª Escalação",
+    description: "Escalação técnica de primeiro nível - Suporte especializado",
+    nextAction: "Avançar para 2ª Escalação",
+    color: "from-orange-500 to-orange-600",
+    bgColor: "bg-orange-500/5 border-orange-200"
+  },
+  3: {
+    title: "2ª Escalação",
+    description: "Escalação técnica de segundo nível - Especialistas sêniores",
+    nextAction: "Avançar para 3ª Escalação",
+    color: "from-red-500 to-red-600",
+    bgColor: "bg-red-500/5 border-red-200"
+  },
+  4: {
+    title: "3ª Escalação",
+    description: "Escalação técnica de terceiro nível - Time de arquitetura",
+    nextAction: "Avançar para 4ª Escalação",
+    color: "from-purple-500 to-purple-600",
+    bgColor: "bg-purple-500/5 border-purple-200"
+  },
+  5: {
+    title: "4ª Escalação",
+    description: "Escalação máxima - Gestores e decisores técnicos",
+    nextAction: "Finalizar Chamado",
+    color: "from-red-600 to-red-700",
+    bgColor: "bg-red-600/5 border-red-300"
+  }
+};
+
+export const ModernTimerModal: React.FC<ModernTimerModalProps> = ({
+  isOpen,
+  onClose,
+  chamado,
+  currentLevel,
+  remainingTime,
+  formatTime,
+  onNextLevel,
+  onPreviousLevel,
+  updateStatusFinal,
+  updateObservacao
+}) => {
+  const [observacao, setObservacao] = useState('');
+  const [isProcessing, setIsProcessing] = useState(false);
+
+  const levelInfo = LEVEL_INFO[currentLevel as keyof typeof LEVEL_INFO];
+
+  const validateObservacao = useCallback(() => {
+    if (!observacao.trim()) {
+      toast({
+        title: "⚠️ Observação Obrigatória",
+        description: "É obrigatório preencher o campo de observações para continuar",
+        variant: "destructive",
+      });
+      return false;
+    }
+    return true;
+  }, [observacao]);
+
+  const handleAction = useCallback(async (action: 'next' | 'previous' | 'finish') => {
+    if (!validateObservacao()) return;
+
+    setIsProcessing(true);
+
+    try {
+      const trimmedObservacao = observacao.trim();
+
+      switch (action) {
+        case 'next':
+          if (currentLevel >= 5) {
+            await updateStatusFinal(chamado, "finalizado");
+            await updateObservacao(chamado, currentLevel, trimmedObservacao);
+            toast({
+              title: "✅ Chamado Finalizado",
+              description: `Chamado ${chamado} foi finalizado com sucesso!`,
+            });
+          } else {
+            await onNextLevel(chamado, currentLevel + 1, trimmedObservacao);
+            const nextLevelInfo = LEVEL_INFO[(currentLevel + 1) as keyof typeof LEVEL_INFO];
+            toast({
+              title: `🚀 ${nextLevelInfo?.title} Iniciado`,
+              description: `Timer de 20 minutos iniciado para ${nextLevelInfo?.title}`,
+            });
+          }
+          break;
+
+        case 'previous':
+          if (currentLevel > 1) {
+            await onPreviousLevel(chamado, currentLevel - 1, trimmedObservacao);
+            const prevLevelInfo = LEVEL_INFO[(currentLevel - 1) as keyof typeof LEVEL_INFO];
+            toast({
+              title: `⬅️ Retornando para ${prevLevelInfo?.title}`,
+              description: `Timer reiniciado para ${prevLevelInfo?.title}`,
+            });
+          }
+          break;
+
+        case 'finish':
+          await Promise.all([
+            updateStatusFinal(chamado, "finalizado"),
+            updateObservacao(chamado, currentLevel, trimmedObservacao)
+          ]);
+
+          toast({
+            title: "✅ Chamado Finalizado",
+            description: `Chamado ${chamado} foi finalizado com sucesso!`,
+          });
+          break;
+      }
+
+      setObservacao('');
+      onClose();
+
+    } catch (error) {
+      console.error("❌ Erro no handleAction:", error);
+      toast({
+        title: "❌ Erro na Operação",
+        description: "Ocorreu um erro ao processar a ação. Verifique os logs.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsProcessing(false);
+    }
+  }, [validateObservacao, observacao, currentLevel, chamado, onNextLevel, onPreviousLevel, onClose, updateStatusFinal, updateObservacao]);
+
+  return (
+    <Dialog open={isOpen} onOpenChange={onClose}>
+      <DialogContent className="sm:max-w-4xl border-border bg-gradient-to-br from-background to-background/95 shadow-modal max-h-[95vh] overflow-y-auto">
+        <DialogHeader className="relative pb-6">
+          <div className={cn(
+            "absolute inset-0 bg-gradient-to-r opacity-10 rounded-t-lg",
+            levelInfo?.color || "from-gray-500 to-gray-600"
+          )} />
+          <div className="relative z-10">
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center gap-4">
+                <div className={cn(
+                  "p-4 rounded-xl bg-gradient-to-r text-white shadow-lg",
+                  levelInfo?.color || "from-gray-500 to-gray-600"
+                )}>
+                  <Timer className="h-8 w-8" />
+                </div>
+                <div>
+                  <DialogTitle className="text-3xl font-bold bg-gradient-to-r from-foreground to-foreground/70 bg-clip-text text-transparent">
+                    {levelInfo?.title || `Nível ${currentLevel}`}
+                  </DialogTitle>
+                  <p className="text-lg text-muted-foreground mt-1">
+                    Chamado {chamado}
+                  </p>
+                </div>
+              </div>
+              <Button variant="ghost" size="icon" onClick={onClose} className="rounded-full hover:bg-background/80">
+                <X className="h-5 w-5" />
+              </Button>
+            </div>
+            <div className={cn("p-4 rounded-lg border-2", levelInfo?.bgColor || "bg-gray-500/5 border-gray-200")}>
+              <p className="text-foreground font-medium">
+                {levelInfo?.description || 'Gerenciamento de escalação técnica'}
+              </p>
+            </div>
+          </div>
+        </DialogHeader>
+
+        <div className="space-y-8 pt-2">
+          {/* Timer Display */}
+          <TimerDisplay
+            remainingTime={remainingTime}
+            formatTime={formatTime}
+          />
+
+          {/* Progress Indicator */}
+          <ProgressIndicator currentLevel={currentLevel} />
+
+          <Separator className="my-6" />
+
+          {/* Observação Section */}
+          <div className="space-y-4">
+            <div className="flex items-center gap-3 mb-4">
+              <MessageSquare className="h-5 w-5 text-primary" />
+              <Label htmlFor="observacao" className="text-lg font-semibold text-foreground">
+                Observações da Escalação
+              </Label>
+              <Badge variant="destructive" className="text-xs font-bold">
+                OBRIGATÓRIO
+              </Badge>
+            </div>
+
+            <Textarea
+              id="observacao"
+              value={observacao}
+              onChange={(e) => setObservacao(e.target.value)}
+              placeholder={`Descreva detalhadamente as ações realizadas no ${levelInfo?.title.toLowerCase()}, diagnósticos feitos, status atual e próximos passos recomendados...`}
+              rows={6}
+              className="border-2 focus:border-primary transition-all duration-200 resize-none text-base"
+              disabled={isProcessing}
+            />
+
+            <div className="flex justify-between items-center">
+              <div className="flex items-center gap-2 text-sm">
+                <span className="font-medium text-muted-foreground">
+                  {observacao.length}/500 caracteres
+                </span>
+              </div>
+
+              {observacao.trim().length > 0 && (
+                <div className="flex items-center gap-2 text-green-600 font-medium text-sm">
+                  <CheckCircle className="h-4 w-4" />
+                  <span>Observação preenchida</span>
+                </div>
+              )}
+            </div>
+          </div>
+
+          <Separator className="my-6" />
+
+          {/* Action Buttons */}
+          <div className="space-y-6">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              {/* Voltar Etapa */}
+              {currentLevel > 1 && (
+                <Button
+                  variant="outline"
+                  size="xl"
+                  onClick={() => handleAction('previous')}
+                  disabled={!observacao.trim() || isProcessing}
+                  className="h-16 border-2 hover:border-primary/50 transition-all duration-200"
+                >
+                  <ArrowLeft className="h-5 w-5 mr-2" />
+                  <div className="text-left">
+                    <div className="font-semibold">Voltar Etapa</div>
+                    <div className="text-xs opacity-70">Retornar ao nível anterior</div>
+                  </div>
+                </Button>
+              )}
+
+              {/* Finalizar Chamado */}
+              <Button
+                variant="destructive"
+                size="xl"
+                onClick={() => handleAction('finish')}
+                disabled={!observacao.trim() || isProcessing}
+                className="h-16 md:col-span-1"
+              >
+                <CheckCircle className="h-5 w-5 mr-2" />
+                <div className="text-left">
+                  <div className="font-semibold">Finalizar</div>
+                  <div className="text-xs opacity-90">Resolver chamado</div>
+                </div>
+              </Button>
+
+              {/* Próxima Etapa ou Finalizar (se último nível) */}
+              <Button
+                variant={currentLevel >= 5 ? "success" : "timer"}
+                size="xl"
+                onClick={() => handleAction('next')}
+                disabled={!observacao.trim() || isProcessing}
+                className="h-16 animate-glow"
+              >
+                {currentLevel >= 5 ? (
+                  <>
+                    <CheckCircle className="h-5 w-5 mr-2" />
+                    <div className="text-left">
+                      <div className="font-semibold">Concluir Final</div>
+                      <div className="text-xs opacity-90">Última escalação</div>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <ArrowRight className="h-5 w-5 mr-2" />
+                    <div className="text-left">
+                      <div className="font-semibold">{levelInfo?.nextAction || 'Próxima Etapa'}</div>
+                      <div className="text-xs opacity-90">Avançar escalação</div>
+                    </div>
+                  </>
+                )}
+              </Button>
+            </div>
+          </div>
+
+          {/* Dicas e Informações */}
+          <div className="bg-gradient-modal rounded-xl p-6 border border-border/50">
+            <div className="flex items-start gap-3">
+              <Lightbulb className="h-6 w-6 text-yellow-500 mt-1 flex-shrink-0" />
+              <div className="space-y-3">
+                <h4 className="font-semibold text-foreground text-lg">💡 Diretrizes Importantes</h4>
+                <ul className="space-y-2 text-muted-foreground">
+                  <li className="flex items-start gap-2">
+                    <AlertTriangle className="h-4 w-4 text-yellow-500 mt-0.5 flex-shrink-0" />
+                    <span><strong>Observações obrigatórias:</strong> Documente todas as ações realizadas</span>
+                  </li>
+                  <li className="flex items-start gap-2">
+                    <Timer className="h-4 w-4 text-blue-500 mt-0.5 flex-shrink-0" />
+                    <span><strong>Timer renovado:</strong> Cada escalação reinicia o timer de 20 minutos</span>
+                  </li>
+                  <li className="flex items-start gap-2">
+                    <CheckCircle className="h-4 w-4 text-green-500 mt-0.5 flex-shrink-0" />
+                    <span><strong>Finalização:</strong> Use apenas quando o problema estiver resolvido</span>
+                  </li>
+                </ul>
+              </div>
+            </div>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+};
