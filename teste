@@ -1,5 +1,5 @@
-import { useState, useMemo, useCallback, useEffect } from 'react';
-import { Check, AlertTriangle, Timer, Play, Pause, CheckCircle, Edit3, Search, ChevronLeft, ChevronRight, ArrowUpDown, ArrowUp, ArrowDown, SkipForward, ChevronUp, ChevronDown, XCircle } from 'lucide-react';
+import { useState, useMemo, useCallback } from 'react';
+import { Check, AlertTriangle, Timer, Play, Pause, CheckCircle, Edit3, Search, ChevronLeft, ChevronRight, ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-react';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
@@ -11,6 +11,9 @@ import { toast } from '@/hooks/use-toast';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { Textarea } from '@/components/ui/textarea';
+import { useEffect } from 'react';
+
+// WebSocket hook
 import { useWebsocketTimers } from "@/hooks/useWebsocketTimers";
 
 interface AlertData {
@@ -32,167 +35,7 @@ interface ActionTableProps {
   loading: boolean;
 }
 
-// Component for Timer Control with Escalation Levels
-const TimerControl = ({ 
-  alert, 
-  timerActive, 
-  timerState, 
-  remainingTime, 
-  formatTime, 
-  isConnected, 
-  onStartTimer, 
-  onFinishTimer, 
-  onAdvanceLevel, 
-  onBackLevel,
-  hasObservacao 
-}: any) => {
-  const currentLevel = timerState?.current_level || 0;
-  
-  const getLevelName = (level: number) => {
-    if (level === 0) return "Primeira Escalação";
-    if (level >= 1 && level <= 4) return `${level}º Escalonamento`;
-    return "Finalizado";
-  };
 
-  const getLevelBadgeClass = (level: number) => {
-    if (level === 0) return "bg-blue-500 text-white";
-    if (level === 1) return "bg-yellow-500 text-white";
-    if (level === 2) return "bg-orange-500 text-white";
-    if (level === 3) return "bg-red-500 text-white";
-    if (level === 4) return "bg-red-700 text-white";
-    return "bg-gray-500 text-white";
-  };
-
-  if (!timerActive) {
-    return (
-      <div className="flex flex-col items-center gap-2">
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => onStartTimer(alert.chamado, 0)}
-          className="h-8 px-4 text-xs font-semibold bg-gradient-to-r from-blue-500 to-blue-600 text-white border-none hover:opacity-90 transition-all duration-300"
-          disabled={!isConnected}
-        >
-          <Play className="h-4 w-4 mr-2" />
-          Iniciar Timer (20min)
-        </Button>
-        {!isConnected && (
-          <span className="text-xs text-destructive">WebSocket desconectado</span>
-        )}
-      </div>
-    );
-  }
-
-  return (
-    <div className="space-y-2 text-center">
-      {/* Level Badge */}
-      <div className="flex items-center gap-2 justify-center">
-        <Timer className="h-4 w-4 text-timer-active animate-pulse" />
-        <Badge className={`${getLevelBadgeClass(currentLevel)} text-xs font-semibold px-3 py-1`}>
-          {getLevelName(currentLevel)}
-        </Badge>
-      </div>
-
-      {/* Timer Display */}
-      <div className="text-2xl font-mono font-black text-timer-active tracking-wide">
-        {formatTime(remainingTime)}
-      </div>
-
-      {/* Operador Info */}
-      {timerState?.operador && (
-        <div className="text-xs text-muted-foreground bg-muted rounded px-2 py-1">
-          👤 {timerState.operador}
-        </div>
-      )}
-
-      {/* Observação Info */}
-      {timerState?.level_observacao?.[currentLevel] && (
-        <div className="text-xs text-muted-foreground max-w-[200px] truncate">
-          📝 {timerState.level_observacao[currentLevel]}
-        </div>
-      )}
-
-      {/* Warning for last 5 minutes */}
-      {remainingTime <= 300 && remainingTime > 0 && (
-        <Badge variant="destructive" className="text-xs animate-pulse">
-          ⚠️ Últimos 5 min
-        </Badge>
-      )}
-
-      {/* Control Buttons */}
-      <div className="flex flex-col gap-1">
-        <div className="flex gap-1 justify-center">
-          {/* Back Button - only show if not on first level */}
-          {currentLevel > 0 && (
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => onBackLevel(alert.chamado)}
-                  disabled={!hasObservacao}
-                  className="h-7 w-7 p-0 border-orange-500 text-orange-500 hover:bg-orange-50"
-                >
-                  <ChevronDown className="h-3 w-3" />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>
-                <p>{!hasObservacao ? "Preencha as informações primeiro" : "Retroceder etapa"}</p>
-              </TooltipContent>
-            </Tooltip>
-          )}
-
-          {/* Finish Button */}
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => onFinishTimer(alert.chamado)}
-                disabled={!hasObservacao}
-                className="h-7 px-2 text-xs border-red-500 text-red-500 hover:bg-red-50"
-              >
-                <XCircle className="h-3 w-3 mr-1" />
-                Finalizar
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>
-              <p>{!hasObservacao ? "Preencha as informações primeiro" : "Finalizar acionamento"}</p>
-            </TooltipContent>
-          </Tooltip>
-
-          {/* Advance Button - only show if not on last level */}
-          {currentLevel < 4 && (
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => onAdvanceLevel(alert.chamado)}
-                  disabled={!hasObservacao}
-                  className="h-7 px-2 text-xs border-green-500 text-green-500 hover:bg-green-50"
-                >
-                  <SkipForward className="h-3 w-3 mr-1" />
-                  {currentLevel === 0 ? "Próxima" : "Avançar"}
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>
-                <p>{!hasObservacao ? "Preencha as informações primeiro" : `Avançar para ${getLevelName(currentLevel + 1)}`}</p>
-              </TooltipContent>
-            </Tooltip>
-          )}
-        </div>
-
-        {/* Info message about required fields */}
-        {!hasObservacao && (
-          <span className="text-[10px] text-amber-600 font-medium">
-            ⚠️ Registre as informações antes de continuar
-          </span>
-        )}
-      </div>
-    </div>
-  );
-};
 
 type SortField = keyof AlertData;
 type SortDirection = 'asc' | 'desc' | null;
@@ -216,17 +59,15 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
     timers,
     isConnected,
     startTimer,
-    stopTimer,
     updateObservacao,
     updateOperador,
     getRemainingTime,
     formatTime,
     isTimerActive,
     getState,
-    setWatchedChamados,
-    advanceLevel,
-    backLevel
+    setWatchedChamados
   } = useWebsocketTimers();
+
 
   // Primeiro registrar os chamados que queremos monitorar
   useEffect(() => {
@@ -239,25 +80,11 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
     chamadosNum.forEach(chamado => getState(chamado));
   }, [alertData, setWatchedChamados, getState]);
 
+
+
+
   // Estados locais para observações
   const [localObservacoes, setLocalObservacoes] = useState<Map<string, { observacao: string; operador: string }>>(new Map());
-
-  // Auto-advance when timer reaches 0
-  useEffect(() => {
-    const interval = setInterval(() => {
-      timers.forEach((timerState, chamadoNum) => {
-        const currentLevel = timerState.current_level || 0;
-        const remainingTime = getRemainingTime(chamadoNum, currentLevel);
-        
-        if (remainingTime === 0 && timerState.is_active && currentLevel < 4) {
-          // Auto-advance to next level
-          handleAdvanceLevel(chamadoNum.toString());
-        }
-      });
-    }, 1000);
-
-    return () => clearInterval(interval);
-  }, [timers, getRemainingTime]);
 
   // Funções utilitárias
   const formatDate = useCallback((dateString: string) => {
@@ -316,9 +143,14 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
       : 'bg-yellow-500 text-yellow-950';
   }, []);
 
+  const truncateText = useCallback((text: string, maxLength: number) => {
+    return text.length > maxLength ? text.substring(0, maxLength) + '...' : text;
+  }, []);
+
   // Handlers para acionamento
   const handleAcknowledgment = useCallback(async (alert: AlertData) => {
     try {
+      // Simular envio para webhook (mantendo a lógica original)
       toast({
         title: "Alerta acionado",
         description: `Chamado ${alert.chamado} foi acionado com sucesso`,
@@ -335,7 +167,7 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
   }, [onUpdateAcknowledgment]);
 
   // Handlers para timer
-  const handleStartTimer = useCallback((chamado: string, level: number = 0) => {
+  const handleStartTimer = useCallback((chamado: string, level: number = 1) => {
     const chamadoNum = parseInt(chamado);
     const duration = 1200; // 20 minutos em segundos
 
@@ -346,7 +178,7 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
     if (success) {
       toast({
         title: "Timer Iniciado",
-        description: `Primeira escalação iniciada para chamado ${chamado} (20 minutos)`,
+        description: `Timer de ${duration / 60} minutos iniciado para chamado ${chamado}`,
       });
 
       // Solicitar o estado após iniciar para garantir sincronização
@@ -356,78 +188,6 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
       }, 1000);
     }
   }, [startTimer, getState]);
-
-  const handleFinishTimer = useCallback((chamado: string) => {
-    const chamadoNum = parseInt(chamado);
-    const success = stopTimer(chamadoNum);
-
-    if (success) {
-      toast({
-        title: "Timer Finalizado",
-        description: `Acionamento do chamado ${chamado} foi finalizado`,
-      });
-    }
-  }, [stopTimer]);
-
-  const handleAdvanceLevel = useCallback((chamado: string) => {
-    const chamadoNum = parseInt(chamado);
-    const timerState = timers.get(chamadoNum);
-    const currentLevel = timerState?.current_level || 0;
-    const nextLevel = currentLevel + 1;
-
-    // Start new timer for next level
-    const duration = 1200; // 20 minutes for each level
-    const success = advanceLevel(chamadoNum, nextLevel, duration);
-
-    if (success) {
-      const levelName = nextLevel === 1 ? "1º Escalonamento" : 
-                       nextLevel === 2 ? "2º Escalonamento" :
-                       nextLevel === 3 ? "3º Escalonamento" :
-                       nextLevel === 4 ? "4º Escalonamento" : "";
-      
-      toast({
-        title: "Nível Avançado",
-        description: `Avançado para ${levelName} - Chamado ${chamado}`,
-      });
-
-      // Clear local observacao when advancing
-      setLocalObservacoes(prev => {
-        const newMap = new Map(prev);
-        newMap.delete(chamado);
-        return newMap;
-      });
-    }
-  }, [timers, advanceLevel]);
-
-  const handleBackLevel = useCallback((chamado: string) => {
-    const chamadoNum = parseInt(chamado);
-    const timerState = timers.get(chamadoNum);
-    const currentLevel = timerState?.current_level || 0;
-    const prevLevel = Math.max(0, currentLevel - 1);
-
-    // Start new timer for previous level
-    const duration = 1200; // 20 minutes
-    const success = backLevel(chamadoNum, prevLevel, duration);
-
-    if (success) {
-      const levelName = prevLevel === 0 ? "Primeira Escalação" :
-                       prevLevel === 1 ? "1º Escalonamento" :
-                       prevLevel === 2 ? "2º Escalonamento" :
-                       prevLevel === 3 ? "3º Escalonamento" : "";
-      
-      toast({
-        title: "Nível Retrocedido",
-        description: `Retornado para ${levelName} - Chamado ${chamado}`,
-      });
-
-      // Clear local observacao when going back
-      setLocalObservacoes(prev => {
-        const newMap = new Map(prev);
-        newMap.delete(chamado);
-        return newMap;
-      });
-    }
-  }, [timers, backLevel]);
 
   // Handlers para observação
   const handleOpenObservacao = useCallback((chamado: string) => {
@@ -442,12 +202,10 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
     if (!selectedChamadoForEdit) return;
 
     const chamadoNum = parseInt(selectedChamadoForEdit);
-    const timerState = timers.get(chamadoNum);
-    const currentLevel = timerState?.current_level || 0;
 
     // Atualizar no WebSocket
     if (observacaoText.trim()) {
-      updateObservacao(chamadoNum, currentLevel, observacaoText.trim());
+      updateObservacao(chamadoNum, 1, observacaoText.trim());
     }
 
     if (operadorText.trim()) {
@@ -469,10 +227,10 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
     setOperadorText('');
 
     toast({
-      title: "Informações Salvas",
-      description: `Informações do chamado ${selectedChamadoForEdit} foram registradas`,
+      title: "Observação Salva",
+      description: `Observação do chamado ${selectedChamadoForEdit} foi salva`,
     });
-  }, [selectedChamadoForEdit, observacaoText, operadorText, updateObservacao, updateOperador, timers]);
+  }, [selectedChamadoForEdit, observacaoText, operadorText, updateObservacao, updateOperador]);
 
   // Handlers para ordenação
   const handleSort = useCallback((field: SortField) => {
@@ -642,11 +400,11 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
                       </Button>
                     </TableHead>
                   ))}
-                  <TableHead className="text-muted-foreground w-56 text-center">
-                    <span className="text-xs font-medium">Controle de Escalonamento</span>
+                  <TableHead className="text-muted-foreground w-48 text-center">
+                    <span className="text-xs font-medium">Timer WebSocket</span>
                   </TableHead>
                   <TableHead className="text-muted-foreground w-16 text-center">Chat</TableHead>
-                  <TableHead className="text-muted-foreground w-32 text-center">Informações</TableHead>
+                  <TableHead className="text-muted-foreground w-32 text-center">Observação</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -668,10 +426,9 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
                     const isChat = alert.acionado === 'true' || alert.chat;
                     const observacao = localObservacoes.get(alert.chamado);
                     const chamadoNum = parseInt(alert.chamado);
+                    const timerActive = isTimerActive(chamadoNum, 1);
+                    const remainingTime = getRemainingTime(chamadoNum, 1);
                     const timerState = timers.get(chamadoNum);
-                    const currentLevel = timerState?.current_level || 0;
-                    const timerActive = isTimerActive(chamadoNum, currentLevel);
-                    const remainingTime = getRemainingTime(chamadoNum, currentLevel);
 
                     return (
                       <TableRow key={alert.id} className="border-border hover:bg-accent transition-colors">
@@ -717,19 +474,52 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
                           </Badge>
                         </TableCell>
                         <TableCell>
-                          <TimerControl
-                            alert={alert}
-                            timerActive={timerActive}
-                            timerState={timerState}
-                            remainingTime={remainingTime}
-                            formatTime={formatTime}
-                            isConnected={isConnected}
-                            onStartTimer={handleStartTimer}
-                            onFinishTimer={handleFinishTimer}
-                            onAdvanceLevel={handleAdvanceLevel}
-                            onBackLevel={handleBackLevel}
-                            hasObservacao={!!observacao}
-                          />
+                          <div className="flex flex-col items-center gap-2">
+                            {timerActive && timerState ? (
+                              <div className="space-y-2 text-center">
+                                <div className="flex items-center gap-2 justify-center">
+                                  <Timer className="h-4 w-4 text-timer-active animate-pulse" />
+                                  <Badge className="timer-active text-xs font-semibold px-3 py-1">
+                                    Level 1 • {timerState.level1_status?.toUpperCase()}
+                                  </Badge>
+                                </div>
+                                <div className="text-2xl font-mono font-black text-timer-active tracking-wide">
+                                  {formatTime(remainingTime)}
+                                </div>
+                                {timerState.operador && (
+                                  <div className="text-xs text-muted-foreground bg-muted rounded px-2 py-1">
+                                    👤 {timerState.operador}
+                                  </div>
+                                )}
+                                {timerState.level1_observacao && (
+                                  <div className="text-xs text-muted-foreground max-w-[200px] truncate">
+                                    📝 {timerState.level1_observacao}
+                                  </div>
+                                )}
+                                {remainingTime <= 300 && remainingTime > 0 && (
+                                  <Badge variant="destructive" className="text-xs animate-pulse">
+                                    ⚠️ Últimos 5 min
+                                  </Badge>
+                                )}
+                              </div>
+                            ) : (
+                              <div className="flex flex-col items-center gap-2">
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() => handleStartTimer(alert.chamado, 1)}
+                                  className="h-8 px-4 text-xs font-semibold gradient-primary text-primary-foreground border-none hover:opacity-90 transition-all duration-300"
+                                  disabled={!isConnected}
+                                >
+                                  <Play className="h-4 w-4 mr-2" />
+                                  Iniciar Timer (20min)
+                                </Button>
+                                {!isConnected && (
+                                  <span className="text-xs text-destructive">WebSocket desconectado</span>
+                                )}
+                              </div>
+                            )}
+                          </div>
                         </TableCell>
                         <TableCell>
                           <Tooltip>
@@ -766,23 +556,17 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
                                 className={`${observacao
                                   ? 'bg-websocket-connected text-white hover:bg-websocket-connected/90 shadow-lg'
                                   : 'border-border hover:bg-accent hover:border-timer-active transition-all duration-300'
-                                  } h-8 px-2 text-xs`}
+                                  } h-8 w-8 p-0`}
                               >
                                 {observacao ? (
-                                  <>
-                                    <CheckCircle className="h-4 w-4 mr-1" />
-                                    Registrado
-                                  </>
+                                  <CheckCircle className="h-4 w-4" />
                                 ) : (
-                                  <>
-                                    <Edit3 className="h-4 w-4 mr-1" />
-                                    Registrar
-                                  </>
+                                  <Edit3 className="h-4 w-4" />
                                 )}
                               </Button>
                             </TooltipTrigger>
                             <TooltipContent>
-                              <p>{observacao ? 'Informações registradas' : 'Registrar informações'}</p>
+                              <p>{observacao ? 'Observação salva' : 'Adicionar observação'}</p>
                             </TooltipContent>
                           </Tooltip>
                         </TableCell>
@@ -876,17 +660,17 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
           <Dialog open={observacaoDialogOpen} onOpenChange={setObservacaoDialogOpen}>
             <DialogContent className="sm:max-w-lg border-border bg-card">
               <DialogHeader className="text-left">
-                <DialogTitle className="text-xl bg-gradient-to-r from-blue-500 to-blue-600 bg-clip-text text-transparent">
-                  📝 Registrar Informações - Chamado {selectedChamadoForEdit}
+                <DialogTitle className="text-xl gradient-primary bg-clip-text text-transparent">
+                  📝 Observação - Chamado {selectedChamadoForEdit}
                 </DialogTitle>
                 <DialogDescription className="text-muted-foreground">
-                  Registre as informações do acionamento. É obrigatório preencher antes de avançar ou finalizar.
+                  Registre observações importantes e defina o operador responsável pelo chamado
                 </DialogDescription>
               </DialogHeader>
               <div className="space-y-6 pt-2">
                 <div className="space-y-2">
                   <Label htmlFor="operador" className="text-sm font-semibold text-foreground">
-                    👤 Operador Responsável <span className="text-red-500">*</span>
+                    👤 Operador Responsável
                   </Label>
                   <Input
                     id="operador"
@@ -898,27 +682,18 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="observacao" className="text-sm font-semibold text-foreground">
-                    📄 Observações do Acionamento <span className="text-red-500">*</span>
+                    📄 Observações
                   </Label>
                   <Textarea
                     id="observacao"
                     value={observacaoText}
                     onChange={(e) => setObservacaoText(e.target.value)}
-                    placeholder="Descreva o que foi identificado, ações tomadas, responsáveis contatados..."
+                    placeholder="Descreva o status atual, ações tomadas, próximos passos..."
                     rows={5}
                     className="border-border focus:border-timer-active transition-colors resize-none"
                   />
                   <div className="text-xs text-muted-foreground">
                     {observacaoText.length}/500 caracteres
-                  </div>
-                </div>
-                <div className="bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-800 rounded-lg p-3">
-                  <div className="flex items-start gap-2">
-                    <AlertTriangle className="h-4 w-4 text-amber-600 mt-0.5" />
-                    <div className="text-xs text-amber-700 dark:text-amber-400">
-                      <p className="font-semibold mb-1">Importante:</p>
-                      <p>O preenchimento destas informações é obrigatório para poder avançar, retroceder ou finalizar o escalonamento.</p>
-                    </div>
                   </div>
                 </div>
                 <div className="flex justify-end gap-3 pt-4 border-t border-border">
@@ -931,10 +706,10 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
                   </Button>
                   <Button
                     onClick={handleSaveObservacao}
-                    className="px-6 bg-gradient-to-r from-blue-500 to-blue-600 text-white border-none hover:opacity-90 transition-all duration-300"
-                    disabled={!operadorText.trim() || !observacaoText.trim()}
+                    className="px-6 gradient-primary text-primary-foreground border-none hover:opacity-90 transition-all duration-300"
+                    disabled={!operadorText.trim() && !observacaoText.trim()}
                   >
-                    💾 Salvar Informações
+                    💾 Salvar Observação
                   </Button>
                 </div>
               </div>
