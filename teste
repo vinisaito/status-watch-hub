@@ -1,21 +1,2 @@
-case 'finish':
-  await Promise.all([
-    // Atualiza o status final do chamado
-    updateStatusFinal(chamado, "statusFinal", "finished"),
-
-    // Opcional: atualiza todos os níveis como finalizados
-    updateStatusFinal(chamado, "level1_status", "finished"),
-    updateStatusFinal(chamado, "level2_status", "finished"),
-    updateStatusFinal(chamado, "level3_status", "finished"),
-    updateStatusFinal(chamado, "level4_status", "finished"),
-    updateStatusFinal(chamado, "level5_status", "finished"),
-
-    updateObservacao(chamado, currentLevel, trimmedObservacao)
-  ]);
-
-  setFinalizado(true);
-  toast({
-    title: "✅ Chamado Finalizado",
-    description: `Chamado ${chamado} foi finalizado com sucesso!`,
-  });
-  break;
+console.log('Chamado:', chamado, 'LevelStatusKey:', levelStatusKey, 'Status:', 'finished');
+await updateStatusFinal(chamado, levelStatusKey, 'finished');
