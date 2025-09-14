@@ -1,6 +1,10 @@
+// Primeiro registrar os chamados que queremos monitorar
 useEffect(() => {
   if (!alertData || alertData.length === 0) return;
 
   const chamadosNum = alertData.map(a => parseInt(a.chamado));
-  setWatchedChamados(chamadosNum);  // Atualiza watchedChamadosRef no hook
-}, [alertData, setWatchedChamados]);
+  setWatchedChamados(chamadosNum);
+
+  // Forçar getState imediatamente
+  chamadosNum.forEach(chamado => getState(chamado));
+}, [alertData, setWatchedChamados, getState]);
