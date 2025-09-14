@@ -30,7 +30,7 @@ interface ModernTimerModalProps {
   formatTime: (seconds: number) => string;
   onNextLevel: (chamado: number, level: number, observacao: string) => void;
   onPreviousLevel: (chamado: number, level: number, observacao: string) => void;
-  onFinalize: (chamado: number, observacao: string) => void;
+  onFinalize?: (chamado: number, observacao: string) => void; // 🔹 agora é opcional
   updateStatusFinal: (chamado: number, statusFinal: string) => void;
   updateObservacao: (chamado: number, level: number, observacao: string) => void;
 }
@@ -82,7 +82,7 @@ export const ModernTimerModal: React.FC<ModernTimerModalProps> = ({
   formatTime,
   onNextLevel,
   onPreviousLevel,
-  onFinalize,
+  onFinalize, // 🔹 opcional
   updateStatusFinal,
   updateObservacao
 }) => {
@@ -91,7 +91,6 @@ export const ModernTimerModal: React.FC<ModernTimerModalProps> = ({
 
   const levelInfo = LEVEL_INFO[currentLevel as keyof typeof LEVEL_INFO];
 
-  // Função para validar observação
   const validateObservacao = useCallback(() => {
     if (!observacao.trim()) {
       toast({
@@ -104,7 +103,6 @@ export const ModernTimerModal: React.FC<ModernTimerModalProps> = ({
     return true;
   }, [observacao]);
 
-  // Handler para ações do modal
   const handleAction = useCallback(async (action: 'next' | 'previous' | 'finish') => {
     if (!validateObservacao()) return;
 
@@ -146,7 +144,12 @@ export const ModernTimerModal: React.FC<ModernTimerModalProps> = ({
         case 'finish':
           await updateStatusFinal(chamado, "finalizado");
           await updateObservacao(chamado, currentLevel, trimmedObservacao);
-          await onFinalize(chamado, trimmedObservacao);
+
+          // 🔹 só chama onFinalize se ele foi passado
+          if (onFinalize) {
+            await onFinalize(chamado, trimmedObservacao);
+          }
+
           toast({
             title: "✅ Chamado Finalizado",
             description: `Chamado ${chamado} foi finalizado com sucesso!`,
@@ -154,31 +157,29 @@ export const ModernTimerModal: React.FC<ModernTimerModalProps> = ({
           break;
       }
       
-      // Limpar o form e fechar modal
       setObservacao('');
       onClose();
       
     } catch (error) {
+      console.error("❌ Erro no handleAction:", error);
       toast({
         title: "❌ Erro na Operação",
-        description: "Ocorreu um erro ao processar a ação. Tente novamente.",
+        description: "Ocorreu um erro ao processar a ação. Verifique os logs.",
         variant: "destructive",
       });
     } finally {
       setIsProcessing(false);
     }
-  }, [validateObservacao, observacao, currentLevel, chamado, onNextLevel, onPreviousLevel, onFinalize, onClose, updateStatusFinal, updateObservacao]);
+  }, [validateObservacao, observacao, currentLevel, chamado, onNextLevel, onPreviousLevel, onClose, updateStatusFinal, updateObservacao, onFinalize]);
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
       <DialogContent className="sm:max-w-4xl border-border bg-gradient-to-br from-background to-background/95 shadow-modal max-h-[95vh] overflow-y-auto">
-        {/* Header com gradiente */}
         <DialogHeader className="relative pb-6">
           <div className={cn(
             "absolute inset-0 bg-gradient-to-r opacity-10 rounded-t-lg",
             levelInfo?.color || "from-gray-500 to-gray-600"
           )} />
-          
           <div className="relative z-10">
             <div className="flex items-center justify-between mb-4">
               <div className="flex items-center gap-4">
@@ -197,169 +198,14 @@ export const ModernTimerModal: React.FC<ModernTimerModalProps> = ({
                   </p>
                 </div>
               </div>
-              
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={onClose}
-                className="rounded-full hover:bg-background/80"
-              >
+              <Button variant="ghost" size="icon" onClick={onClose} className="rounded-full hover:bg-background/80">
                 <X className="h-5 w-5" />
               </Button>
             </div>
-
-            <div className={cn(
-              "p-4 rounded-lg border-2",
-              levelInfo?.bgColor || "bg-gray-500/5 border-gray-200"
-            )}>
+            <div className={cn("p-4 rounded-lg border-2", levelInfo?.bgColor || "bg-gray-500/5 border-gray-200")}>
               <p className="text-foreground font-medium">
                 {levelInfo?.description || 'Gerenciamento de escalação técnica'}
               </p>
             </div>
           </div>
         </DialogHeader>
-
-        <div className="space-y-8 pt-2">
-          {/* Timer Display */}
-          <TimerDisplay 
-            remainingTime={remainingTime}
-            formatTime={formatTime}
-          />
-
-          {/* Progress Indicator */}
-          <ProgressIndicator currentLevel={currentLevel} />
-
-          <Separator className="my-6" />
-
-          {/* Observação Section */}
-          <div className="space-y-4">
-            <div className="flex items-center gap-3 mb-4">
-              <MessageSquare className="h-5 w-5 text-primary" />
-              <Label htmlFor="observacao" className="text-lg font-semibold text-foreground">
-                Observações da Escalação
-              </Label>
-              <Badge variant="destructive" className="text-xs font-bold">
-                OBRIGATÓRIO
-              </Badge>
-            </div>
-
-            <Textarea
-              id="observacao"
-              value={observacao}
-              onChange={(e) => setObservacao(e.target.value)}
-              placeholder={`Descreva detalhadamente as ações realizadas no ${levelInfo?.title.toLowerCase()}, diagnósticos feitos, status atual e próximos passos recomendados...`}
-              rows={6}
-              className="border-2 focus:border-primary transition-all duration-200 resize-none text-base"
-              disabled={isProcessing}
-            />
-            
-            <div className="flex justify-between items-center">
-              <div className="flex items-center gap-2 text-sm">
-                <span className="font-medium text-muted-foreground">
-                  {observacao.length}/500 caracteres
-                </span>
-              </div>
-              
-              {observacao.trim().length > 0 && (
-                <div className="flex items-center gap-2 text-green-600 font-medium text-sm">
-                  <CheckCircle className="h-4 w-4" />
-                  <span>Observação preenchida</span>
-                </div>
-              )}
-            </div>
-          </div>
-
-          <Separator className="my-6" />
-
-          {/* Action Buttons */}
-          <div className="space-y-6">
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              {/* Voltar Etapa */}
-              {currentLevel > 1 && (
-                <Button
-                  variant="outline"
-                  size="xl"
-                  onClick={() => handleAction('previous')}
-                  disabled={!observacao.trim() || isProcessing}
-                  className="h-16 border-2 hover:border-primary/50 transition-all duration-200"
-                >
-                  <ArrowLeft className="h-5 w-5 mr-2" />
-                  <div className="text-left">
-                    <div className="font-semibold">Voltar Etapa</div>
-                    <div className="text-xs opacity-70">Retornar ao nível anterior</div>
-                  </div>
-                </Button>
-              )}
-
-              {/* Finalizar Chamado */}
-              <Button
-                variant="destructive"
-                size="xl"
-                onClick={() => handleAction('finish')}
-                disabled={!observacao.trim() || isProcessing}
-                className="h-16 md:col-span-1"
-              >
-                <CheckCircle className="h-5 w-5 mr-2" />
-                <div className="text-left">
-                  <div className="font-semibold">Finalizar</div>
-                  <div className="text-xs opacity-90">Resolver chamado</div>
-                </div>
-              </Button>
-
-              {/* Próxima Etapa ou Finalizar (se último nível) */}
-              <Button
-                variant={currentLevel >= 5 ? "success" : "timer"}
-                size="xl"
-                onClick={() => handleAction('next')}
-                disabled={!observacao.trim() || isProcessing}
-                className="h-16 animate-glow"
-              >
-                {currentLevel >= 5 ? (
-                  <>
-                    <CheckCircle className="h-5 w-5 mr-2" />
-                    <div className="text-left">
-                      <div className="font-semibold">Concluir Final</div>
-                      <div className="text-xs opacity-90">Última escalação</div>
-                    </div>
-                  </>
-                ) : (
-                  <>
-                    <ArrowRight className="h-5 w-5 mr-2" />
-                    <div className="text-left">
-                      <div className="font-semibold">{levelInfo?.nextAction || 'Próxima Etapa'}</div>
-                      <div className="text-xs opacity-90">Avançar escalação</div>
-                    </div>
-                  </>
-                )}
-              </Button>
-            </div>
-          </div>
-
-          {/* Dicas e Informações */}
-          <div className="bg-gradient-modal rounded-xl p-6 border border-border/50">
-            <div className="flex items-start gap-3">
-              <Lightbulb className="h-6 w-6 text-yellow-500 mt-1 flex-shrink-0" />
-              <div className="space-y-3">
-                <h4 className="font-semibold text-foreground text-lg">💡 Diretrizes Importantes</h4>
-                <ul className="space-y-2 text-muted-foreground">
-                  <li className="flex items-start gap-2">
-                    <AlertTriangle className="h-4 w-4 text-yellow-500 mt-0.5 flex-shrink-0" />
-                    <span><strong>Observações obrigatórias:</strong> Documente todas as ações realizadas</span>
-                  </li>
-                  <li className="flex items-start gap-2">
-                    <Timer className="h-4 w-4 text-blue-500 mt-0.5 flex-shrink-0" />
-                    <span><strong>Timer renovado:</strong> Cada escalação reinicia o timer de 20 minutos</span>
-                  </li>
-                  <li className="flex items-start gap-2">
-                    <CheckCircle className="h-4 w-4 text-green-500 mt-0.5 flex-shrink-0" />
-                    <span><strong>Finalização:</strong> Use apenas quando o problema estiver resolvido</span>
-                  </li>
-                </ul>
-              </div>
-            </div>
-          </div>
-        </div>
-      </DialogContent>
-    </Dialog>
-  );
-};
