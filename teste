@@ -1,16 +1,1 @@
-def handle_update_status_final(event, trace, body):
-    chamado = int(body["chamado"])
-    status = body["status"]
-    level_status_key = body.get("levelStatusKey")  # chave enviada pelo frontend
-
-    if not level_status_key:
-        level_status_key = "statusFinal"  # fallback
-
-    update = {level_status_key: status}
-    state = update_chamado(trace, chamado, update)
-    broadcast({"event": "updateStatusFinal", "chamado": chamado, "state": state})
-
-    return {
-        "statusCode": 200,
-        "body": json.dumps({"msg": f"{level_status_key} atualizado"}, cls=DecimalEncoder)
-    }
+{"routeKey": "updateStatusFinal", "chamado": 123, "levelStatusKey": "level1_status", "status": "finished"}
