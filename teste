@@ -1,25 +1,28 @@
-ws.current.onmessage = (event) => {
+const initialStateRequestedRef = useRef(false);
+
+useEffect(() => {
+  if (!isConnected || initialStateRequestedRef.current) return;
+
   try {
-    const message: WebSocketMessage = JSON.parse(event.data);
+    const currentKeys = Array.from(timers.keys());
+    const watchedKeys = Array.from(watchedChamadosRef.current);
+    const uniqueChamados = Array.from(new Set([...currentKeys, ...watchedKeys]));
 
-    if (message.state && message.chamado) {
-      setTimers(prev => {
-        const oldState = prev.get(message.chamado);
-        const isDifferent = JSON.stringify(oldState) !== JSON.stringify(message.state);
+    if (uniqueChamados.length === 0) return;
 
-        // Só loga se houver diferença real
-        if (isDifferent) {
-          console.log(`🔔 Novo evento para chamado ${message.chamado}`, message.state);
-          const newTimers = new Map(prev);
-          newTimers.set(message.chamado, message.state!);
-          return newTimers;
-        }
+    console.log('🔁 Solicitando estado inicial para chamados:', uniqueChamados);
+    uniqueChamados.forEach(chamado => {
+      try {
+        getState(chamado);
+      } catch (err) {
+        console.error(`Erro ao solicitar getState para ${chamado}:`, err);
+      }
+    });
 
-        // Retorna o state antigo se nada mudou
-        return prev;
-      });
-    }
-  } catch (error) {
-    console.error('❌ Erro ao processar mensagem WebSocket:', error);
+    // Marca que já solicitou o estado inicial
+    initialStateRequestedRef.current = true;
+
+  } catch (err) {
+    console.error('Erro no efeito de sincronização inicial:', err);
   }
-};
+}, [isConnected, getState, timers]);
