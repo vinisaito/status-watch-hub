@@ -20,13 +20,13 @@ import {
 import { toast } from '@/hooks/use-toast';
 import { cn } from '@/lib/utils';
 
-// Tipagem corrigida: chamado deve ser number
 interface ModernTimerModalProps {
   isOpen: boolean;
   onClose: () => void;
   chamado: number;
   currentLevel: number;
   remainingTime: number;
+  chamadoData?: any; // Incluindo statusFinal e outros atributos do DynamoDB
   formatTime: (seconds: number) => string;
   onNextLevel: (chamado: number, level: number, observacao: string) => void;
   onPreviousLevel: (chamado: number, level: number, observacao: string) => void;
@@ -78,6 +78,7 @@ export const ModernTimerModal: React.FC<ModernTimerModalProps> = ({
   chamado,
   currentLevel,
   remainingTime,
+  chamadoData,
   formatTime,
   onNextLevel,
   onPreviousLevel,
@@ -87,7 +88,8 @@ export const ModernTimerModal: React.FC<ModernTimerModalProps> = ({
   const [observacao, setObservacao] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
 
-  const levelInfo = LEVEL_INFO[currentLevel as keyof typeof LEVEL_INFO];
+  const isFinalizado = chamadoData?.statusFinal === "finalizado";
+  const levelInfo = isFinalizado ? { title: "Chamado Finalizado", description: "O chamado já foi encerrado", color: "from-green-500 to-green-600", bgColor: "bg-green-500/5 border-green-200" } : LEVEL_INFO[currentLevel as keyof typeof LEVEL_INFO];
 
   const validateObservacao = useCallback(() => {
     if (!observacao.trim()) {
@@ -109,11 +111,22 @@ export const ModernTimerModal: React.FC<ModernTimerModalProps> = ({
     try {
       const trimmedObservacao = observacao.trim();
 
+      if (isFinalizado) {
+        toast({
+          title: "⚠️ Chamado já finalizado",
+          description: "Não é possível alterar níveis pois o chamado está finalizado",
+          variant: "destructive",
+        });
+        return;
+      }
+
       switch (action) {
         case 'next':
           if (currentLevel >= 5) {
-            await updateStatusFinal(chamado, "finalizado");
-            await updateObservacao(chamado, currentLevel, trimmedObservacao);
+            await Promise.all([
+              updateStatusFinal(chamado, "finalizado"),
+              updateObservacao(chamado, currentLevel, trimmedObservacao)
+            ]);
             toast({
               title: "✅ Chamado Finalizado",
               description: `Chamado ${chamado} foi finalizado com sucesso!`,
@@ -144,7 +157,6 @@ export const ModernTimerModal: React.FC<ModernTimerModalProps> = ({
             updateStatusFinal(chamado, "finalizado"),
             updateObservacao(chamado, currentLevel, trimmedObservacao)
           ]);
-
           toast({
             title: "✅ Chamado Finalizado",
             description: `Chamado ${chamado} foi finalizado com sucesso!`,
@@ -165,7 +177,7 @@ export const ModernTimerModal: React.FC<ModernTimerModalProps> = ({
     } finally {
       setIsProcessing(false);
     }
-  }, [validateObservacao, observacao, currentLevel, chamado, onNextLevel, onPreviousLevel, onClose, updateStatusFinal, updateObservacao]);
+  }, [validateObservacao, observacao, currentLevel, chamado, onNextLevel, onPreviousLevel, onClose, updateStatusFinal, updateObservacao, isFinalizado]);
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
@@ -206,27 +218,18 @@ export const ModernTimerModal: React.FC<ModernTimerModalProps> = ({
         </DialogHeader>
 
         <div className="space-y-8 pt-2">
-          {/* Timer Display */}
-          <TimerDisplay
-            remainingTime={remainingTime}
-            formatTime={formatTime}
-          />
-
-          {/* Progress Indicator */}
+          <TimerDisplay remainingTime={remainingTime} formatTime={formatTime} />
           <ProgressIndicator currentLevel={currentLevel} />
 
           <Separator className="my-6" />
 
-          {/* Observação Section */}
           <div className="space-y-4">
             <div className="flex items-center gap-3 mb-4">
               <MessageSquare className="h-5 w-5 text-primary" />
               <Label htmlFor="observacao" className="text-lg font-semibold text-foreground">
                 Observações da Escalação
               </Label>
-              <Badge variant="destructive" className="text-xs font-bold">
-                OBRIGATÓRIO
-              </Badge>
+              <Badge variant="destructive" className="text-xs font-bold">OBRIGATÓRIO</Badge>
             </div>
 
             <Textarea
@@ -236,16 +239,11 @@ export const ModernTimerModal: React.FC<ModernTimerModalProps> = ({
               placeholder={`Descreva detalhadamente as ações realizadas no ${levelInfo?.title.toLowerCase()}, diagnósticos feitos, status atual e próximos passos recomendados...`}
               rows={6}
               className="border-2 focus:border-primary transition-all duration-200 resize-none text-base"
-              disabled={isProcessing}
+              disabled={isProcessing || isFinalizado}
             />
 
             <div className="flex justify-between items-center">
-              <div className="flex items-center gap-2 text-sm">
-                <span className="font-medium text-muted-foreground">
-                  {observacao.length}/500 caracteres
-                </span>
-              </div>
-
+              <span className="font-medium text-muted-foreground">{observacao.length}/500 caracteres</span>
               {observacao.trim().length > 0 && (
                 <div className="flex items-center gap-2 text-green-600 font-medium text-sm">
                   <CheckCircle className="h-4 w-4" />
@@ -257,11 +255,9 @@ export const ModernTimerModal: React.FC<ModernTimerModalProps> = ({
 
           <Separator className="my-6" />
 
-          {/* Action Buttons */}
           <div className="space-y-6">
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              {/* Voltar Etapa */}
-              {currentLevel > 1 && (
+              {currentLevel > 1 && !isFinalizado && (
                 <Button
                   variant="outline"
                   size="xl"
@@ -277,12 +273,11 @@ export const ModernTimerModal: React.FC<ModernTimerModalProps> = ({
                 </Button>
               )}
 
-              {/* Finalizar Chamado */}
               <Button
                 variant="destructive"
                 size="xl"
                 onClick={() => handleAction('finish')}
-                disabled={!observacao.trim() || isProcessing}
+                disabled={!observacao.trim() || isProcessing || isFinalizado}
                 className="h-16 md:col-span-1"
               >
                 <CheckCircle className="h-5 w-5 mr-2" />
@@ -292,15 +287,22 @@ export const ModernTimerModal: React.FC<ModernTimerModalProps> = ({
                 </div>
               </Button>
 
-              {/* Próxima Etapa ou Finalizar (se último nível) */}
               <Button
-                variant={currentLevel >= 5 ? "success" : "timer"}
+                variant={currentLevel >= 5 || isFinalizado ? "success" : "timer"}
                 size="xl"
                 onClick={() => handleAction('next')}
-                disabled={!observacao.trim() || isProcessing}
+                disabled={!observacao.trim() || isProcessing || isFinalizado}
                 className="h-16 animate-glow"
               >
-                {currentLevel >= 5 ? (
+                {isFinalizado ? (
+                  <>
+                    <CheckCircle className="h-5 w-5 mr-2" />
+                    <div className="text-left">
+                      <div className="font-semibold">Finalizado</div>
+                      <div className="text-xs opacity-90">Chamado encerrado</div>
+                    </div>
+                  </>
+                ) : currentLevel >= 5 ? (
                   <>
                     <CheckCircle className="h-5 w-5 mr-2" />
                     <div className="text-left">
@@ -321,7 +323,6 @@ export const ModernTimerModal: React.FC<ModernTimerModalProps> = ({
             </div>
           </div>
 
-          {/* Dicas e Informações */}
           <div className="bg-gradient-modal rounded-xl p-6 border border-border/50">
             <div className="flex items-start gap-3">
               <Lightbulb className="h-6 w-6 text-yellow-500 mt-1 flex-shrink-0" />
@@ -344,6 +345,7 @@ export const ModernTimerModal: React.FC<ModernTimerModalProps> = ({
               </div>
             </div>
           </div>
+
         </div>
       </DialogContent>
     </Dialog>
