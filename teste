@@ -26,11 +26,11 @@ interface ModernTimerModalProps {
   chamado: number;
   currentLevel: number;
   remainingTime: number;
-  chamadoData?: any; // Incluindo statusFinal e outros atributos do DynamoDB
+  chamadoData?: any; // Incluindo atributos do DynamoDB
   formatTime: (seconds: number) => string;
   onNextLevel: (chamado: number, level: number, observacao: string) => void;
   onPreviousLevel: (chamado: number, level: number, observacao: string) => void;
-  updateStatusFinal: (chamado: number, status: string) => void;
+  updateStatusFinal: (chamado: number, levelStatusKey: string, status: string) => void;
   updateObservacao: (chamado: number, level: number, observacao: string) => void;
 }
 
@@ -88,8 +88,13 @@ export const ModernTimerModal: React.FC<ModernTimerModalProps> = ({
   const [observacao, setObservacao] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
 
-  const isFinalizado = chamadoData?.statusFinal === "finalizado";
-  const levelInfo = isFinalizado ? { title: "Chamado Finalizado", description: "O chamado já foi encerrado", color: "from-green-500 to-green-600", bgColor: "bg-green-500/5 border-green-200" } : LEVEL_INFO[currentLevel as keyof typeof LEVEL_INFO];
+  // Novo: checagem de finalização por levelX_status
+  const levelStatusKey = `level${currentLevel}_status`;
+  const isFinalizado = chamadoData?.[levelStatusKey] === "finished";
+
+  const levelInfo = isFinalizado
+    ? { title: "Chamado Finalizado", description: "O chamado já foi encerrado", color: "from-green-500 to-green-600", bgColor: "bg-green-500/5 border-green-200" }
+    : LEVEL_INFO[currentLevel as keyof typeof LEVEL_INFO];
 
   const validateObservacao = useCallback(() => {
     if (!observacao.trim()) {
@@ -111,7 +116,7 @@ export const ModernTimerModal: React.FC<ModernTimerModalProps> = ({
     try {
       const trimmedObservacao = observacao.trim();
 
-      if (isFinalizado) {
+      if (isFinalizado && action !== 'previous') {
         toast({
           title: "⚠️ Chamado já finalizado",
           description: "Não é possível alterar níveis pois o chamado está finalizado",
@@ -124,7 +129,7 @@ export const ModernTimerModal: React.FC<ModernTimerModalProps> = ({
         case 'next':
           if (currentLevel >= 5) {
             await Promise.all([
-              updateStatusFinal(chamado, "finalizado"),
+              updateStatusFinal(chamado, levelStatusKey, "finished"),
               updateObservacao(chamado, currentLevel, trimmedObservacao)
             ]);
             toast({
@@ -154,7 +159,7 @@ export const ModernTimerModal: React.FC<ModernTimerModalProps> = ({
 
         case 'finish':
           await Promise.all([
-            updateStatusFinal(chamado, "finalizado"),
+            updateStatusFinal(chamado, levelStatusKey, "finished"),
             updateObservacao(chamado, currentLevel, trimmedObservacao)
           ]);
           toast({
@@ -177,7 +182,7 @@ export const ModernTimerModal: React.FC<ModernTimerModalProps> = ({
     } finally {
       setIsProcessing(false);
     }
-  }, [validateObservacao, observacao, currentLevel, chamado, onNextLevel, onPreviousLevel, onClose, updateStatusFinal, updateObservacao, isFinalizado]);
+  }, [validateObservacao, observacao, currentLevel, chamado, onNextLevel, onPreviousLevel, onClose, updateStatusFinal, updateObservacao, isFinalizado, levelStatusKey]);
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
