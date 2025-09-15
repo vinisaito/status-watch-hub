@@ -1,1 +1,9 @@
-{"action":"updateStatusFinal","chamado":123,"status":"finished","level":1}
+const [finalizado, setFinalizado] = useState(
+  chamadoData?.statusFinal === "finished" || chamadoData?.[levelStatusKey] === "finished"
+);
+
+React.useEffect(() => {
+  setFinalizado(
+    chamadoData?.statusFinal === "finished" || chamadoData?.[levelStatusKey] === "finished"
+  );
+}, [chamadoData?.statusFinal, chamadoData?.[levelStatusKey]]);
