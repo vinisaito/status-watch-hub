@@ -1,6 +1,10 @@
 const levelStatusKey = `level${currentLevel}_status`;
-const [finalizado, setFinalizado] = useState(chamadoData?.[levelStatusKey] === "finished");
+const [finalizado, setFinalizado] = useState(
+  chamadoData?.statusFinal === "finished" || chamadoData?.[levelStatusKey] === "finished"
+);
 
 React.useEffect(() => {
-  setFinalizado(chamadoData?.[levelStatusKey] === "finished");
+  setFinalizado(
+    chamadoData?.statusFinal === "finished" || chamadoData?.[levelStatusKey] === "finished"
+  );
 }, [chamadoData, levelStatusKey]);
