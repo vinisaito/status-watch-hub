@@ -1,16 +1,1 @@
-def handle_update_status_final(event, trace, body):
-    chamado = int(body["chamado"])
-    status = body["status"]
-    level = body.get("level")  # opcional
-
-    update = {"statusFinal": status}
-
-    if level:
-        update[f"level{level}_status"] = status
-
-    state = update_chamado(trace, chamado, update)
-    broadcast({"event": "updateStatusFinal", "chamado": chamado, "state": state})
-    return {
-        "statusCode": 200,
-        "body": json.dumps({"msg": "Status final atualizado"}, cls=DecimalEncoder)
-    }
+{"action":"updateStatusFinal","chamado":123,"status":"finished","level":1}
