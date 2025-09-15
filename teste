@@ -1,371 +1,357 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useCallback } from 'react';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Button } from '@/components/ui/button';
+import { Textarea } from '@/components/ui/textarea';
+import { Label } from '@/components/ui/label';
+import { Badge } from '@/components/ui/badge';
+import { Separator } from '@/components/ui/separator';
+import { ProgressIndicator } from '@/components/ui/progress-indicator';
+import { TimerDisplay } from '@/components/ui/timer-display';
+import {
+  ArrowRight,
+  ArrowLeft,
+  CheckCircle,
+  X,
+  AlertTriangle,
+  Lightbulb,
+  MessageSquare,
+  Timer
+} from 'lucide-react';
 import { toast } from '@/hooks/use-toast';
+import { cn } from '@/lib/utils';
 
-export interface TimerState {
+interface ModernTimerModalProps {
+  isOpen: boolean;
+  onClose: () => void;
   chamado: number;
-  operador?: string;
-  statusFinal?: string;
-  level1_timerStart?: string;
-  level1_duration?: number;
-  level1_status?: 'running' | 'paused' | 'stopped' | 'finished';
-  level1_observacao?: string;
-  level2_timerStart?: string;
-  level2_duration?: number;
-  level2_status?: 'running' | 'paused' | 'stopped' | 'finished';
-  level2_observacao?: string;
-  level3_timerStart?: string;
-  level3_duration?: number;
-  level3_status?: 'running' | 'paused' | 'stopped' | 'finished';
-  level3_observacao?: string;
-  level4_timerStart?: string;
-  level4_duration?: number;
-  level4_status?: 'running' | 'paused' | 'stopped' | 'finished';
-  level4_observacao?: string;
-  level5_timerStart?: string;
-  level5_duration?: number;
-  level5_status?: 'running' | 'paused' | 'stopped' | 'finished';
-  level5_observacao?: string;
+  currentLevel: number;
+  remainingTime: number;
+  chamadoData?: any; // Incluindo atributos do DynamoDB
+  formatTime: (seconds: number) => string;
+  onNextLevel: (chamado: number, level: number, observacao: string) => void;
+  onPreviousLevel: (chamado: number, level: number, observacao: string) => void;
+  updateStatusFinal: (chamado: number, levelStatusKey: string, status: string) => void;
+  updateObservacao: (chamado: number, level: number, observacao: string) => void;
 }
 
-export interface WebSocketMessage {
-  event: 'startTimer' | 'updateObservacao' | 'updateOperador' | 'updateStatusFinal' | 'getState';
-  chamado: number;
-  level?: number;
-  state?: TimerState;
-}
+const LEVEL_INFO = {
+  1: {
+    title: "Primeiro Acionamento",
+    nextAction: "Avançar para 1ª Escalação",
+    color: "from-blue-500 to-blue-600",
+    bgColor: "bg-blue-500/5 border-blue-200"
+  },
+  2: {
+    title: "1ª Escalação",
+    description: "Escalação técnica de primeiro nível - Suporte especializado",
+    nextAction: "Avançar para 2ª Escalação",
+    color: "from-orange-500 to-orange-600",
+    bgColor: "bg-orange-500/5 border-orange-200"
+  },
+  3: {
+    title: "2ª Escalação",
+    description: "Escalação técnica de segundo nível - Especialistas sêniores",
+    nextAction: "Avançar para 3ª Escalação",
+    color: "from-red-500 to-red-600",
+    bgColor: "bg-red-500/5 border-red-200"
+  },
+  4: {
+    title: "3ª Escalação",
+    description: "Escalação técnica de terceiro nível - Time de arquitetura",
+    nextAction: "Avançar para 4ª Escalação",
+    color: "from-purple-500 to-purple-600",
+    bgColor: "bg-purple-500/5 border-purple-200"
+  },
+  5: {
+    title: "4ª Escalação",
+    description: "Escalação máxima - Gestores e decisores técnicos",
+    nextAction: "Finalizar Chamado",
+    color: "from-red-600 to-red-700",
+    bgColor: "bg-red-600/5 border-red-300"
+  }
+};
 
-export interface SendMessage {
-  action: 'startTimer' | 'updateObservacao' | 'updateOperador' | 'updateStatusFinal' | 'getState';
-  chamado: number;
-  level?: number;
-  duration?: number;
-  observacao?: string;
-  operador?: string;
-  // retrocompatibilidade (se o frontend usar só statusFinal)
-  statusFinal?: string;
-  // novo formato para atualizar levelX_status dinamicamente
-  levelStatusKey?: string;
-  status?: string;
-}
+export const ModernTimerModal: React.FC<ModernTimerModalProps> = ({
+  isOpen,
+  onClose,
+  chamado,
+  currentLevel,
+  remainingTime,
+  chamadoData,
+  formatTime,
+  onNextLevel,
+  onPreviousLevel,
+  updateStatusFinal,
+  updateObservacao
+}) => {
+  const [observacao, setObservacao] = useState('');
+  const [isProcessing, setIsProcessing] = useState(false);
 
-export const useWebsocketTimers = () => {
-  const [timers, setTimers] = useState<Map<number, TimerState>>(new Map());
-  const [isConnected, setIsConnected] = useState(false);
-  const ws = useRef<WebSocket | null>(null);
-  const reconnectAttempts = useRef(0);
-  const maxReconnectAttempts = 5;
-  const reconnectTimeout = useRef<NodeJS.Timeout | null>(null);
+  // Novo: checagem de finalização por levelX_status
+  const levelStatusKey = `level${currentLevel}_status`;
+  const [finalizado, setFinalizado] = useState(
+    chamadoData?.statusFinal === "finished" || chamadoData?.[levelStatusKey] === "finished"
+  );
 
-  // Chamados que o cliente quer garantir que sejam consultados ao conectar
-  const watchedChamadosRef = useRef<Set<number>>(new Set());
+  React.useEffect(() => {
+    setFinalizado(
+      chamadoData?.statusFinal === "finished" || chamadoData?.[levelStatusKey] === "finished"
+    );
+  }, [chamadoData, levelStatusKey]);
 
-  const connect = useCallback(() => {
-    try {
-      if (ws.current && ws.current.readyState === WebSocket.CONNECTING) {
-        return;
-      }
 
-      const wsUrl = 'wss://rsgjd6wsza.execute-api.us-east-1.amazonaws.com/dev';
-      console.log(`🔌 Tentando conectar no WebSocket: ${wsUrl}`);
+  const levelInfo = finalizado
+    ? { title: "Chamado Finalizado", description: "O chamado já foi encerrado", color: "from-green-500 to-green-600", bgColor: "bg-green-500/5 border-green-200" }
+    : LEVEL_INFO[currentLevel as keyof typeof LEVEL_INFO];
 
-      ws.current = new WebSocket(wsUrl);
-
-      const connectionTimeout = setTimeout(() => {
-        if (ws.current && ws.current.readyState === WebSocket.CONNECTING) {
-          ws.current.close();
-          toast({
-            title: "Timeout de Conexão",
-            description: "WebSocket demorou muito para conectar. Tentando novamente...",
-            variant: "destructive",
-          });
-        }
-      }, 10000);
-
-      ws.current.onopen = () => {
-        clearTimeout(connectionTimeout);
-        setIsConnected(true);
-        reconnectAttempts.current = 0;
-
-        console.log('✅ WebSocket conectado com sucesso');
-        toast({
-          title: "Conectado",
-          description: "WebSocket conectado com sucesso",
-        });
-      };
-
-      ws.current.onmessage = (event) => {
-        try {
-          const message: WebSocketMessage = JSON.parse(event.data);
-
-          if (message.state && message.chamado) {
-            setTimers(prev => {
-              const oldState = prev.get(message.chamado);
-              const isDifferent = JSON.stringify(oldState) !== JSON.stringify(message.state);
-
-              if (isDifferent) {
-                console.log(`🔔 Novo evento para chamado ${message.chamado}`, message.state);
-              }
-
-              const newTimers = new Map(prev);
-              newTimers.set(message.chamado, message.state!);
-              return newTimers;
-            });
-          }
-        } catch (error) {
-          console.error('❌ Erro ao processar mensagem WebSocket:', error);
-        }
-      };
-
-      ws.current.onclose = (event) => {
-        clearTimeout(connectionTimeout);
-        setIsConnected(false);
-
-        console.warn('⚠️ WebSocket desconectado - Código:', event.code, 'Motivo:', event.reason);
-
-        if (event.code !== 1000 && reconnectAttempts.current < maxReconnectAttempts) {
-          reconnectAttempts.current++;
-          const delay = Math.min(1000 * Math.pow(2, reconnectAttempts.current), 30000);
-          console.log(`🔄 Tentando reconectar em ${delay}ms (tentativa ${reconnectAttempts.current}/${maxReconnectAttempts})`);
-
-          reconnectTimeout.current = setTimeout(() => {
-            connect();
-          }, delay);
-        } else if (reconnectAttempts.current >= maxReconnectAttempts) {
-          console.error('❌ Máximo de tentativas de reconexão atingido');
-          toast({
-            title: "Falha na Conexão",
-            description: "Não foi possível conectar ao WebSocket após várias tentativas",
-            variant: "destructive",
-          });
-        }
-      };
-
-      ws.current.onerror = () => {
-        clearTimeout(connectionTimeout);
-        console.error('❌ Erro WebSocket detectado');
-      };
-
-    } catch (error) {
-      console.error('❌ Erro ao conectar WebSocket:', error);
+  const validateObservacao = useCallback(() => {
+    if (!observacao.trim()) {
       toast({
-        title: "Erro de Inicialização",
-        description: "Erro ao inicializar conexão WebSocket",
+        title: "⚠️ Observação Obrigatória",
+        description: "É obrigatório preencher o campo de observações para continuar",
         variant: "destructive",
       });
-    }
-  }, []);
-
-  const disconnect = useCallback(() => {
-    if (reconnectTimeout.current) {
-      clearTimeout(reconnectTimeout.current);
-      reconnectTimeout.current = null;
-    }
-
-    if (ws.current) {
-      ws.current.close(1000, 'Desconexão intencional');
-      ws.current = null;
-    }
-
-    setIsConnected(false);
-    console.log('🔌 WebSocket desconectado manualmente');
-  }, []);
-
-  const sendMessage = useCallback((message: SendMessage) => {
-    if (ws.current && ws.current.readyState === WebSocket.OPEN) {
-      try {
-        const payload = JSON.stringify(message); // Armazena o payload em uma variável
-        ws.current.send(payload);
-
-        // Inclui a variável payload no console.log
-        console.log(`📤 Mensagem enviada: ${message.action} (chamado ${message.chamado})`);
-        console.log('Payload:', payload);
-
-        return true;
-      } catch (error) {
-        console.error('❌ Erro ao enviar mensagem:', error);
-        toast({
-          title: "Erro ao Enviar",
-          description: "Não foi possível enviar a mensagem",
-          variant: "destructive",
-        });
-        return false;
-      }
-    } else {
-      toast({
-        title: "Não Conectado",
-        description: "WebSocket não está conectado. Tentando reconectar...",
-        variant: "destructive",
-      });
-      connect();
       return false;
     }
-  }, [connect]);
+    return true;
+  }, [observacao]);
 
-  // Ações (mantive todas as existentes)
-  const startTimer = useCallback((chamado: number, level: number, duration: number = 1200) => {
-    return sendMessage({ action: 'startTimer', chamado, level, duration });
-  }, [sendMessage]);
+  const handleAction = useCallback(async (action: 'next' | 'previous' | 'finish') => {
+    if (!validateObservacao()) return;
 
-  const updateObservacao = useCallback((chamado: number, level: number, observacao: string) => {
-    return sendMessage({ action: 'updateObservacao', chamado, level, observacao });
-  }, [sendMessage]);
-
-  const updateOperador = useCallback((chamado: number, operador: string) => {
-    return sendMessage({ action: 'updateOperador', chamado, operador });
-  }, [sendMessage]);
-
-  /**
-   * updateStatusFinal flexível (retrocompatível):
-   *
-   * Chamadas possíveis:
-   * 1) updateStatusFinal(chamado, 1, 'finished') -> atualiza level1_status = 'finished'
-   * 2) updateStatusFinal(chamado, 'level1_status', 'finished') -> atualiza level1_status = 'finished'
-   * 3) updateStatusFinal(chamado, 'finished') -> retrocompatível: envia statusFinal = 'finished'
-   */
-  const updateStatusFinal = useCallback((
-    chamado: number,
-    levelOrKeyOrStatus: number | string,
-    maybeStatus?: string
-  ) => {
-    // caso 1: numeric + status -> level number
-    if (typeof levelOrKeyOrStatus === 'number') {
-      const level = levelOrKeyOrStatus;
-      const status = maybeStatus!;
-      const levelStatusKey = `level${level}_status`;
-      return sendMessage({ action: 'updateStatusFinal', chamado, levelStatusKey, status });
-    }
-
-    // caso 2: string + status (treat second param as levelStatusKey)
-    if (typeof maybeStatus === 'string') {
-      const levelStatusKey = levelOrKeyOrStatus;
-      const status = maybeStatus;
-      return sendMessage({ action: 'updateStatusFinal', chamado, levelStatusKey, status });
-    }
-
-    // caso 3: apenas chamado + statusFinal (retrocompatível)
-    const statusFinal = levelOrKeyOrStatus;
-    return sendMessage({ action: 'updateStatusFinal', chamado, statusFinal });
-  }, [sendMessage]);
-
-  const getState = useCallback((chamado: number) => {
-    return sendMessage({ action: 'getState', chamado });
-  }, [sendMessage]);
-
-  // Cálculo de tempo restante (sem logs)
-  const getRemainingTime = useCallback((chamado: number, level: number): number => {
-    const timerState = timers.get(chamado);
-    if (!timerState) return 0;
-
-    const levelPrefix = `level${level}` as 'level1' | 'level2' | 'level3' | 'level4' | 'level5';
-    const timerStart = timerState[`${levelPrefix}_timerStart`];
-    const duration = timerState[`${levelPrefix}_duration`];
-    const status = timerState[`${levelPrefix}_status`];
-
-    if (!timerStart || !duration || status !== 'running') return 0;
+    setIsProcessing(true);
 
     try {
-      const startTime = new Date(timerStart).getTime();
-      const endTime = startTime + (duration * 1000);
-      const now = Date.now();
-      return Math.max(0, Math.floor((endTime - now) / 1000));
-    } catch {
-      return 0;
-    }
-  }, [timers]);
+      const trimmedObservacao = observacao.trim();
 
-  const formatTime = useCallback((seconds: number): string => {
-    const hours = Math.floor(seconds / 3600);
-    const minutes = Math.floor((seconds % 3600) / 60);
-    const secs = seconds % 60;
-
-    if (hours > 0) {
-      return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
-    }
-    return `${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
-  }, []);
-
-  const isTimerActive = useCallback((chamado: number, level: number): boolean => {
-    const timerState = timers.get(chamado);
-    if (!timerState) return false;
-
-    const levelPrefix = `level${level}` as 'level1' | 'level2' | 'level3' | 'level4' | 'level5';
-    return timerState[`${levelPrefix}_status`] === 'running';
-  }, [timers]);
-
-  // Conectar ao montar
-  useEffect(() => {
-    connect();
-    return () => disconnect();
-  }, [connect, disconnect]);
-
-  // Força re-render a cada segundo
-  useEffect(() => {
-    const interval = setInterval(() => {
-      setTimers(prev => new Map(prev));
-    }, 1000);
-    return () => clearInterval(interval);
-  }, []);
-
-  useEffect(() => {
-    if (!isConnected) return;
-
-    try {
-      const currentKeys = Array.from(timers.keys());
-      const watchedKeys = Array.from(watchedChamadosRef.current);
-      const uniqueChamados = Array.from(new Set([...currentKeys, ...watchedKeys]));
-
-      if (uniqueChamados.length === 0) {
+      if (finalizado && action !== 'previous') {
+        toast({
+          title: "⚠️ Chamado já finalizado",
+          description: "Não é possível alterar níveis pois o chamado está finalizado",
+          variant: "destructive",
+        });
         return;
       }
 
-      console.log('🔁 Solicitando estado inicial para chamados:', uniqueChamados);
-      uniqueChamados.forEach(chamado => {
-        try {
-          getState(chamado);
-        } catch (err) {
-          console.error(`Erro ao solicitar getState para ${chamado}:`, err);
-        }
+      switch (action) {
+        case 'next':
+          if (currentLevel >= 5) {
+            await Promise.all([
+              updateStatusFinal(chamado, levelStatusKey, "finished"),
+              updateObservacao(chamado, currentLevel, trimmedObservacao)
+            ]);
+            toast({
+              title: "✅ Chamado Finalizado",
+              description: `Chamado ${chamado} foi finalizado com sucesso!`,
+            });
+          } else {
+            await onNextLevel(chamado, currentLevel + 1, trimmedObservacao);
+            const nextLevelInfo = LEVEL_INFO[(currentLevel + 1) as keyof typeof LEVEL_INFO];
+            toast({
+              title: `🚀 ${nextLevelInfo?.title} Iniciado`,
+              description: `Timer de 20 minutos iniciado para ${nextLevelInfo?.title}`,
+            });
+          }
+          break;
+
+        case 'previous':
+          if (currentLevel > 1) {
+            await onPreviousLevel(chamado, currentLevel - 1, trimmedObservacao);
+            const prevLevelInfo = LEVEL_INFO[(currentLevel - 1) as keyof typeof LEVEL_INFO];
+            toast({
+              title: `⬅️ Retornando para ${prevLevelInfo?.title}`,
+              description: `Timer reiniciado para ${prevLevelInfo?.title}`,
+            });
+          }
+          break;
+
+        case 'finish':
+          await Promise.all([
+            updateStatusFinal(chamado, levelStatusKey, "finished"),
+            updateObservacao(chamado, currentLevel, trimmedObservacao)
+          ]);
+          setFinalizado(true);
+          toast({
+            title: "✅ Chamado Finalizado",
+            description: `Chamado ${chamado} foi finalizado com sucesso!`,
+          });
+          console.log("Atualizando status:", levelStatusKey);
+          break;
+      }
+
+      setObservacao('');
+      onClose();
+
+    } catch (error) {
+      console.error("❌ Erro no handleAction:", error);
+      toast({
+        title: "❌ Erro na Operação",
+        description: "Ocorreu um erro ao processar a ação. Verifique os logs.",
+        variant: "destructive",
       });
-    } catch (err) {
-      console.error('Erro no efeito de sincronização inicial:', err);
+    } finally {
+      setIsProcessing(false);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isConnected, getState]);
+  }, [validateObservacao, observacao, currentLevel, chamado, onNextLevel, onPreviousLevel, onClose, updateStatusFinal, updateObservacao, finalizado, levelStatusKey]);
 
-  const addWatchedChamado = useCallback((chamado: number) => {
-    watchedChamadosRef.current.add(chamado);
-  }, []);
+  return (
+    <Dialog open={isOpen} onOpenChange={onClose}>
+      <DialogContent className="sm:max-w-4xl border-border bg-gradient-to-br from-background to-background/95 shadow-modal max-h-[95vh] overflow-y-auto">
+        <DialogHeader className="relative pb-6">
+          <div className={cn(
+            "absolute inset-0 bg-gradient-to-r opacity-10 rounded-t-lg max-h-[95vh]",
+            levelInfo?.color || "from-gray-500 to-gray-600"
+          )} />
+          <div className="relative z-10">
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center gap-4">
+                <div className={cn(
+                  "p-4 rounded-xl bg-gradient-to-r text-white shadow-lg ",
+                  levelInfo?.color || "from-gray-500 to-gray-600"
+                )}>
+                  <Timer className="h-8 w-8" />
+                </div>
+                <div>
+                  <DialogTitle className="text-3xl font-bold bg-gradient-to-r from-foreground to-foreground/70 bg-clip-text text-transparent">
+                    {levelInfo?.title || `Nível ${currentLevel}`}
+                  </DialogTitle>
+                  <p className="text-lg text-muted-foreground mt-1">
+                    Chamado {chamado}
+                  </p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </DialogHeader>
+        <div className="space-y-8 pt-2">
+          <TimerDisplay remainingTime={remainingTime} formatTime={formatTime} />
+          <ProgressIndicator currentLevel={currentLevel} />
+          <Separator className="my-6" />
 
-  const removeWatchedChamado = useCallback((chamado: number) => {
-    watchedChamadosRef.current.delete(chamado);
-  }, []);
+          <div className="space-y-4">
+            <div className="flex items-center gap-3 mb-4">
+              <MessageSquare className="h-5 w-5 text-primary" />
+              <Label htmlFor="observacao" className="text-lg font-semibold text-foreground">
+                Observações
+              </Label>
+              <Badge variant="destructive" className="text-xs font-bold">OBRIGATÓRIO</Badge>
+            </div>
 
-  const setWatchedChamados = useCallback((chamados: number[]) => {
-    watchedChamadosRef.current = new Set(chamados);
-  }, []);
+            <Textarea
+              id="observacao"
+              value={observacao}
+              onChange={(e) => setObservacao(e.target.value)}
+              placeholder={`Descreva detalhadamente as ações realizadas no ${levelInfo?.title.toLowerCase()}, diagnósticos feitos, status atual e próximos passos recomendados...`}
+              rows={6}
+              className="border-2 focus:border-primary transition-all duration-200 resize-none text-base"
+              disabled={isProcessing || finalizado}
+            />
 
-  const getWatchedChamados = useCallback(() => {
-    return Array.from(watchedChamadosRef.current);
-  }, []);
+            <div className="flex justify-between items-center">
+              <span className="font-medium text-muted-foreground">{observacao.length}/500 caracteres</span>
+              {observacao.trim().length > 0 && (
+                <div className="flex items-center gap-2 text-green-600 font-medium text-sm">
+                  <CheckCircle className="h-4 w-4" />
+                  <span>Observação preenchida</span>
+                </div>
+              )}
+            </div>
+          </div>
 
-  return {
-    timers,
-    isConnected,
-    sendMessage,
-    startTimer,
-    updateObservacao,
-    updateOperador,
-    updateStatusFinal,
-    getState,
-    getRemainingTime,
-    formatTime,
-    isTimerActive,
-    connect,
-    disconnect,
-    // extras
-    addWatchedChamado,
-    removeWatchedChamado,
-    setWatchedChamados,
-    getWatchedChamados
-  };
+          <Separator className="my-6" />
+
+          <div className="space-y-6">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              {currentLevel > 1 && !finalizado && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => handleAction('previous')}
+                  disabled={!observacao.trim() || isProcessing}
+                  className="h-16 border-2 hover:border-primary/50 transition-all duration-200"
+                >
+                  <ArrowLeft className="h-5 w-5 mr-2" />
+                  <div className="text-left">
+                    <div className="font-semibold">Voltar Etapa</div>
+                    <div className="text-xs opacity-70">Retornar ao nível anterior</div>
+                  </div>
+                </Button>
+              )}
+
+              <Button
+                variant="destructive"
+                size="lg"
+                onClick={() => handleAction('finish')}
+                disabled={!observacao.trim() || isProcessing || finalizado}
+                className="h-16 md:col-span-1"
+              >
+                <CheckCircle className="h-5 w-5 mr-2" />
+                <div className="text-left">
+                  <div className="font-semibold">Finalizar</div>
+                  <div className="text-xs opacity-90">Resolver chamado</div>
+                </div>
+              </Button>
+
+              <Button
+                variant={currentLevel >= 5 || finalizado ? "success" : "timer"}
+                size="lg"
+                onClick={() => handleAction('next')}
+                disabled={!observacao.trim() || isProcessing || finalizado}
+                className="h-16 animate-glow"
+              >
+                {finalizado ? (
+                  <>
+                    <CheckCircle className="h-5 w-5 mr-2" />
+                    <div className="text-left">
+                      <div className="font-semibold">Finalizado</div>
+                      <div className="text-xs opacity-90">Chamado encerrado</div>
+                    </div>
+                  </>
+                ) : currentLevel >= 5 ? (
+                  <>
+                    <CheckCircle className="h-5 w-5 mr-2" />
+                    <div className="text-left">
+                      <div className="font-semibold">Concluir Final</div>
+                      <div className="text-xs opacity-90">Última escalação</div>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <ArrowRight className="h-5 w-5 mr-2" />
+                    <div className="text-left">
+                      <div className="font-semibold">{levelInfo?.nextAction || 'Próxima Etapa'}</div>
+                      <div className="text-xs opacity-90">Avançar escalação</div>
+                    </div>
+                  </>
+                )}
+              </Button>
+            </div>
+          </div>
+
+          <div className="bg-gradient-modal rounded-xl p-6 border border-border/50">
+            <div className="flex items-start gap-3">
+              <div className="space-y-3">
+                <h4 className="font-semibold text-foreground text-lg">💡 Diretrizes Importantes</h4>
+                <ul className="space-y-2 text-muted-foreground">
+                  <li className="flex items-start gap-2">
+                    <AlertTriangle className="h-4 w-4 text-yellow-500 mt-0.5 flex-shrink-0" />
+                    <span><strong>Observações obrigatórias:</strong> Documente todas as ações realizadas</span>
+                  </li>
+                  <li className="flex items-start gap-2">
+                    <Timer className="h-4 w-4 text-blue-500 mt-0.5 flex-shrink-0" />
+                    <span><strong>Timer renovado:</strong> Cada escalação reinicia o timer de 20 minutos</span>
+                  </li>
+                  <li className="flex items-start gap-2">
+                    <CheckCircle className="h-4 w-4 text-green-500 mt-0.5 flex-shrink-0" />
+                    <span><strong>Finalização:</strong> Use apenas quando o problema estiver resolvido</span>
+                  </li>
+                </ul>
+              </div>
+            </div>
+          </div>
+
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
 };
