@@ -1,9 +1,13 @@
-const [finalizado, setFinalizado] = useState(
-  chamadoData?.statusFinal === "finished" || chamadoData?.[levelStatusKey] === "finished"
-);
+const { timers } = useWebsocketTimers();
 
-React.useEffect(() => {
-  setFinalizado(
-    chamadoData?.statusFinal === "finished" || chamadoData?.[levelStatusKey] === "finished"
-  );
-}, [chamadoData?.statusFinal, chamadoData?.[levelStatusKey]]);
+const chamadoState = timers.get(chamado) || chamadoData;
+
+<ModernTimerModal
+  isOpen={isModalOpen}
+  onClose={handleClose}
+  chamado={chamado}
+  currentLevel={currentLevel}
+  remainingTime={remainingTime}
+  chamadoData={chamadoState}   // 👈 agora vem do WebSocket se existir
+  ...
+/>
