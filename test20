@@ -1,8 +1,31 @@
-# fallback: se level não vier, atualiza level ativo
-if level:
-    update[f"level{level}_status"] = status
-else:
-    # pegar nível ativo do timer no estado atual
-    level_ativo = get_active_level(chamado)  # função que retorna level1, level2, etc
-    if level_ativo:
-        update[f"level{level_ativo}_status"] = status
+def handle_update_status_final(event, trace, body):
+    chamado = int(body["chamado"])
+    status = body["status"]
+    level = body.get("level")  # opcional
+
+    # Pega o estado atual do chamado
+    resp = table.get_item(Key={"chamado": chamado})
+    state_atual = resp.get("Item", {})
+
+    update = {"statusFinal": status}
+
+    if level:
+        # Se o frontend enviou o level, usa ele
+        update[f"level{level}_status"] = status
+    else:
+        # Se não mandou, tenta descobrir qual level está "ativo"
+        for i in range(1, 4):  # supondo até level3
+            if state_atual.get(f"level{i}_status") == "running":
+                update[f"level{i}_status"] = status
+                break
+
+    # Atualiza o chamado no DynamoDB
+    state = update_chamado(trace, chamado, update)
+
+    # Notifica todos conectados
+    broadcast({"event": "updateStatusFinal", "chamado": chamado, "state": state})
+
+    return {
+        "statusCode": 200,
+        "body": json.dumps({"msg": "Status final atualizado"}, cls=DecimalEncoder)
+    }
