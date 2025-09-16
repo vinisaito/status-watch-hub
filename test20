@@ -1,19 +1,17 @@
-// dentro do ActionTable
-const advanceEscalation = async (chamadoId: number, nextLevel: number, observacao: string) => {
-  try {
-    await fetch(`/api/chamados/${chamadoId}/advance`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        nextLevel,
-        observacao,
-      }),
-    });
+<ModernTimerModal
+  isOpen={timerManagementOpen}
+  onClose={() => {
+    setTimerManagementOpen(false);
+    setSelectedChamadoForTimer('');
+  }}
+  chamado={selectedChamadoForTimer}
+  currentLevel={getCurrentActiveLevel(parseInt(selectedChamadoForTimer)) || 1}
+  remainingTime={getCurrentActiveLevel(parseInt(selectedChamadoForTimer)) ? getRemainingTime(parseInt(selectedChamadoForTimer), getCurrentActiveLevel(parseInt(selectedChamadoForTimer))!) : 0}
+  formatTime={formatTime}
 
-    console.log(`✅ Chamado ${chamadoId} avançado para o nível ${nextLevel}`);
-    // 🔹 Atualiza estado local ou refaz fetch da tabela
-    refreshChamados();
-  } catch (err) {
-    console.error("❌ Erro ao avançar escalação:", err);
-  }
-};
+  updateObservacao={updateObservacao}
+  updateStatusFinal={updateStatusFinal}
+
+  onNextLevel={handleNextLevel}       // 🔹 função de avançar nível
+  onPreviousLevel={handlePreviousLevel} // 🔹 função de retroceder nível
+/>
