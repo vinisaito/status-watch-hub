@@ -1,67 +1,73 @@
-// hooks/useObservacoes.ts
-import { useState, useEffect, useCallback } from "react";
-import { toast } from "@/hooks/use-toast";
+import { useState, useEffect, useCallback } from 'react';
+import { toast } from '@/hooks/use-toast';
 
-export interface ObservacaoData {
-  chamado: number;
-  observacao: string;
-  status: string;
-  operador: string;
-  CreatedAt?: string;
-}
+export const useChatAcionados = () => {
+  const [acionadosSet, setAcionadosSet] = useState<Set<string>>(new Set());
+  const [loading, setLoading] = useState(true);
 
-export function useObservacoes() {
-  const [observacoesData, setObservacoesData] = useState<Map<string, ObservacaoData>>(new Map());
-
-  const fetchObservacoes = useCallback(async (retryCount = 0) => {
+  // Busca os incidentes acionados no DynamoDB via API
+  const fetchAcionados = useCallback(async () => {
     try {
-      const response = await fetch("https://f6ffk8e9fe.execute-api.us-east-1.amazonaws.com/prod/obs", {
-        method: "GET",
-        headers: { "Content-Type": "application/json" },
-      });
-
-      if (response.ok) {
-        const data: ObservacaoData[] = await response.json();
-        const observacoesMap = new Map<string, ObservacaoData>();
-        data.forEach(obs => observacoesMap.set(obs.chamado.toString(), obs));
-        setObservacoesData(observacoesMap);
-      } else if (response.status === 404) {
-        setObservacoesData(new Map());
-      } else {
-        throw new Error(`API retornou status: ${response.status}`);
-      }
+      setLoading(true);
+      const res = await fetch('https://f6ffk8e9fe.execute-api.us-east-1.amazonaws.com/prod/chatacionados');
+      if (!res.ok) throw new Error(`Erro ao buscar acionados: ${res.status}`);
+      const data: { chamado: string }[] = await res.json();
+      setAcionadosSet(new Set(data.map(item => item.chamado.toString())));
     } catch (error) {
-      console.error("Erro ao buscar observações:", error);
-      if (retryCount < 3) {
-        setTimeout(() => fetchObservacoes(retryCount + 1), 2000 * (retryCount + 1));
-      } else {
-        toast({
-          title: "Erro ao carregar observações",
-          description: "Não foi possível carregar dados salvos.",
-          variant: "destructive",
-        });
-      }
+      toast({
+        title: 'Erro ao buscar acionados',
+        description: 'Não foi possível carregar os incidentes acionados',
+        variant: 'destructive',
+      });
+    } finally {
+      setLoading(false);
     }
   }, []);
 
   useEffect(() => {
-    fetchObservacoes();
-    const interval = setInterval(fetchObservacoes, 5 * 60 * 1000);
-    return () => clearInterval(interval);
-  }, [fetchObservacoes]);
+    fetchAcionados();
+  }, [fetchAcionados]);
 
-  // Função utilitária → verifica se o chamado tem observação
-  const hasObservacao = useCallback(
-    (chamado: string) => {
-      const obs = observacoesData.get(chamado);
-      return !!(obs && obs.observacao.trim() !== "");
-    },
-    [observacoesData]
-  );
+  // Função para adicionar um chamado ao set de acionados
+  const addAcionado = useCallback((chamado: string) => {
+    setAcionadosSet(prev => new Set([...prev, chamado]));
+  }, []);
+
+  // Função para verificar se um chamado foi acionado
+  const isAcionado = useCallback((chamado: string) => {
+    return acionadosSet.has(chamado);
+  }, [acionadosSet]);
+
+  // Função para reenviar um chamado já acionado
+  const reenviarAcionado = useCallback(async (chamado: string) => {
+    try {
+      const res = await fetch('https://f6ffk8e9fe.execute-api.us-east-1.amazonaws.com/prod/chatacionados', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ chamado }),
+      });
+
+      if (!res.ok) throw new Error(`Erro ao reenviar chamado: ${res.status}`);
+
+      toast({
+        title: 'Alerta reenviado',
+        description: `O chamado ${chamado} foi reenviado com sucesso.`,
+      });
+    } catch (error) {
+      toast({
+        title: 'Erro ao reenviar chamado',
+        description: `Não foi possível reenviar o chamado ${chamado}.`,
+        variant: 'destructive',
+      });
+    }
+  }, []);
 
   return {
-    observacoesData,
-    fetchObservacoes,
-    hasObservacao,
+    acionadosSet,
+    loading,
+    addAcionado,
+    isAcionado,
+    reenviarAcionado, // ✅ agora disponível
+    refetch: fetchAcionados,
   };
-}
+};
