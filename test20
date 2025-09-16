@@ -1,17 +1,23 @@
-<ModernTimerModal
-  isOpen={timerManagementOpen}
-  onClose={() => {
-    setTimerManagementOpen(false);
-    setSelectedChamadoForTimer('');
-  }}
-  chamado={selectedChamadoForTimer}
-  currentLevel={getCurrentActiveLevel(parseInt(selectedChamadoForTimer)) || 1}
-  remainingTime={getCurrentActiveLevel(parseInt(selectedChamadoForTimer)) ? getRemainingTime(parseInt(selectedChamadoForTimer), getCurrentActiveLevel(parseInt(selectedChamadoForTimer))!) : 0}
-  formatTime={formatTime}
+case 'next':
+  if (currentLevel >= 5) {
+    // último nível → finaliza de vez
+    await Promise.all([
+      updateStatusFinal(chamado, levelStatusKey, "finished"),
+      updateObservacao(chamado, currentLevel, trimmedObservacao)
+    ]);
+    toast({ title: "✅ Chamado Finalizado", description: `Chamado ${chamado} foi finalizado com sucesso!` });
+  } else {
+    // finaliza o nível atual
+    await updateStatusFinal(chamado, levelStatusKey, "finished");
+    await updateObservacao(chamado, currentLevel, trimmedObservacao);
 
-  updateObservacao={updateObservacao}
-  updateStatusFinal={updateStatusFinal}
+    // avança e abre o próximo nível como "running"
+    await onNextLevel(chamado, currentLevel + 1, trimmedObservacao);
 
-  onNextLevel={handleNextLevel}       // 🔹 função de avançar nível
-  onPreviousLevel={handlePreviousLevel} // 🔹 função de retroceder nível
-/>
+    const nextLevelInfo = LEVEL_INFO[(currentLevel + 1) as keyof typeof LEVEL_INFO];
+    toast({
+      title: `🚀 ${nextLevelInfo?.title} Iniciado`,
+      description: `Timer de 20 minutos iniciado para ${nextLevelInfo?.title}`,
+    });
+  }
+  break;
