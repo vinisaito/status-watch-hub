@@ -1,24 +1,19 @@
-case 'next':
-  if (currentLevel >= 5) {
-    await Promise.all([
-      updateStatusFinal(chamado, levelStatusKey, "finished"),
-      updateObservacao(chamado, currentLevel, trimmedObservacao)
-    ]);
-    toast({
-      title: "✅ Chamado Finalizado",
-      description: `Chamado ${chamado} foi finalizado com sucesso!`,
+// dentro do ActionTable
+const advanceEscalation = async (chamadoId: number, nextLevel: number, observacao: string) => {
+  try {
+    await fetch(`/api/chamados/${chamadoId}/advance`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        nextLevel,
+        observacao,
+      }),
     });
-  } else {
-    // 1. Atualiza observação do nível atual
-    await updateObservacao(chamado, currentLevel, trimmedObservacao);
 
-    // 2. Dispara a função de iniciar próximo timer
-    await onNextLevel(chamado, currentLevel + 1, trimmedObservacao);
-
-    const nextLevelInfo = LEVEL_INFO[(currentLevel + 1) as keyof typeof LEVEL_INFO];
-    toast({
-      title: `🚀 ${nextLevelInfo?.title} Iniciado`,
-      description: `Timer de 20 minutos iniciado para ${nextLevelInfo?.title}`,
-    });
+    console.log(`✅ Chamado ${chamadoId} avançado para o nível ${nextLevel}`);
+    // 🔹 Atualiza estado local ou refaz fetch da tabela
+    refreshChamados();
+  } catch (err) {
+    console.error("❌ Erro ao avançar escalação:", err);
   }
-  break;
+};
