@@ -1,185 +1,230 @@
-import json
-import boto3
-import os
-import uuid
-from datetime import datetime, timezone
-from decimal import Decimal
+import { useState, useEffect, useMemo, useCallback } from 'react';
+import { Check, AlertTriangle, ExternalLink, Zap, Group, Calendar, Info, XCircle, Flame, ChevronLeft, ChevronRight, ArrowUpDown, ArrowUp, ArrowDown, User, FileText, Save, Edit3, CheckCircle, X, RefreshCw, Clock, Search } from 'lucide-react';
+import { Card, CardContent, CardHeader } from '@/components/ui/card';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { toast } from '@/hooks/use-toast';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import { Textarea } from '@/components/ui/textarea';
+import { Label } from '@/components/ui/label';
+import { useChatAcionados } from '@/hooks/use-chat-acionados';
+import { useChatAcionadosTimestamps } from '@/hooks/use-chat-acionados-timestamps';
 
-# ---------- Config ----------
-dynamodb = boto3.resource("dynamodb")
-table = dynamodb.Table(os.environ["CHAMADOS_TABLE"])  # Tabela principal (chamados)
-conn_table = dynamodb.Table(os.environ["CONNECTIONS_TABLE"])  # Tabela de conexões
-apigw = boto3.client(
-    "apigatewaymanagementapi",
-    endpoint_url=f"https://{os.environ['WS_API_ID']}.execute-api.{os.environ['AWS_REGION']}.amazonaws.com/{os.environ['WS_STAGE']}"
-)
+interface AlertData {
+  id: string;
+  chamado: string;
+  tipo_chamado: string;
+  grupo_chamado: string;
+  status_chamado: string;
+  abertura_chamado: string;
+  resumo_chamado: string;
+  severidade_chamado: string;
+  acionado: string;
+  chat: boolean;
+}
 
-# ---------- Helpers ----------
-class DecimalEncoder(json.JSONEncoder):
-    def default(self, o):
-        if isinstance(o, Decimal):
-            if o % 1 == 0:
-                return int(o)
-            return float(o)
-        return super(DecimalEncoder, self).default(o)
+interface ObservacaoData {
+  chamado: number;
+  observacao: string;
+  status: string;
+  operador: string;
+  CreatedAt?: string;
+}
 
-def log(trace, msg, **kwargs):
-    print(json.dumps({"trace": trace, "msg": msg, **kwargs}, cls=DecimalEncoder, default=str))
+interface ActionTableProps {
+  alertData: AlertData[];
+  onUpdateAcknowledgment: (alertId: string, acknowledged: boolean) => void;
+  loading: boolean;
+}
 
-def send_to_connection(conn_id, data):
-    """Envia mensagem para uma conexão específica"""
-    try:
-        apigw.post_to_connection(
-            ConnectionId=conn_id,
-            Data=json.dumps(data, cls=DecimalEncoder).encode("utf-8")
-        )
-    except apigw.exceptions.GoneException:
-        # Conexão morta -> remover
-        conn_table.delete_item(Key={"connectionId": conn_id})
-        log("broadcast", "Conexão removida (GoneException)", connectionId=conn_id)
+interface Obsstatus {
+  status: string;
+}
 
-def broadcast(data):
-    """Envia mensagem para todos conectados"""
-    conns = conn_table.scan().get("Items", [])
-    for c in conns:
-        send_to_connection(c["connectionId"], data)
+const Obsstatus: React.FC<Obsstatus> = ({ status }) => {
+  if (status === "finalizado") {
+    return null; // não renderiza nada
+  }
+}
+export default Obsstatus;
 
-def update_chamado(trace, chamado, update):
-    """Atualiza DynamoDB no chamado"""
-    log(trace, "Atualizando chamado", chamado=chamado, update=update)
-    resp = table.update_item(
-        Key={"chamado": chamado},
-        UpdateExpression="SET " + ", ".join(f"#{k} = :{k}" for k in update.keys()),
-        ExpressionAttributeNames={f"#{k}": k for k in update.keys()},
-        ExpressionAttributeValues={f":{k}": v for k, v in update.items()},
-        ReturnValues="ALL_NEW"
-    )
-    log(trace, "Chamado atualizado", new_state=resp.get("Attributes"))
-    return resp.get("Attributes")
+type SortField = 'chamado' | 'tipo_chamado' | 'grupo_chamado' | 'status_chamado' | 'abertura_chamado' | 'resumo_chamado' | 'severidade_chamado' | 'acionado';
+type SortDirection = 'asc' | 'desc' | null;
 
-# ---------- Handlers ----------
-def handle_connect(event, trace):
-    conn_id = event["requestContext"]["connectionId"]
-    conn_table.put_item(Item={"connectionId": conn_id, "connectedAt": datetime.now(timezone.utc).isoformat()})
-    log(trace, "Novo cliente conectado", connectionId=conn_id)
-    return {"statusCode": 200}
+export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: ActionTableProps) => {
+  const [selectedIncident, setSelectedIncident] = useState<AlertData | null>(null);
+  const [crisisDialogOpen, setCrisisDialogOpen] = useState(false);
+  const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
+  const [currentPage, setCurrentPage] = useState(1);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [itemsPerPage, setItemsPerPage] = useState<number>(() => {
+    const saved = sessionStorage.getItem("itemsPerPage");
+    return saved ? parseInt(saved, 10) : 5;
+  });
 
-def handle_disconnect(event, trace):
-    conn_id = event["requestContext"]["connectionId"]
-    conn_table.delete_item(Key={"connectionId": conn_id})
-    log(trace, "Cliente desconectado", connectionId=conn_id)
-    return {"statusCode": 200}
+  // Estados para ordenação
+  const [sortField, setSortField] = useState<SortField>('chamado');
+  const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
 
-def handle_start_timer(event, trace, body):
-    chamado = int(body["chamado"])
-    level = int(body["level"])
-    duration = int(body.get("duration", 1200))  # padrão 20min
-    now = datetime.now(timezone.utc).isoformat()
+  // Usando o hook personalizado para chat acionados
+  const { acionadosSet, isAcionado, addAcionado } = useChatAcionados();
 
-    update = {
-        f"level{level}_timerStart": now,
-        f"level{level}_duration": duration,
-        f"level{level}_status": "running"
+  // Estados para observações
+  const [observacoesData, setObservacoesData] = useState<Map<string, ObservacaoData>>(new Map());
+  const [observacaoDialogOpen, setObservacaoDialogOpen] = useState(false);
+  const [selectedChamadoForEdit, setSelectedChamadoForEdit] = useState<string>('');
+  const [tempOperador, setTempOperador] = useState<string>('');
+  const [tempObservacao, setTempObservacao] = useState<string>('');
+
+  const { getTimestampForChamado, hasTimestamp, fetchTimestamps } = useChatAcionadosTimestamps();
+
+  // Modal para detalhes do chamado
+  const [chamadoModalOpen, setChamadoModalOpen] = useState(false);
+
+  // Função para buscar observações da API com retry
+  const fetchObservacoes = useCallback(async (retryCount = 0) => {
+    try {
+      const response = await fetch('https://f6ffk8e9fe.execute-api.us-east-1.amazonaws.com/prod/obs', {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      });
+
+      if (response.ok) {
+        const data: ObservacaoData[] = await response.json();
+        const observacoesMap = new Map<string, ObservacaoData>();
+        data.forEach(obs => {
+          observacoesMap.set(obs.chamado.toString(), obs);
+        });
+        setObservacoesData(observacoesMap);
+        console.log(`Observações carregadas: ${data.length} registros`);
+      } else if (response.status === 404) {
+        // API retorna 404 quando não há dados, isso é normal
+        console.log('Nenhuma observação encontrada na API');
+        setObservacoesData(new Map());
+      } else {
+        throw new Error(`API retornou status: ${response.status}`);
+      }
+    } catch (error) {
+      console.error('Erro ao buscar observações:', error);
+
+      // Retry até 3 tentativas
+      if (retryCount < 3) {
+        console.log(`Tentando novamente... (${retryCount + 1}/3)`);
+        setTimeout(() => fetchObservacoes(retryCount + 1), 2000 * (retryCount + 1));
+      } else {
+        toast({
+          title: 'Erro ao carregar observações',
+          description: 'Não foi possível carregar dados salvos. As novas alterações funcionarão normalmente.',
+          variant: 'destructive',
+        });
+      }
     }
-    state = update_chamado(trace, chamado, update)
-    broadcast({"event": "startTimer", "chamado": chamado, "level": level, "state": state})
-    return {"statusCode": 200, "body": json.dumps({"msg": "Timer iniciado"}, cls=DecimalEncoder)}
+  }, []);
 
-def handle_update_status_final(event, trace, body):
-    chamado = int(body["chamado"])
-    status = body["status"]
-    level_status_key = body.get("levelStatusKey")  # chave enviada pelo frontend
+  // Carrega observações ao montar o componente
+  useEffect(() => {
+    fetchObservacoes();
+    fetchTimestamps();
+  }, [fetchObservacoes, fetchTimestamps]);
 
-    if not level_status_key:
-        level_status_key = "statusFinal"  # fallback
+  // Auto-refresh a cada 5 minutos
+  useEffect(() => {
+    const interval = setInterval(() => {
+      fetchObservacoes();
+      fetchTimestamps();
+    }, 5 * 60 * 1000); // 5 minutos
 
-    update = {level_status_key: status}
-    state = update_chamado(trace, chamado, update)
-    broadcast({"event": "updateStatusFinal", "chamado": chamado, "state": state})
+    return () => clearInterval(interval);
+  }, [fetchObservacoes, fetchTimestamps]);
 
-    return {
-        "statusCode": 200,
-        "body": json.dumps({"msg": f"{level_status_key} atualizado"}, cls=DecimalEncoder)
+  // Funções para manipular observações
+  const handleOpenObservacao = (chamado: string) => {
+    setSelectedChamadoForEdit(chamado);
+    const existingObs = observacoesData.get(chamado);
+    if (existingObs) {
+      setTempOperador(existingObs.operador);
+      setTempObservacao(existingObs.observacao);
+    } else {
+      setTempOperador('');
+      setTempObservacao('');
+    }
+    setObservacaoDialogOpen(true);
+  };
+
+  const handleSaveObservacao = async () => {
+    if (!tempOperador || !tempObservacao.trim() || !selectedChamadoForEdit) {
+      toast({
+        title: 'Campos obrigatórios',
+        description: 'Preencha o operador e a observação',
+        variant: 'destructive',
+      });
+      return;
     }
 
-def handle_update_operador(event, trace, body):
-    chamado = int(body["chamado"])
-    operador = body["operador"]
-    update = {"operador": operador}
-    state = update_chamado(trace, chamado, update)
-    broadcast({"event": "updateOperador", "chamado": chamado, "state": state})
-    return {"statusCode": 200, "body": json.dumps({"msg": "Operador atualizado"}, cls=DecimalEncoder)}
+    try {
+      const payload: ObservacaoData = {
+        chamado: parseInt(selectedChamadoForEdit),
+        observacao: tempObservacao.trim(),
+        status: 'acionado',
+        operador: tempOperador,
+      };
 
-def handle_update_status_final(event, trace, body):
-    chamado = int(body["chamado"])
-    status = body["status"]
-    level = body.get("level")  # opcional
+      const response = await fetch('https://f6ffk8e9fe.execute-api.us-east-1.amazonaws.com/prod/obs', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(payload),
+      });
 
-    update = {"statusFinal": status}
+      if (!response.ok) {
+        throw new Error(`Erro na API: ${response.status}`);
+      }
 
-    if level:
-        update[f"level{level}_status"] = status
+      // Atualiza o estado local
+      const updatedObsData = new Map(observacoesData);
+      updatedObsData.set(selectedChamadoForEdit, payload);
+      setObservacoesData(updatedObsData);
 
-    state = update_chamado(trace, chamado, update)
-    broadcast({"event": "updateStatusFinal", "chamado": chamado, "state": state})
-    return {
-        "statusCode": 200,
-        "body": json.dumps({"msg": "Status final atualizado"}, cls=DecimalEncoder)
+      toast({
+        title: 'Observação salva',
+        description: 'A observação foi salva com sucesso',
+      });
+
+      // Recarrega dados da API para pegar o CreatedAt
+      fetchObservacoes();
+
+      handleCancelObservacao();
+    } catch (error) {
+      console.error('Erro ao salvar observação:', error);
+      toast({
+        title: 'Erro ao salvar',
+        description: 'Não foi possível salvar a observação',
+        variant: 'destructive',
+      });
     }
+  };
 
-def handle_get_state(event, trace, body):
-    chamado = int(body["chamado"])
-    resp = table.get_item(Key={"chamado": chamado})
-    state = resp.get("Item", {})
-    log(trace, "Estado retornado", chamado=chamado, state=state)
-
-    # Enviar resposta padronizada só para o cliente que pediu
-    conn_id = event["requestContext"]["connectionId"]
-    payload = {
-        "event": "getState",
-        "chamado": chamado,
-        "state": state
-    }
-    send_to_connection(conn_id, payload)
-
-    return {
-        "statusCode": 200,
-        "body": json.dumps({"msg": "Estado enviado"}, cls=DecimalEncoder)
-    }
-
-# ---------- Main ----------
-def lambda_handler(event, context):
-    trace = str(uuid.uuid4())[:8]
-
-    # Segurança: alguns invokes (ex. test console) podem não ter requestContext
-    req_ctx = event.get("requestContext", {})
-    route = req_ctx.get("routeKey", "UNKNOWN")
-    conn_id = req_ctx.get("connectionId", "N/A")
-
-    log(trace, "invoke", routeKey=route, connectionId=conn_id, body=event.get("body"))
-
-    try:
-        if route == "$connect":
-            return handle_connect(event, trace)
-        elif route == "$disconnect":
-            return handle_disconnect(event, trace)
-        else:
-            # Mensagens normais -> parse body
-            body = json.loads(event.get("body") or "{}")
-
-            if route == "startTimer":
-                return handle_start_timer(event, trace, body)
-            elif route == "updateObservacao":
-                return handle_update_observacao(event, trace, body)
-            elif route == "updateOperador":
-                return handle_update_operador(event, trace, body)
-            elif route == "updateStatusFinal":
-                return handle_update_status_final(event, trace, body)
-            elif route == "getState":
-                return handle_get_state(event, trace, body)
-            else:
-                log(trace, "Rota inválida", route=route)
-                return {"statusCode": 400, "body": json.dumps({"error": "Invalid route"}, cls=DecimalEncoder)}
-    except Exception as e:
-        log(trace, "Erro na execução", error=str(e))
-        return {"statusCode": 500, "body": json.dumps({"error": str(e)}, cls=DecimalEncoder)}
+  const handleCancelObservacao = () => {
+    setObservacaoDialogOpen(false);
+    setSelectedChamadoForEdit('');
+    setTempOperador('');
+    setTempObservacao('');
+  };
