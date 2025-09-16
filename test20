@@ -1,73 +1,15 @@
-import { useState, useEffect, useCallback } from 'react';
-import { toast } from '@/hooks/use-toast';
+const ReenviarButton = ({ chamado }: { chamado: string }) => {
+  const { reenviarAcionado } = useChatAcionados();
 
-export const useChatAcionados = () => {
-  const [acionadosSet, setAcionadosSet] = useState<Set<string>>(new Set());
-  const [loading, setLoading] = useState(true);
+  if (!chamado) return null;
 
-  // Busca os incidentes acionados no DynamoDB via API
-  const fetchAcionados = useCallback(async () => {
-    try {
-      setLoading(true);
-      const res = await fetch('https://f6ffk8e9fe.execute-api.us-east-1.amazonaws.com/prod/chatacionados');
-      if (!res.ok) throw new Error(`Erro ao buscar acionados: ${res.status}`);
-      const data: { chamado: string }[] = await res.json();
-      setAcionadosSet(new Set(data.map(item => item.chamado.toString())));
-    } catch (error) {
-      toast({
-        title: 'Erro ao buscar acionados',
-        description: 'Não foi possível carregar os incidentes acionados',
-        variant: 'destructive',
-      });
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    fetchAcionados();
-  }, [fetchAcionados]);
-
-  // Função para adicionar um chamado ao set de acionados
-  const addAcionado = useCallback((chamado: string) => {
-    setAcionadosSet(prev => new Set([...prev, chamado]));
-  }, []);
-
-  // Função para verificar se um chamado foi acionado
-  const isAcionado = useCallback((chamado: string) => {
-    return acionadosSet.has(chamado);
-  }, [acionadosSet]);
-
-  // Função para reenviar um chamado já acionado
-  const reenviarAcionado = useCallback(async (chamado: string) => {
-    try {
-      const res = await fetch('https://f6ffk8e9fe.execute-api.us-east-1.amazonaws.com/prod/chatacionados', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ chamado }),
-      });
-
-      if (!res.ok) throw new Error(`Erro ao reenviar chamado: ${res.status}`);
-
-      toast({
-        title: 'Alerta reenviado',
-        description: `O chamado ${chamado} foi reenviado com sucesso.`,
-      });
-    } catch (error) {
-      toast({
-        title: 'Erro ao reenviar chamado',
-        description: `Não foi possível reenviar o chamado ${chamado}.`,
-        variant: 'destructive',
-      });
-    }
-  }, []);
-
-  return {
-    acionadosSet,
-    loading,
-    addAcionado,
-    isAcionado,
-    reenviarAcionado, // ✅ agora disponível
-    refetch: fetchAcionados,
-  };
+  return (
+    <Button
+      onClick={() => reenviarAcionado(chamado)}
+      variant="secondary"
+      className="bg-white/20 text-white hover:bg-white/30"
+    >
+      🔄 Reenviar alerta
+    </Button>
+  );
 };
