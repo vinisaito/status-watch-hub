@@ -2,12 +2,14 @@ import React, { useState, useCallback } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
+import { Input } from '@/components/ui/input';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
 import { ProgressIndicator } from '@/components/ui/progress-indicator';
 import { TimerDisplay } from '@/components/ui/timer-display';
-import { ArrowRight, ArrowLeft, CheckCircle, X, AlertTriangle, Lightbulb, MessageSquare, Timer, Building2, Users, Clock } from 'lucide-react';
+import { ArrowRight, CheckCircle, X, AlertTriangle, Lightbulb, MessageSquare, Timer, Building2, Users, Clock, User, Phone } from 'lucide-react';
 import { toast } from '@/hooks/use-toast';
 import { cn } from '@/lib/utils';
 
@@ -85,6 +87,8 @@ export const ModernTimerModal: React.FC<ModernTimerModalProps> = ({
   updateObservacao
 }) => {
   const [observacao, setObservacao] = useState('');
+  const [pessoaAcionada, setPessoaAcionada] = useState('');
+  const [statusAtendimento, setStatusAtendimento] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
 
   const levelStatusKey = `level${currentLevel}_status`;
@@ -110,33 +114,44 @@ export const ModernTimerModal: React.FC<ModernTimerModalProps> = ({
       }
     : LEVEL_INFO[currentLevel as keyof typeof LEVEL_INFO];
 
-  const validateObservacao = useCallback(() => {
+  const validateForm = useCallback(() => {
+    const errors = [];
+    
+    if (!pessoaAcionada.trim()) {
+      errors.push("Nome da pessoa acionada é obrigatório");
+    } else if (pessoaAcionada.trim().length < 2) {
+      errors.push("Nome deve ter pelo menos 2 caracteres");
+    }
+    
+    if (!statusAtendimento) {
+      errors.push("Status de atendimento é obrigatório");
+    }
+    
     if (!observacao.trim()) {
+      errors.push("Observações são obrigatórias");
+    } else if (observacao.trim().length < 10) {
+      errors.push("Observações devem ter pelo menos 10 caracteres");
+    }
+    
+    if (errors.length > 0) {
       toast({
-        title: "⚠️ Observação Obrigatória",
-        description: "É obrigatório preencher o campo de observações para continuar",
+        title: "⚠️ Campos Obrigatórios",
+        description: errors.join(". "),
         variant: "destructive",
       });
       return false;
     }
-    if (observacao.trim().length < 10) {
-      toast({
-        title: "⚠️ Observação Muito Curta",
-        description: "A observação deve ter pelo menos 10 caracteres",
-        variant: "destructive",
-      });
-      return false;
-    }
+    
     return true;
-  }, [observacao]);
+  }, [pessoaAcionada, statusAtendimento, observacao]);
 
   const handleAction = useCallback(async (action: 'next' | 'finish') => {
-    if (!validateObservacao()) return;
+    if (!validateForm()) return;
 
     setIsProcessing(true);
 
     try {
-      const trimmedObservacao = observacao.trim();
+      const fullObservacao = `Pessoa Acionada: ${pessoaAcionada.trim()}\nStatus: ${statusAtendimento}\n\nDetalhes: ${observacao.trim()}`;
 
       if (finalizado && action !== 'finish') {
         toast({
@@ -152,7 +167,7 @@ export const ModernTimerModal: React.FC<ModernTimerModalProps> = ({
           if (currentLevel >= 5) {
             await Promise.all([
               updateStatusFinal(chamado, levelStatusKey, "finished"),
-              updateObservacao(chamado, currentLevel, trimmedObservacao)
+              updateObservacao(chamado, currentLevel, fullObservacao)
             ]);
             toast({ 
               title: "✅ Chamado Finalizado", 
@@ -160,8 +175,8 @@ export const ModernTimerModal: React.FC<ModernTimerModalProps> = ({
             });
           } else {
             await updateStatusFinal(chamado, levelStatusKey, "finished");
-            await updateObservacao(chamado, currentLevel, trimmedObservacao);
-            await onNextLevel(chamado, currentLevel + 1, trimmedObservacao);
+            await updateObservacao(chamado, currentLevel, fullObservacao);
+            await onNextLevel(chamado, currentLevel + 1, fullObservacao);
 
             const nextLevelInfo = LEVEL_INFO[(currentLevel + 1) as keyof typeof LEVEL_INFO];
             toast({
@@ -174,7 +189,7 @@ export const ModernTimerModal: React.FC<ModernTimerModalProps> = ({
         case 'finish':
           await Promise.all([
             updateStatusFinal(chamado, levelStatusKey, "finished"),
-            updateObservacao(chamado, currentLevel, trimmedObservacao)
+            updateObservacao(chamado, currentLevel, fullObservacao)
           ]);
           setFinalizado(true);
           toast({
@@ -184,7 +199,10 @@ export const ModernTimerModal: React.FC<ModernTimerModalProps> = ({
           break;
       }
 
+      // Reset form
       setObservacao('');
+      setPessoaAcionada('');
+      setStatusAtendimento('');
       onClose();
 
     } catch (error) {
@@ -197,11 +215,12 @@ export const ModernTimerModal: React.FC<ModernTimerModalProps> = ({
     } finally {
       setIsProcessing(false);
     }
-  }, [validateObservacao, observacao, currentLevel, chamado, onNextLevel, onClose, updateStatusFinal, updateObservacao, finalizado, levelStatusKey]);
+  }, [validateForm, pessoaAcionada, statusAtendimento, observacao, currentLevel, chamado, onNextLevel, onClose, updateStatusFinal, updateObservacao, finalizado, levelStatusKey]);
 
   if (!levelInfo) return null;
 
   const LevelIcon = levelInfo.icon;
+  const isFormValid = pessoaAcionada.trim().length >= 2 && statusAtendimento && observacao.trim().length >= 10;
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
@@ -248,15 +267,6 @@ export const ModernTimerModal: React.FC<ModernTimerModalProps> = ({
                 </div>
               </div>
             </div>
-
-            <div className={cn(
-              "p-4 rounded-xl border-l-4",
-              levelInfo.bgColor
-            )}>
-              <p className="text-sm text-muted-foreground">
-                {levelInfo.description}
-              </p>
-            </div>
           </div>
         </DialogHeader>
 
@@ -274,77 +284,63 @@ export const ModernTimerModal: React.FC<ModernTimerModalProps> = ({
             />
           </div>
 
-          {/* Escalation History Section */}
+          <Separator />
+
+          {/* Required Information Section */}
           <div className="space-y-6">
             <div className="flex items-center gap-3">
-              <Clock className="h-6 w-6 text-primary" />
+              <Phone className="h-6 w-6 text-primary" />
               <Label className="text-xl font-semibold text-foreground">
-                Histórico de Escalações
+                Informações do Acionamento
               </Label>
             </div>
 
-            <div className="bg-card rounded-xl border border-border p-6 max-h-64 overflow-y-auto">
-              <div className="space-y-4">
-                {Array.from({ length: currentLevel - 1 }, (_, index) => {
-                  const level = index + 1;
-                  const levelData = LEVEL_INFO[level as keyof typeof LEVEL_INFO];
-                  const LevelIcon = levelData?.icon || Clock;
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              {/* Nome da Pessoa Acionada */}
+              <div className="space-y-3">
+                <Label htmlFor="pessoa-acionada" className="text-base font-medium flex items-center gap-2">
+                  <User className="h-4 w-4" />
+                  Nome da Pessoa Acionada
+                  <span className="text-destructive">*</span>
+                </Label>
+                <Input
+                  id="pessoa-acionada"
+                  type="text"
+                  value={pessoaAcionada}
+                  onChange={(e) => setPessoaAcionada(e.target.value)}
+                  placeholder="Ex: João Silva, Maria Santos..."
+                  className={cn(
+                    "border-2 focus:border-primary transition-all duration-200",
+                    pessoaAcionada.trim().length >= 2 && "border-success"
+                  )}
+                  disabled={isProcessing || finalizado}
+                  maxLength={100}
+                />
+              </div>
 
-                  return (
-                    <div key={level} className="flex items-start gap-4 p-4 bg-muted/30 rounded-lg border border-border/50">
-                      <div className={cn(
-                        "p-2 rounded-lg bg-gradient-to-r text-white flex-shrink-0",
-                        levelData?.color || "from-gray-500 to-gray-600"
-                      )}>
-                        <LevelIcon className="h-5 w-5" />
-                      </div>
-
-                      <div className="flex-1 space-y-2">
-                        <div className="flex items-center justify-between">
-                          <h4 className="font-semibold text-foreground">
-                            {levelData?.title || `Nível ${level}`}
-                          </h4>
-                          <Badge variant="outline" className="text-xs">
-                            Concluído
-                          </Badge>
-                        </div>
-
-                        <p className="text-sm text-muted-foreground">
-                          {levelData?.description || "Escalação processada"}
-                        </p>
-
-                        {/* Mock observation data - in real app, this would come from chamadoData */}
-                        <div className="mt-3 p-3 bg-background/50 rounded-md border border-border/30">
-                          {/* <p className="text-sm text-muted-foreground mb-1 font-medium">
-                            Observações registradas:
-                          </p>
-                          <p className="text-sm text-foreground">
-                            {chamadoData?.[`level${level}_observacao`] || 
-                             `Escalação ${level} processada - análise técnica realizada e encaminhamento efetuado conforme procedimentos estabelecidos.`}
-
-                          </p> */}
-                          <div className="flex items-center gap-2 mt-2 text-xs text-muted-foreground">
-                            <Clock className="h-3 w-3" />
-                            <span>
-                              {chamadoData?.[`level${level}_timestamp`] || 
-                               `Finalizado em ${new Date(Date.now() - (currentLevel - level) * 20 * 60 * 1000).toLocaleString('pt-BR')}`}
-                            </span>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })}
-
-                {currentLevel === 1 && (
-                  <div className="text-center py-8 text-muted-foreground">
-                    <Clock className="h-12 w-12 mx-auto mb-3 opacity-30" />
-                    <p className="text-sm">
-                      Nenhuma escalação anterior registrada.<br />
-                      Este é o primeiro nível de atendimento.
-                    </p>
-                  </div>
-                )}
+              {/* Status do Atendimento */}
+              <div className="space-y-3">
+                <Label htmlFor="status-atendimento" className="text-base font-medium flex items-center gap-2">
+                  <CheckCircle className="h-4 w-4" />
+                  Status do Atendimento
+                  <span className="text-destructive">*</span>
+                </Label>
+                <Select 
+                  value={statusAtendimento} 
+                  onValueChange={setStatusAtendimento}
+                  disabled={isProcessing || finalizado}
+                >
+                  <SelectTrigger className={cn(
+                    "border-2 focus:border-primary",
+                    statusAtendimento && "border-success"
+                  )}>
+                    <SelectValue placeholder="Selecione o status do atendimento" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="atendido">✅ Atendido</SelectItem>
+                    <SelectItem value="nao-atendido">❌ Não Atendido</SelectItem>
+                  </SelectContent>
+                </Select>
               </div>
             </div>
           </div>
@@ -356,20 +352,20 @@ export const ModernTimerModal: React.FC<ModernTimerModalProps> = ({
             <div className="flex items-center gap-3">
               <MessageSquare className="h-6 w-6 text-primary" />
               <Label htmlFor="observacao" className="text-xl font-semibold text-foreground">
-                Observações Técnicas
+                Observações
               </Label>
-              <Badge variant="destructive" className="text-xs font-bold">
-                OBRIGATÓRIO
-              </Badge>
             </div>
 
             <Textarea
               id="observacao"
               value={observacao}
               onChange={(e) => setObservacao(e.target.value)}
-              placeholder={`Descreva detalhadamente as ações de acionamento realizadas`}
-              rows={8}
-              className="border-2 focus:border-primary transition-all duration-200 resize-none text-base min-h-[120px]"
+              placeholder="Descreva as informações do acionamento"
+              rows={6}
+              className={cn(
+                "border-2 focus:border-primary transition-all duration-200 resize-none text-base min-h-[120px]",
+                observacao.trim().length >= 10 && "border-success"
+              )}
               disabled={isProcessing || finalizado}
               maxLength={1000}
             />
@@ -392,6 +388,9 @@ export const ModernTimerModal: React.FC<ModernTimerModalProps> = ({
 
           <Separator />
 
+          {/* Form Validation Summary */}
+          
+
           {/* Action Buttons */}
           <div className="space-y-6">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -400,12 +399,12 @@ export const ModernTimerModal: React.FC<ModernTimerModalProps> = ({
                 variant="finish"
                 size="lg"
                 onClick={() => handleAction('finish')}
-                disabled={!observacao.trim() || observacao.trim().length < 10 || isProcessing || finalizado}
+                disabled={!isFormValid || isProcessing || finalizado}
                 className="h-20"
               >
                 <CheckCircle className="h-6 w-6 mr-3" />
                 <div className="text-left">
-                  <div className="font-semibold text-base">Acompnhamento Confirmado</div>
+                  <div className="font-semibold text-base">Acompanhamento Confirmado</div>
                   <div className="text-sm opacity-90">Finalizar Acompanhamento</div>
                 </div>
               </Button>
@@ -415,7 +414,7 @@ export const ModernTimerModal: React.FC<ModernTimerModalProps> = ({
                 variant="destructive"
                 size="lg"
                 onClick={() => handleAction('next')}
-                disabled={!observacao.trim() || observacao.trim().length < 10 || isProcessing || finalizado}
+                disabled={!isFormValid || isProcessing || finalizado}
                 className="h-20 animate-glow"
               >
                 {finalizado ? (
@@ -450,39 +449,34 @@ export const ModernTimerModal: React.FC<ModernTimerModalProps> = ({
           {/* Guidelines Section */}
           <div className="gradient-modal rounded-2xl p-6 border border-border/50">
             <div className="space-y-4">
-              <div className="flex items-center gap-3">
-                <Lightbulb className="h-6 w-6 text-primary" />
-                <h4 className="font-semibold text-foreground text-xl">Diretrizes de Monitoração</h4>
-              </div>
-
               <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
                 <div className="space-y-2">
                   <div className="flex items-center gap-2 text-destructive">
                     <AlertTriangle className="h-5 w-5" />
-                    <span className="font-semibold">Observações Obrigatórias</span>
+                    <span className="font-semibold">Dados Obrigatórios</span>
                   </div>
                   <p className="text-sm text-muted-foreground">
-                    Documente todas as ações realizadas, diagnósticos e próximos passos.
+                    Nome da pessoa, status e observações são campos obrigatórios para prosseguir.
                   </p>
                 </div>
 
                 <div className="space-y-2">
                   <div className="flex items-center gap-2 text-primary">
                     <Timer className="h-5 w-5" />
-                    <span className="font-semibold">Timer Renovado</span>
+                    <span className="font-semibold">Controle de Tempo</span>
                   </div>
                   <p className="text-sm text-muted-foreground">
-                    Cada escalação reinicia o timer de 20 minutos automaticamente.
+                    Cada escalação reinicia automaticamente o timer de 20 minutos.
                   </p>
                 </div>
 
                 <div className="space-y-2">
                   <div className="flex items-center gap-2 text-success">
                     <CheckCircle className="h-5 w-5" />
-                    <span className="font-semibold">Resolução</span>
+                    <span className="font-semibold">Documentação</span>
                   </div>
                   <p className="text-sm text-muted-foreground">
-                    Use "Resolver Agora" quando o acionamento for confirmado.
+                    Todas as informações são automaticamente registradas no histórico.
                   </p>
                 </div>
               </div>
