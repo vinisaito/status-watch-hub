@@ -1,511 +1,183 @@
-import React, { useState, useCallback } from 'react';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { Button } from '@/components/ui/button';
-import { Textarea } from '@/components/ui/textarea';
-import { Input } from '@/components/ui/input';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Label } from '@/components/ui/label';
-import { Badge } from '@/components/ui/badge';
-import { Separator } from '@/components/ui/separator';
-import { ProgressIndicator } from '@/components/ui/progress-indicator';
-import { TimerDisplay } from '@/components/ui/timer-display';
-import { ArrowRight, CheckCircle, X, AlertTriangle, Lightbulb, MessageSquare, Timer, Building2, Users, Clock, User, Phone } from 'lucide-react';
-import { toast } from '@/hooks/use-toast';
-import { cn } from '@/lib/utils';
+import json
+import boto3
+import os
+import uuid
+from datetime import datetime, timezone
+from decimal import Decimal
 
-interface ModernTimerModalProps {
-  isOpen: boolean;
-  onClose: () => void;
-  chamado: number;
-  currentLevel: number;
-  remainingTime: number;
-  chamadoData?: any;
-  formatTime: (seconds: number) => string;
-  onNextLevel: (chamado: number, level: number, observacao: string) => void;
-  updateStatusFinal: (chamado: number, levelStatusKey: string, status: string) => void;
-  updateObservacao: (chamado: number, level: number, observacao: string) => void;
-}
+# ---------- Config ----------
+dynamodb = boto3.resource("dynamodb")
+table = dynamodb.Table(os.environ["CHAMADOS_TABLE"])  # Tabela principal (chamados)
+conn_table = dynamodb.Table(os.environ["CONNECTIONS_TABLE"])  # Tabela de conexões
+apigw = boto3.client(
+    "apigatewaymanagementapi",
+    endpoint_url=f"https://{os.environ['WS_API_ID']}.execute-api.{os.environ['AWS_REGION']}.amazonaws.com/{os.environ['WS_STAGE']}"
+)
 
-const LEVEL_INFO = {
-  1: {
-    title: "Primeiro Acionamento",
-    subtitle: "",
-    nextAction: "Avançar para 1ª Escalação",
-    icon: Clock,
-    color: "from-blue-500 to-blue-600",
-    bgColor: "bg-blue-500/5 border-blue-200",
-    description: "Atendimento Inicial da Equipe"
-  },
-  2: {
-    title: "1ª Escalação",
-    subtitle: "",
-    nextAction: "Avançar para 2ª Escalação", 
-    icon: Users,
-    color: "from-orange-500 to-orange-600",
-    bgColor: "bg-orange-500/5 border-orange-200",
-    description: "Acionamento do Gestor de Incidente ou Plantonista"
-  },
-  3: {
-    title: "2ª Escalação",
-    subtitle: "",
-    nextAction: "Avançar para 3ª Escalação",
-    icon: Building2,
-    color: "from-red-500 to-red-600", 
-    bgColor: "bg-red-500/5 border-red-200",
-    description: "Acionamento do Coordenador"
-  },
-  4: {
-    title: "3ª Escalação",
-    subtitle: "",
-    nextAction: "Avançar para 4ª Escalação",
-    icon: Users,
-    color: "from-purple-500 to-purple-600",
-    bgColor: "bg-purple-500/5 border-purple-200", 
-    description: "Acionamento do Gerente"
-  },
-  5: {
-    title: "4ª Escalação",
-    subtitle: "",
-    nextAction: "Finalizar Chamado",
-    icon: Building2,
-    color: "from-red-600 to-red-700",
-    bgColor: "bg-red-600/5 border-red-300",
-    description: "Acionamento do Kleber Costa"
-  }
-};
+# ---------- Helpers ----------
+class DecimalEncoder(json.JSONEncoder):
+    def default(self, o):
+        if isinstance(o, Decimal):
+            if o % 1 == 0:
+                return int(o)
+            return float(o)
+        return super(DecimalEncoder, self).default(o)
 
-export const ModernTimerModal: React.FC<ModernTimerModalProps> = ({
-  isOpen,
-  onClose,
-  chamado,
-  currentLevel,
-  remainingTime,
-  chamadoData,
-  formatTime,
-  onNextLevel,
-  updateStatusFinal,
-  updateObservacao
-}) => {
-  const [observacao, setObservacao] = useState('');
-  const [pessoaAcionada, setPessoaAcionada] = useState('');
-  const [statusAtendimento, setStatusAtendimento] = useState('');
-  const [isProcessing, setIsProcessing] = useState(false);
+def log(trace, msg, **kwargs):
+    print(json.dumps({"trace": trace, "msg": msg, **kwargs}, cls=DecimalEncoder, default=str))
 
-  const levelStatusKey = `level${currentLevel}_status`;
-  const [finalizado, setFinalizado] = useState(
-    chamadoData?.statusFinal === "finished" || chamadoData?.[levelStatusKey] === "finished"
-  );
+def send_to_connection(conn_id, data):
+    """Envia mensagem para uma conexão específica"""
+    try:
+        apigw.post_to_connection(
+            ConnectionId=conn_id,
+            Data=json.dumps(data, cls=DecimalEncoder).encode("utf-8")
+        )
+    except apigw.exceptions.GoneException:
+        # Conexão morta -> remover
+        conn_table.delete_item(Key={"connectionId": conn_id})
+        log("broadcast", "Conexão removida (GoneException)", connectionId=conn_id)
 
-  React.useEffect(() => {
-    setFinalizado(
-      chamadoData?.statusFinal === "finished" || chamadoData?.[levelStatusKey] === "finished"
-    );
-  }, [chamadoData, levelStatusKey]);
+def broadcast(data):
+    """Envia mensagem para todos conectados"""
+    conns = conn_table.scan().get("Items", [])
+    for c in conns:
+        send_to_connection(c["connectionId"], data)
 
-  const levelInfo = finalizado
-    ? { 
-        title: "Chamado Finalizado", 
-        subtitle: "Processo encerrado com sucesso",
-        description: "O chamado foi resolvido e encerrado", 
-        icon: CheckCircle,
-        color: "from-success to-success/90", 
-        bgColor: "bg-success/5 border-success/20",
-        nextAction: "Finalizado"
-      }
-    : LEVEL_INFO[currentLevel as keyof typeof LEVEL_INFO];
+def update_chamado(trace, chamado, update):
+    """Atualiza DynamoDB no chamado"""
+    log(trace, "Atualizando chamado", chamado=chamado, update=update)
+    resp = table.update_item(
+        Key={"chamado": chamado},
+        UpdateExpression="SET " + ", ".join(f"#{k} = :{k}" for k in update.keys()),
+        ExpressionAttributeNames={f"#{k}": k for k in update.keys()},
+        ExpressionAttributeValues={f":{k}": v for k, v in update.items()},
+        ReturnValues="ALL_NEW"
+    )
+    log(trace, "Chamado atualizado", new_state=resp.get("Attributes"))
+    return resp.get("Attributes")
 
-  const validateForm = useCallback(() => {
-    const errors = [];
-    
-    if (!pessoaAcionada.trim()) {
-      errors.push("Nome da pessoa acionada é obrigatório");
-    } else if (pessoaAcionada.trim().length < 2) {
-      errors.push("Nome deve ter pelo menos 2 caracteres");
+# ---------- Handlers ----------
+def handle_connect(event, trace):
+    conn_id = event["requestContext"]["connectionId"]
+    conn_table.put_item(Item={"connectionId": conn_id, "connectedAt": datetime.now(timezone.utc).isoformat()})
+    log(trace, "Novo cliente conectado", connectionId=conn_id)
+    return {"statusCode": 200}
+
+def handle_disconnect(event, trace):
+    conn_id = event["requestContext"]["connectionId"]
+    conn_table.delete_item(Key={"connectionId": conn_id})
+    log(trace, "Cliente desconectado", connectionId=conn_id)
+    return {"statusCode": 200}
+
+def handle_start_timer(event, trace, body):
+    chamado = int(body["chamado"])
+    level = int(body["level"])
+    duration = int(body.get("duration", 1200))  
+    now = datetime.now(timezone.utc).isoformat()
+
+    update = {
+        f"level{level}_timerStart": now,
+        f"level{level}_duration": duration,
+        f"level{level}_status": "running"
     }
-    
-    if (!statusAtendimento) {
-      errors.push("Status de atendimento é obrigatório");
+    state = update_chamado(trace, chamado, update)
+    broadcast({"event": "startTimer", "chamado": chamado, "level": level, "state": state})
+    return {"statusCode": 200, "body": json.dumps({"msg": "Timer iniciado"}, cls=DecimalEncoder)}
+
+def handle_update_observacao(event, trace, body):
+    """Atualiza a observação de um level de um chamado"""
+    chamado = int(body["chamado"])
+    level = int(body.get("level", 1))  
+    observacao = body["observacao"]
+
+    update = {f"level{level}_observacao": observacao}
+    state = update_chamado(trace, chamado, update)
+
+    broadcast({"event": "updateObservacao", "chamado": chamado, "state": state})
+    return {"statusCode": 200, "body": json.dumps({"msg": f"Observação do level {level} atualizada"}, cls=DecimalEncoder)}
+
+def handle_update_operador(event, trace, body):
+    chamado = int(body["chamado"])
+    operador = body["operador"]
+    update = {"operador": operador}
+    state = update_chamado(trace, chamado, update)
+    broadcast({"event": "updateOperador", "chamado": chamado, "state": state})
+    return {"statusCode": 200, "body": json.dumps({"msg": "Operador atualizado"}, cls=DecimalEncoder)}
+
+def handle_update_status_final(event, trace, body):
+    chamado = int(body["chamado"])
+    status = body["status"]
+    level = body.get("level")  # opcional
+
+    # Pega o estado atual do chamado
+    resp = table.get_item(Key={"chamado": chamado})
+    state_atual = resp.get("Item", {})
+
+    update = {"statusFinal": status}
+
+    if level:
+        # Se o frontend enviou o level, usa ele
+        update[f"level{level}_status"] = status
+    else:
+        # Se não mandou, tenta descobrir qual level está "ativo"
+        for i in range(1, 6): 
+            if state_atual.get(f"level{i}_status") == "running":
+                update[f"level{i}_status"] = status
+                break
+
+    # Atualiza o chamado no DynamoDB
+    state = update_chamado(trace, chamado, update)
+
+    # Notifica todos conectados
+    broadcast({"event": "updateStatusFinal", "chamado": chamado, "state": state})
+
+    return {
+        "statusCode": 200,
+        "body": json.dumps({"msg": "Status final atualizado"}, cls=DecimalEncoder)
     }
-    
-    if (!observacao.trim()) {
-      errors.push("Observações são obrigatórias");
-    } else if (observacao.trim().length < 10) {
-      errors.push("Observações devem ter pelo menos 10 caracteres");
-    }
-    
-    if (errors.length > 0) {
-      toast({
-        title: "⚠️ Campos Obrigatórios",
-        description: errors.join(". "),
-        variant: "destructive",
-      });
-      return false;
-    }
-    
-    return true;
-  }, [pessoaAcionada, statusAtendimento, observacao]);
 
-  const handleAction = useCallback(async (action: 'next' | 'finish') => {
-    if (!validateForm()) return;
+def handle_get_state(event, trace, body):
+    chamado = int(body["chamado"])
+    resp = table.get_item(Key={"chamado": chamado})
+    state = resp.get("Item", {})
+    log(trace, "Estado retornado", chamado=chamado, state=state)
 
-    setIsProcessing(true);
+    # Enviar resposta padronizada só para o cliente que pediu
+    conn_id = event["requestContext"]["connectionId"]
+    payload = {"event": "getState", "chamado": chamado, "state": state}
+    send_to_connection(conn_id, payload)
+    return {"statusCode": 200, "body": json.dumps({"msg": "Estado enviado"}, cls=DecimalEncoder)}
 
-    try {
-      const fullObservacao = `Pessoa Acionada: ${pessoaAcionada.trim()}\nStatus: ${statusAtendimento}\n\nDetalhes: ${observacao.trim()}`;
+# ---------- Main ----------
+def lambda_handler(event, context):
+    trace = str(uuid.uuid4())[:8]
+    req_ctx = event.get("requestContext", {})
+    route = req_ctx.get("routeKey", "UNKNOWN")
+    conn_id = req_ctx.get("connectionId", "N/A")
 
-      if (finalizado && action !== 'finish') {
-        toast({
-          title: "⚠️ Chamado já finalizado",
-          description: "Não é possível alterar níveis pois o chamado está finalizado",
-          variant: "destructive",
-        });
-        return;
-      }
+    log(trace, "invoke", routeKey=route, connectionId=conn_id, body=event.get("body"))
 
-      switch (action) {
-        case 'next':
-          if (currentLevel >= 5) {
-            await Promise.all([
-              updateStatusFinal(chamado, levelStatusKey, "finished"),
-              updateObservacao(chamado, currentLevel, fullObservacao)
-            ]);
-            toast({ 
-              title: "✅ Chamado Finalizado", 
-              description: `Chamado ${chamado} foi finalizado com sucesso!` 
-            });
-          } else {
-            await updateStatusFinal(chamado, levelStatusKey, "finished");
-            await updateObservacao(chamado, currentLevel, fullObservacao);
-            await onNextLevel(chamado, currentLevel + 1, fullObservacao);
-
-            const nextLevelInfo = LEVEL_INFO[(currentLevel + 1) as keyof typeof LEVEL_INFO];
-            toast({
-              title: `🚀 ${nextLevelInfo?.title} Iniciado`,
-              description: `Timer de 20 minutos iniciado para ${nextLevelInfo?.title}`,
-            });
-          }
-          break;
-
-        case 'finish':
-          await Promise.all([
-            updateStatusFinal(chamado, levelStatusKey, "finished"),
-            updateObservacao(chamado, currentLevel, fullObservacao)
-          ]);
-          setFinalizado(true);
-          toast({
-            title: "✅ Chamado Finalizado",
-            description: `Chamado ${chamado} foi finalizado com sucesso!`,
-          });
-          break;
-      }
-
-      // Reset form
-      setObservacao('');
-      setPessoaAcionada('');
-      setStatusAtendimento('');
-      onClose();
-
-    } catch (error) {
-      console.error("❌ Erro no handleAction:", error);
-      toast({
-        title: "❌ Erro na Operação",
-        description: "Ocorreu um erro ao processar a ação. Verifique os logs.",
-        variant: "destructive",
-      });
-    } finally {
-      setIsProcessing(false);
-    }
-  }, [validateForm, pessoaAcionada, statusAtendimento, observacao, currentLevel, chamado, onNextLevel, onClose, updateStatusFinal, updateObservacao, finalizado, levelStatusKey]);
-
-  if (!levelInfo) return null;
-
-  const LevelIcon = levelInfo.icon;
-  const isFormValid = pessoaAcionada.trim().length >= 2 && statusAtendimento && observacao.trim().length >= 10;
-
-  return (
-    <Dialog open={isOpen} onOpenChange={onClose}>
-      <DialogContent className="sm:max-w-4xl max-h-[85vh] overflow-y-auto border-border shadow-modal">
-        {/* Header Section */}
-        <DialogHeader className="relative pb-8">
-          <div className={cn(
-            "absolute inset-0 bg-gradient-to-r opacity-5 rounded-t-lg",
-            levelInfo.color
-          )} />
-
-          <div className="relative z-10 space-y-6">
-            <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-6">
-              <div className="flex items-center gap-6">
-                <div className={cn(
-                  "p-4 rounded-2xl bg-gradient-to-r shadow-lg",
-                  levelInfo.color,
-                  "text-white"
-                )}>
-                  <LevelIcon className="h-10 w-10" />
-                </div>
-
-                <div className="space-y-2">
-                  <DialogTitle className="text-3xl lg:text-4xl font-bold text-foreground">
-                    {levelInfo.title}
-                  </DialogTitle>
-                  <p className="text-lg text-muted-foreground">
-                    {levelInfo.subtitle}
-                  </p>
-                  <div className="flex items-center gap-3">
-                    <Badge variant="outline" className="text-sm font-medium">
-                      Chamado #{chamado}
-                    </Badge>
-                    <Badge 
-                      variant={finalizado ? "default" : "secondary"}
-                      className={cn(
-                        "text-sm font-medium",
-                        finalizado && "bg-success text-success-foreground"
-                      )}
-                    >
-                      {finalizado ? "Finalizado" : "Em Andamento"}
-                    </Badge>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <div className={cn(
-              "p-4 rounded-xl border-l-4",
-              levelInfo.bgColor
-            )}>
-              <p className="text-sm text-muted-foreground">
-                {levelInfo.description}
-              </p>
-            </div>
-          </div>
-        </DialogHeader>
-
-        <div className="space-y-8">
-          {/* Timer and Progress Section */}
-          <div className="grid grid-cols-1 xl:grid-cols-2 gap-8">
-            <TimerDisplay 
-              remainingTime={remainingTime} 
-              formatTime={formatTime}
-              className="w-full"
-            />
-            <ProgressIndicator 
-              currentLevel={currentLevel}
-              className="w-full"
-            />
-          </div>
-
-          <Separator />
-
-          {/* Required Information Section */}
-          <div className="space-y-6">
-            <div className="flex items-center gap-3">
-              <Phone className="h-6 w-6 text-primary" />
-              <Label className="text-xl font-semibold text-foreground">
-                Acionamento
-              </Label>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              {/* Nome da Pessoa Acionada */}
-              <div className="space-y-3">
-                <Label htmlFor="pessoa-acionada" className="text-base font-medium flex items-center gap-2">
-                  <User className="h-4 w-4" />
-                  Nome da Pessoa Acionada
-                  <span className="text-destructive">*</span>
-                </Label>
-                <Input
-                  id="pessoa-acionada"
-                  type="text"
-                  value={pessoaAcionada}
-                  onChange={(e) => setPessoaAcionada(e.target.value)}
-                  placeholder="Ex: João Silva, Maria Santos..."
-                  className={cn(
-                    "border-2 focus:border-primary transition-all duration-200",
-                    pessoaAcionada.trim().length >= 2 && "border-success"
-                  )}
-                  disabled={isProcessing || finalizado}
-                  maxLength={100}
-                />
-              </div>
-
-              {/* Status do Atendimento */}
-              <div className="space-y-3">
-                <Label htmlFor="status-atendimento" className="text-base font-medium flex items-center gap-2">
-                  <CheckCircle className="h-4 w-4" />
-                  Status do Atendimento
-                  <span className="text-destructive">*</span>
-                </Label>
-                <Select 
-                  value={statusAtendimento} 
-                  onValueChange={setStatusAtendimento}
-                  disabled={isProcessing || finalizado}
-                >
-                  <SelectTrigger className={cn(
-                    "border-2 focus:border-primary",
-                    statusAtendimento && "border-success"
-                  )}>
-                    <SelectValue placeholder="Selecione o status do atendimento" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="atendido">✅ Atendido</SelectItem>
-                    <SelectItem value="nao-atendido">❌ Não Atendido</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-          </div>
-
-          <Separator />
-
-          {/* Observations Section */}
-          <div className="space-y-6">
-            <div className="flex items-center gap-3">
-              <MessageSquare className="h-6 w-6 text-primary" />
-              <Label htmlFor="observacao" className="text-xl font-semibold text-foreground">
-                Observações
-              </Label>
-            </div>
-
-            <Textarea
-              id="observacao"
-              value={observacao}
-              onChange={(e) => setObservacao(e.target.value)}
-              placeholder="Descreva as informações do acionamento"
-              rows={6}
-              className={cn(
-                "border-2 focus:border-primary transition-all duration-200 resize-none text-base min-h-[120px]",
-                observacao.trim().length >= 10 && "border-success"
-              )}
-              disabled={isProcessing || finalizado}
-              maxLength={1000}
-            />
-
-            <div className="flex justify-between items-center">
-              <span className={cn(
-                "text-sm font-medium",
-                observacao.length > 900 ? "text-warning" : "text-muted-foreground"
-              )}>
-                {observacao.length}/1000 caracteres
-              </span>
-              {observacao.trim().length >= 10 && (
-                <div className="flex items-center gap-2 text-success font-medium text-sm">
-                  <CheckCircle className="h-4 w-4" />
-                  <span>Observação válida</span>
-                </div>
-              )}
-            </div>
-          </div>
-
-          <Separator />
-
-          {/* Form Validation Summary */}
-          
-
-          {/* Action Buttons */}
-          <div className="space-y-6">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {/* Finish Button */}
-              <Button
-                variant="finish"
-                size="lg"
-                onClick={() => handleAction('finish')}
-                disabled={!isFormValid || isProcessing || finalizado}
-                className="h-20"
-              >
-                <CheckCircle className="h-6 w-6 mr-3" />
-                <div className="text-left">
-                  <div className="font-semibold text-base">Acompanhamento Confirmado</div>
-                  <div className="text-sm opacity-90">Finalizar Acompanhamento</div>
-                </div>
-              </Button>
-
-              {/* Next Level Button */}
-              <Button
-                variant="destructive"
-                size="lg"
-                onClick={() => handleAction('next')}
-                disabled={!isFormValid || isProcessing || finalizado}
-                className="h-20 animate-glow"
-              >
-                {finalizado ? (
-                  <>
-                    <CheckCircle className="h-6 w-6 mr-3" />
-                    <div className="text-left">
-                      <div className="font-semibold text-base">Finalizado</div>
-                      <div className="text-sm opacity-90">Chamado encerrado</div>
-                    </div>
-                  </>
-                ) : currentLevel >= 5 ? (
-                  <>
-                    <CheckCircle className="h-6 w-6 mr-3" />
-                    <div className="text-left">
-                      <div className="font-semibold text-base">Concluir Final</div>
-                      <div className="text-sm opacity-90">Última escalação</div>
-                    </div>
-                  </>
-                ) : (
-                  <>
-                    <ArrowRight className="h-6 w-6 mr-3" />
-                    <div className="text-left">
-                      <div className="font-semibold text-base">{levelInfo.nextAction}</div>
-                      <div className="text-sm opacity-90">Avançar escalação</div>
-                    </div>
-                  </>
-                )}
-              </Button>
-            </div>
-          </div>
-
-          {/* Guidelines Section */}
-          <div className="gradient-modal rounded-2xl p-6 border border-border/50">
-            <div className="space-y-4">
-              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
-                <div className="space-y-2">
-                  <div className="flex items-center gap-2 text-destructive">
-                    <AlertTriangle className="h-5 w-5" />
-                    <span className="font-semibold">Dados Obrigatórios</span>
-                  </div>
-                  <p className="text-sm text-muted-foreground">
-                    Nome da pessoa, status e observações são campos obrigatórios para prosseguir.
-                  </p>
-                </div>
-
-                <div className="space-y-2">
-                  <div className="flex items-center gap-2 text-primary">
-                    <Timer className="h-5 w-5" />
-                    <span className="font-semibold">Controle de Tempo</span>
-                  </div>
-                  <p className="text-sm text-muted-foreground">
-                    Cada escalação reinicia automaticamente o timer de 20 minutos.
-                  </p>
-                </div>
-
-                <div className="space-y-2">
-                  <div className="flex items-center gap-2 text-success">
-                    <CheckCircle className="h-5 w-5" />
-                    <span className="font-semibold">Documentação</span>
-                  </div>
-                  <p className="text-sm text-muted-foreground">
-                    Todas as informações são automaticamente registradas no histórico.
-                  </p>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* Processing Indicator */}
-          {isProcessing && (
-            <div className="fixed inset-0 bg-background/80 backdrop-blur-sm flex items-center justify-center z-50">
-              <div className="bg-card p-6 rounded-2xl shadow-2xl border border-border">
-                <div className="flex items-center gap-3">
-                  <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-primary"></div>
-                  <span className="text-lg font-medium">Processando ação...</span>
-                </div>
-              </div>
-            </div>
-          )}
-
-        </div>
-      </DialogContent>
-    </Dialog>
-  );
-};
+    try:
+        if route == "$connect":
+            return handle_connect(event, trace)
+        elif route == "$disconnect":
+            return handle_disconnect(event, trace)
+        else:
+            body = json.loads(event.get("body") or "{}")
+            if route == "startTimer":
+                return handle_start_timer(event, trace, body)
+            elif route == "updateObservacao":
+                return handle_update_observacao(event, trace, body)
+            elif route == "updateOperador":
+                return handle_update_operador(event, trace, body)
+            elif route == "updateStatusFinal":
+                return handle_update_status_final(event, trace, body)
+            elif route == "getState":
+                return handle_get_state(event, trace, body)
+            else:
+                log(trace, "Rota inválida", route=route)
+                return {"statusCode": 400, "body": json.dumps({"error": "Invalid route"}, cls=DecimalEncoder)}
+    except Exception as e:
+        log(trace, "Erro na execução", error=str(e))
+        return {"statusCode": 500, "body": json.dumps({"error": str(e)}, cls=DecimalEncoder)}
