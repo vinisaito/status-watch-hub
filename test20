@@ -1,23 +1,63 @@
-case 'next':
-  if (currentLevel >= 5) {
-    // último nível → finaliza de vez
-    await Promise.all([
-      updateStatusFinal(chamado, levelStatusKey, "finished"),
-      updateObservacao(chamado, currentLevel, trimmedObservacao)
-    ]);
-    toast({ title: "✅ Chamado Finalizado", description: `Chamado ${chamado} foi finalizado com sucesso!` });
-  } else {
-    // finaliza o nível atual
-    await updateStatusFinal(chamado, levelStatusKey, "finished");
-    await updateObservacao(chamado, currentLevel, trimmedObservacao);
+{/* Histórico de Acionamentos */}
+{chamadoData && (
+  <>
+    <Separator />
+    <div className="space-y-6">
+      <div className="flex items-center gap-3">
+        <Clock className="h-6 w-6 text-primary" />
+        <Label className="text-xl font-semibold text-foreground">
+          Histórico de Acionamentos
+        </Label>
+      </div>
 
-    // avança e abre o próximo nível como "running"
-    await onNextLevel(chamado, currentLevel + 1, trimmedObservacao);
+      <div className="space-y-4">
+        {Array.from({ length: 5 }).map((_, i) => {
+          const level = i + 1;
+          const status = chamadoData[`level${level}_status`];
+          const observacao = chamadoData[`level${level}_observacao`];
 
-    const nextLevelInfo = LEVEL_INFO[(currentLevel + 1) as keyof typeof LEVEL_INFO];
-    toast({
-      title: `🚀 ${nextLevelInfo?.title} Iniciado`,
-      description: `Timer de 20 minutos iniciado para ${nextLevelInfo?.title}`,
-    });
-  }
-  break;
+          if (!status && !observacao) return null;
+
+          return (
+            <div
+              key={level}
+              className="p-4 rounded-lg border border-border bg-muted/30"
+            >
+              <div className="flex items-center justify-between mb-2">
+                <span className="font-semibold">
+                  {LEVEL_INFO[level as keyof typeof LEVEL_INFO]?.title ||
+                    `Escalação ${level}`}
+                </span>
+                <Badge
+                  variant={
+                    status === "finished"
+                      ? "default"
+                      : status === "running"
+                      ? "secondary"
+                      : "outline"
+                  }
+                  className={cn(
+                    "text-xs font-medium",
+                    status === "finished" && "bg-success text-white",
+                    status === "running" && "bg-warning text-black"
+                  )}
+                >
+                  {status || "N/A"}
+                </Badge>
+              </div>
+              {observacao ? (
+                <p className="text-sm text-muted-foreground whitespace-pre-line">
+                  {observacao}
+                </p>
+              ) : (
+                <p className="text-sm text-muted-foreground italic">
+                  Sem observações registradas
+                </p>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  </>
+)}
