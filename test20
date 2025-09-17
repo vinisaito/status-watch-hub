@@ -1,63 +1,150 @@
-{/* Histórico de Acionamentos */}
-{chamadoData && (
-  <>
-    <Separator />
-    <div className="space-y-6">
-      <div className="flex items-center gap-3">
-        <Clock className="h-6 w-6 text-primary" />
-        <Label className="text-xl font-semibold text-foreground">
-          Histórico de Acionamentos
-        </Label>
-      </div>
+import React, { useState } from "react";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Button } from "@/components/ui/button";
+import { Textarea } from "@/components/ui/textarea";
+import { Label } from "@/components/ui/label";
+import { Separator } from "@/components/ui/separator";
+import { Badge } from "@/components/ui/badge";
+import { Clock } from "lucide-react";
+import { cn } from "@/lib/utils";
 
-      <div className="space-y-4">
-        {Array.from({ length: 5 }).map((_, i) => {
-          const level = i + 1;
-          const status = chamadoData[`level${level}_status`];
-          const observacao = chamadoData[`level${level}_observacao`];
+const LEVEL_INFO = {
+  1: { title: "Primeira Escalação" },
+  2: { title: "Segunda Escalação" },
+  3: { title: "Terceira Escalação" },
+  4: { title: "Quarta Escalação" },
+  5: { title: "Quinta Escalação" },
+};
 
-          if (!status && !observacao) return null;
+interface ModernTimerModalProps {
+  open: boolean;
+  onClose: () => void;
+  chamadoData: any;
+  onUpdateObservacao: (chamado: number, level: number, observacao: string) => void;
+  onAvancarEscalacao: (chamado: number, level: number) => void;
+}
 
-          return (
-            <div
-              key={level}
-              className="p-4 rounded-lg border border-border bg-muted/30"
-            >
-              <div className="flex items-center justify-between mb-2">
-                <span className="font-semibold">
-                  {LEVEL_INFO[level as keyof typeof LEVEL_INFO]?.title ||
-                    `Escalação ${level}`}
-                </span>
-                <Badge
-                  variant={
-                    status === "finished"
-                      ? "default"
-                      : status === "running"
-                      ? "secondary"
-                      : "outline"
-                  }
-                  className={cn(
-                    "text-xs font-medium",
-                    status === "finished" && "bg-success text-white",
-                    status === "running" && "bg-warning text-black"
-                  )}
+export const ModernTimerModal: React.FC<ModernTimerModalProps> = ({
+  open,
+  onClose,
+  chamadoData,
+  onUpdateObservacao,
+  onAvancarEscalacao,
+}) => {
+  const [observacao, setObservacao] = useState("");
+  const [currentLevel, setCurrentLevel] = useState(1);
+
+  if (!chamadoData) return null;
+
+  return (
+    <Dialog open={open} onOpenChange={onClose}>
+      <DialogContent className="max-w-3xl">
+        <DialogHeader>
+          <DialogTitle>
+            Chamado #{chamadoData.chamado} - Escalação {currentLevel}
+          </DialogTitle>
+        </DialogHeader>
+
+        {/* Observação atual */}
+        <div className="space-y-2">
+          <Label htmlFor="observacao">Observação</Label>
+          <Textarea
+            id="observacao"
+            value={observacao}
+            onChange={(e) => setObservacao(e.target.value)}
+            placeholder="Digite sua observação aqui..."
+          />
+          <Button
+            onClick={() => {
+              onUpdateObservacao(chamadoData.chamado, currentLevel, observacao);
+              setObservacao("");
+            }}
+          >
+            Salvar Observação
+          </Button>
+        </div>
+
+        {/* Histórico de Acionamentos */}
+        <Separator />
+        <div className="space-y-6">
+          <div className="flex items-center gap-3">
+            <Clock className="h-6 w-6 text-primary" />
+            <Label className="text-xl font-semibold text-foreground">
+              Histórico de Acionamentos
+            </Label>
+          </div>
+
+          <div className="space-y-4">
+            {Array.from({ length: 5 }).map((_, i) => {
+              const level = i + 1;
+              const status = chamadoData[`level${level}_status`];
+              const observacao = chamadoData[`level${level}_observacao`];
+
+              if (!status && !observacao) return null;
+
+              return (
+                <div
+                  key={level}
+                  className="p-4 rounded-lg border border-border bg-muted/30"
                 >
-                  {status || "N/A"}
-                </Badge>
-              </div>
-              {observacao ? (
-                <p className="text-sm text-muted-foreground whitespace-pre-line">
-                  {observacao}
-                </p>
-              ) : (
-                <p className="text-sm text-muted-foreground italic">
-                  Sem observações registradas
-                </p>
-              )}
-            </div>
-          );
-        })}
-      </div>
-    </div>
-  </>
-)}
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="font-semibold">
+                      {LEVEL_INFO[level as keyof typeof LEVEL_INFO]?.title ||
+                        `Escalação ${level}`}
+                    </span>
+                    <Badge
+                      variant={
+                        status === "finished"
+                          ? "default"
+                          : status === "running"
+                          ? "secondary"
+                          : "outline"
+                      }
+                      className={cn(
+                        "text-xs font-medium",
+                        status === "finished" && "bg-green-600 text-white",
+                        status === "running" && "bg-yellow-400 text-black"
+                      )}
+                    >
+                      {status || "N/A"}
+                    </Badge>
+                  </div>
+                  {observacao ? (
+                    <p className="text-sm text-muted-foreground whitespace-pre-line">
+                      {observacao}
+                    </p>
+                  ) : (
+                    <p className="text-sm text-muted-foreground italic">
+                      Sem observações registradas
+                    </p>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Botões de ação */}
+        <Separator />
+        <div className="flex justify-between gap-4">
+          <Button variant="secondary" onClick={onClose}>
+            Fechar
+          </Button>
+          <Button
+            onClick={() => {
+              onAvancarEscalacao(chamadoData.chamado, currentLevel);
+              setCurrentLevel((prev) => Math.min(prev + 1, 5));
+            }}
+          >
+            Avançar Escalação
+          </Button>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+};
