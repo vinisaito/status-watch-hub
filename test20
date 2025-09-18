@@ -1,54 +1,27 @@
-switch (action) {
-  case 'next': {
-    const updates = [
-      updateStatusFinal(chamado, levelStatusKey, "finished"),
-      updateObservacao(chamado, currentLevel, observacao || "")
-    ];
-
-    // Só manda updateAcionamento se os 3 campos existirem
-    if (pessoaAcionada || statusAtendimento || operador) {
-      updates.push(
-        updateAcionamento(chamado, currentLevel, pessoaAcionada || "", statusAtendimento || "", operador || "")
-      );
-    }
-
-    if (currentLevel >= 5) {
-      await Promise.all(updates);
-      toast({ 
-        title: "✅ Chamado Finalizado", 
-        description: `Chamado ${chamado} foi finalizado com sucesso!` 
-      });
-    } else {
-      await Promise.all(updates);
-      await onNextLevel(chamado, currentLevel + 1, observacao || "");
-
-      const nextLevelInfo = LEVEL_INFO[(currentLevel + 1) as keyof typeof LEVEL_INFO];
-      toast({
-        title: `🚀 ${nextLevelInfo?.title} Iniciado`,
-        description: `Timer de 20 minutos iniciado para ${nextLevelInfo?.title}`,
-      });
-    }
-    break;
-  }
-
-  case 'finish': {
-    const updates = [
-      updateStatusFinal(chamado, levelStatusKey, "finished"),
-      updateObservacao(chamado, currentLevel, observacao || "")
-    ];
-
-    if (pessoaAcionada || statusAtendimento || operador) {
-      updates.push(
-        updateAcionamento(chamado, currentLevel, pessoaAcionada || "", statusAtendimento || "", operador || "")
-      );
-    }
-
-    await Promise.all(updates);
-    setFinalizado(true);
-    toast({
-      title: "✅ Chamado Finalizado",
-      description: `Chamado ${chamado} foi finalizado com sucesso!`,
-    });
-    break;
-  }
-}
+{/* Status do Atendimento */}
+<div className="space-y-3">
+  <Label htmlFor="status-atendimento" className="text-base font-medium flex items-center gap-2">
+    <CheckCircle className="h-4 w-4" />
+    Status do Atendimento
+    <span className="text-destructive">*</span>
+  </Label>
+  <Select
+    value={statusAtendimento}
+    onValueChange={(value) => {
+      console.log("Status selecionado:", value); // 🔹 log de debug
+      setStatusAtendimento(value);
+    }}
+    disabled={isProcessing || finalizado}
+  >
+    <SelectTrigger className={cn(
+      "border-2 focus:border-primary",
+      statusAtendimento && "border-success"
+    )}>
+      <SelectValue placeholder="Selecione o status do atendimento" />
+    </SelectTrigger>
+    <SelectContent>
+      <SelectItem value="atendido">✅ Atendido</SelectItem>
+      <SelectItem value="nao-atendido">❌ Não Atendido</SelectItem>
+    </SelectContent>
+  </Select>
+</div>
