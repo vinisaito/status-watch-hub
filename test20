@@ -1,48 +1,54 @@
-def handle_update_acionamento(event, trace, body):
-    """Atualiza dados do acionamento em um level específico do chamado"""
-    chamado = int(body["chamado"])
-    level = int(body.get("level", 1))
+switch (action) {
+  case 'next': {
+    const updates = [
+      updateStatusFinal(chamado, levelStatusKey, "finished"),
+      updateObservacao(chamado, currentLevel, observacao || "")
+    ];
 
-    observacao = body.get("observacao")
-    pessoa_acionada = body.get("pessoaAcionada")
-    status_acionamento = body.get("statusAcionamento")
-    operador = body.get("operador")
-
-    update = {}
-    if observacao is not None:
-        update[f"level{level}_observacao"] = observacao
-    if pessoa_acionada is not None:
-        update[f"level{level}_pessoaAcionada"] = pessoa_acionada
-    if status_acionamento is not None:
-        update[f"level{level}_statusAcionamento"] = status_acionamento
-    if operador is not None:
-        update[f"level{level}_operador"] = operador
-
-    if not update:
-        return {
-            "statusCode": 400,
-            "body": json.dumps({"error": "Nenhum campo para atualizar"}, cls=DecimalEncoder)
-        }
-
-    state = update_chamado(trace, chamado, update)
-
-    broadcast({
-        "event": "updateAcionamento",
-        "chamado": chamado,
-        "level": level,
-        "state": state
-    })
-
-    return {
-        "statusCode": 200,
-        "body": json.dumps(
-            {"msg": f"Dados do acionamento do level {level} atualizados"},
-            cls=DecimalEncoder
-        )
+    // Só manda updateAcionamento se os 3 campos existirem
+    if (pessoaAcionada || statusAtendimento || operador) {
+      updates.push(
+        updateAcionamento(chamado, currentLevel, pessoaAcionada || "", statusAtendimento || "", operador || "")
+      );
     }
 
+    if (currentLevel >= 5) {
+      await Promise.all(updates);
+      toast({ 
+        title: "✅ Chamado Finalizado", 
+        description: `Chamado ${chamado} foi finalizado com sucesso!` 
+      });
+    } else {
+      await Promise.all(updates);
+      await onNextLevel(chamado, currentLevel + 1, observacao || "");
 
+      const nextLevelInfo = LEVEL_INFO[(currentLevel + 1) as keyof typeof LEVEL_INFO];
+      toast({
+        title: `🚀 ${nextLevelInfo?.title} Iniciado`,
+        description: `Timer de 20 minutos iniciado para ${nextLevelInfo?.title}`,
+      });
+    }
+    break;
+  }
 
+  case 'finish': {
+    const updates = [
+      updateStatusFinal(chamado, levelStatusKey, "finished"),
+      updateObservacao(chamado, currentLevel, observacao || "")
+    ];
 
-elif route == "updateAcionamento":
-    return handle_update_acionamento(event, trace, body)
+    if (pessoaAcionada || statusAtendimento || operador) {
+      updates.push(
+        updateAcionamento(chamado, currentLevel, pessoaAcionada || "", statusAtendimento || "", operador || "")
+      );
+    }
+
+    await Promise.all(updates);
+    setFinalizado(true);
+    toast({
+      title: "✅ Chamado Finalizado",
+      description: `Chamado ${chamado} foi finalizado com sucesso!`,
+    });
+    break;
+  }
+}
