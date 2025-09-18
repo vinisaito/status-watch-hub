@@ -25,7 +25,6 @@ interface ModernTimerModalProps {
   updateStatusFinal: (chamado: number, levelStatusKey: string, status: string) => void;
   updateObservacao: (chamado: number, level: number, observacao: string) => void;
   updateAcionamento: (chamado: number, level: number, operador: string, pessoaAcionada: string, statusAcionamento: string) => void;
-
 }
 
 const LEVEL_INFO = {
@@ -234,3 +233,348 @@ export const ModernTimerModal: React.FC<ModernTimerModalProps> = ({
   }, [validateForm, updateAcionamento, pessoaAcionada, statusAtendimento, observacao, currentLevel, chamado, onNextLevel, onClose, updateStatusFinal, updateObservacao, finalizado, levelStatusKey]);
 
   if (!levelInfo) return null;
+
+  const LevelIcon = levelInfo.icon;
+  const isFormValid = operador && pessoaAcionada.trim().length >= 2 && statusAtendimento && observacao.trim().length >= 10;
+
+  return (
+    <Dialog open={isOpen} onOpenChange={onClose}>
+      <DialogContent className="sm:max-w-4xl max-h-[85vh] overflow-y-auto border-border shadow-modal">
+        {/* Header Section */}
+        <DialogHeader className="relative pb-8">
+          <div className={cn(
+            "absolute inset-0 bg-gradient-to-r opacity-5 rounded-t-lg",
+            levelInfo.color
+          )} />
+
+          <div className="relative z-10 space-y-6">
+            <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-6">
+              <div className="flex items-center gap-6">
+                <div className={cn(
+                  "p-4 rounded-2xl bg-gradient-to-r shadow-lg",
+                  levelInfo.color,
+                  "text-white"
+                )}>
+                  <LevelIcon className="h-10 w-10" />
+                </div>
+
+                <div className="space-y-2">
+                  <DialogTitle className="text-3xl lg:text-4xl font-bold text-foreground">
+                    {levelInfo.title}
+                  </DialogTitle>
+                  <p className="text-lg text-muted-foreground">
+                    {levelInfo.subtitle}
+                  </p>
+                  <div className="flex items-center gap-3">
+                    <Badge variant="outline" className="text-sm font-medium">
+                      Chamado #{chamado}
+                    </Badge>
+                    <Badge
+                      variant={finalizado ? "default" : "secondary"}
+                      className={cn(
+                        "text-sm font-medium",
+                        finalizado && "bg-success text-success-foreground"
+                      )}
+                    >
+                      {finalizado ? "Finalizado" : "Em Andamento"}
+                    </Badge>
+                    {remainingTime < 0 && (
+                      <Badge
+                        variant="destructive"
+                        className="text-sm font-bold animate-text-flash bg-timer-negative text-white"
+                      >
+                        🚨 TEMPO EXCEDIDO
+                      </Badge>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div className={cn(
+              "p-4 rounded-xl border-l-4",
+              levelInfo.bgColor
+            )}>
+              <p className="text-sm text-muted-foreground">
+                {levelInfo.description}
+              </p>
+              {remainingTime < 0 && (
+                <p className="text-timer-negative font-bold animate-text-flash mt-2">
+                  ⚠️ O tempo limite foi excedido! Ação urgente necessária.
+                </p>
+              )}
+            </div>
+          </div>
+        </DialogHeader>
+
+        <div className="space-y-8">
+          {/* Timer and Progress Section */}
+          <div className="grid grid-cols-1 xl:grid-cols-2 gap-8">
+            <TimerDisplay
+              remainingTime={remainingTime}
+              formatTime={formatTime}
+              className="w-full"
+            />
+            <ProgressIndicator
+              currentLevel={currentLevel}
+              className="w-full"
+            />
+          </div>
+
+          <Separator />
+
+          {/* Required Information Section */}
+          <div className="space-y-6">
+            <div className="flex items-center gap-3">
+              <Phone className="h-6 w-6 text-primary" />
+              <Label className="text-xl font-semibold text-foreground">
+                Acionamento
+              </Label>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+              {/* Operador */}
+              <div className="space-y-3">
+                <Label htmlFor="operador" className="text-base font-medium flex items-center gap-2">
+                  <User className="h-4 w-4" />
+                  Operador
+                  <span className="text-destructive">*</span>
+                </Label>
+                <Select
+                  value={operador}
+                  onValueChange={setOperador}
+                  disabled={isProcessing || finalizado}
+                >
+                  <SelectTrigger className={cn(
+                    "border-2 focus:border-primary",
+                    operador && "border-success"
+                  )}>
+                    <SelectValue placeholder="Selecione o operador" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="operador1">ALBERTO LAGES</SelectItem>
+                    <SelectItem value="operador2">ALEXANDRE LIMA SILVA</SelectItem>
+                    <SelectItem value="operador3">ANSELMO ALVES PESSOA</SelectItem>
+                    <SelectItem value="operador4">BRUNO MAZZO FEITOSA</SelectItem>
+                    <SelectItem value="operador5">CAIO CESAR ALVES DA LUZ</SelectItem>
+                    <SelectItem value="operador6">CLAUDIA ZORZAN DE CAMARGO</SelectItem>
+                    <SelectItem value="operador7">JEFFERSON DA SILVA SOUZA</SelectItem>
+                    <SelectItem value="operador8">JULIANA BEATRIZ DE ANGELO</SelectItem>
+                    <SelectItem value="operador9">MARIA LUIZA DOS SANTOS COIADO</SelectItem>
+                    <SelectItem value="operador10">RAFAEL NUNES PACHECO</SelectItem>
+                    <SelectItem value="operador11">SERGIO ANTONIO DA SILVA</SelectItem>
+                    <SelectItem value="operador12">VICTOR HUGO ALMEIDA FERNANDES</SelectItem>
+                    <SelectItem value="operador13">VINICIUS RHYU VITURINO SAITO</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {/* Nome da Pessoa Acionada */}
+              <div className="space-y-3">
+                <Label htmlFor="pessoa-acionada" className="text-base font-medium flex items-center gap-2">
+                  <User className="h-4 w-4" />
+                  Nome da Pessoa Acionada
+                  <span className="text-destructive">*</span>
+                </Label>
+                <Input
+                  id="pessoa-acionada"
+                  type="text"
+                  value={pessoaAcionada}
+                  onChange={(e) => setPessoaAcionada(e.target.value)}
+                  placeholder="Ex: João Silva, Maria Santos..."
+                  className={cn(
+                    "border-2 focus:border-primary transition-all duration-200",
+                    pessoaAcionada.trim().length >= 2 && "border-success"
+                  )}
+                  disabled={isProcessing || finalizado}
+                  maxLength={100}
+                />
+              </div>
+
+              {/* Status do Atendimento */}
+              <div className="space-y-3">
+                <Label htmlFor="status-atendimento" className="text-base font-medium flex items-center gap-2">
+                  <CheckCircle className="h-4 w-4" />
+                  Status do Atendimento
+                  <span className="text-destructive">*</span>
+                </Label>
+                <Select
+                  value={statusAtendimento}
+                  onValueChange={setStatusAtendimento}
+                  disabled={isProcessing || finalizado}
+                >
+                  <SelectTrigger className={cn(
+                    "border-2 focus:border-primary",
+                    statusAtendimento && "border-success"
+                  )}>
+                    <SelectValue placeholder="Selecione o status do atendimento" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="atendido">✅ Atendido</SelectItem>
+                    <SelectItem value="nao-atendido">❌ Não Atendido</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+          </div>
+
+          <Separator />
+
+          {/* Observations Section */}
+          <div className="space-y-6">
+            <div className="flex items-center gap-3">
+              <MessageSquare className="h-6 w-6 text-primary" />
+              <Label htmlFor="observacao" className="text-xl font-semibold text-foreground">
+                Observações
+              </Label>
+            </div>
+
+            <Textarea
+              id="observacao"
+              value={observacao}
+              onChange={(e) => setObservacao(e.target.value)}
+              placeholder="Descreva as informações do acionamento"
+              rows={6}
+              className={cn(
+                "border-2 focus:border-primary transition-all duration-200 resize-none text-base min-h-[120px]",
+                observacao.trim().length >= 10 && "border-success"
+              )}
+              disabled={isProcessing || finalizado}
+              maxLength={1000}
+            />
+
+            <div className="flex justify-between items-center">
+              <span className={cn(
+                "text-sm font-medium",
+                observacao.length > 900 ? "text-warning" : "text-muted-foreground"
+              )}>
+                {observacao.length}/1000 caracteres
+              </span>
+              {observacao.trim().length >= 10 && (
+                <div className="flex items-center gap-2 text-success font-medium text-sm">
+                  <CheckCircle className="h-4 w-4" />
+                  <span>Observação válida</span>
+                </div>
+              )}
+            </div>
+          </div>
+
+          <Separator />
+
+          {/* Action Buttons */}
+          <div className="space-y-6">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {/* Finish Button */}
+              <Button
+                variant="secondary"
+                size="lg"
+                onClick={() => handleAction('finish')}
+                disabled={!isFormValid || isProcessing || finalizado}
+                className="h-20"
+              >
+                <CheckCircle className="h-6 w-6 mr-3" />
+                <div className="text-left">
+                  <div className="font-semibold text-base">Acompanhamento Confirmado</div>
+                  <div className="text-sm opacity-90">Finalizar Acompanhamento</div>
+                </div>
+              </Button>
+
+              {/* Next Level Button */}
+              <Button
+                variant="destructive"
+                size="lg"
+                onClick={() => handleAction('next')}
+                disabled={!isFormValid || isProcessing || finalizado}
+                className={cn(
+                  "h-20",
+                  remainingTime < 0 && "animate-timer-alert bg-timer-negative hover:bg-timer-negative/90"
+                )}
+              >
+                {finalizado ? (
+                  <>
+                    <CheckCircle className="h-6 w-6 mr-3" />
+                    <div className="text-left">
+                      <div className="font-semibold text-base">Finalizado</div>
+                      <div className="text-sm opacity-90">Chamado encerrado</div>
+                    </div>
+                  </>
+                ) : currentLevel >= 5 ? (
+                  <>
+                    <CheckCircle className="h-6 w-6 mr-3" />
+                    <div className="text-left">
+                      <div className="font-semibold text-base">Concluir Final</div>
+                      <div className="text-sm opacity-90">Última escalação</div>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <ArrowRight className="h-6 w-6 mr-3" />
+                    <div className="text-left">
+                      <div className="font-semibold text-base">{levelInfo.nextAction}</div>
+                      <div className="text-sm opacity-90">Avançar escalação</div>
+                    </div>
+                  </>
+                )}
+              </Button>
+            </div>
+          </div>
+
+          {/* Guidelines Section */}
+          <div className="gradient-modal rounded-2xl p-6 border border-border/50">
+            <div className="space-y-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
+                <div className="space-y-2">
+                  <div className="flex items-center gap-2 text-destructive">
+                    <AlertTriangle className="h-5 w-5" />
+                    <span className="font-semibold">Dados Obrigatórios</span>
+                  </div>
+                  <p className="text-sm text-muted-foreground">
+                    Nome da pessoa, status, operador e observações são campos obrigatórios para prosseguir.
+                  </p>
+                </div>
+
+                <div className="space-y-2">
+                  <div className="flex items-center gap-2 text-primary">
+                    <Timer className="h-5 w-5" />
+                    <span className="font-semibold">Controle de Tempo</span>
+                  </div>
+                  <p className="text-sm text-muted-foreground">
+                    Cada escalação reinicia automaticamente o timer de 20 minutos.
+                  </p>
+                  {remainingTime < 0 && (
+                    <p className="text-timer-negative text-sm font-bold animate-text-flash">
+                      ⚠️ Timer excedido! Ação urgente necessária.
+                    </p>
+                  )}
+                </div>
+
+                <div className="space-y-2">
+                  <div className="flex items-center gap-2 text-success">
+                    <CheckCircle className="h-5 w-5" />
+                    <span className="font-semibold">Documentação</span>
+                  </div>
+                  <p className="text-sm text-muted-foreground">
+                    Todas as informações são automaticamente registradas no histórico.
+                  </p>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Processing Indicator */}
+          {isProcessing && (
+            <div className="fixed inset-0 bg-background/80 backdrop-blur-sm flex items-center justify-center z-50">
+              <div className="bg-card p-6 rounded-2xl shadow-2xl border border-border">
+                <div className="flex items-center gap-3">
+                  <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-primary"></div>
+                  <span className="text-lg font-medium">Processando ação...</span>
+                </div>
+              </div>
+            </div>
+          )}
+
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+};
