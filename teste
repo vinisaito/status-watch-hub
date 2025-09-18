@@ -1,219 +1,220 @@
-export interface WebSocketMessage {
-  event: 'startTimer' | 'updateObservacao' | 'updateOperador' | 'updateStatusFinal' | 'getState' | 'updateAcionamento';
+import React, { useState, useCallback } from 'react';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Button } from '@/components/ui/button';
+import { Textarea } from '@/components/ui/textarea';
+import { Input } from '@/components/ui/input';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Label } from '@/components/ui/label';
+import { Badge } from '@/components/ui/badge';
+import { Separator } from '@/components/ui/separator';
+import { ProgressIndicator } from '@/components/ui/progress-indicator';
+import { TimerDisplay } from '@/components/ui/timer-display';
+import { ArrowRight, CheckCircle, X, AlertTriangle, Lightbulb, MessageSquare, Timer, Building2, Users, Clock, User, Phone } from 'lucide-react';
+import { toast } from '@/hooks/use-toast';
+import { cn } from '@/lib/utils';
+
+interface ModernTimerModalProps {
+  isOpen: boolean;
+  onClose: () => void;
   chamado: number;
-  level?: number;
-  state?: TimerState;
+  currentLevel: number;
+  remainingTime: number;
+  chamadoData?: any;
+  formatTime: (seconds: number) => string;
+  onNextLevel: (chamado: number, level: number, observacao: string) => void;
+  updateStatusFinal: (chamado: number, levelStatusKey: string, status: string) => void;
+  updateObservacao: (chamado: number, level: number, observacao: string) => void;
+  updateAcionamento: (chamado: number, level: number, operador: string, pessoaAcionada: string, statusAcionamento: string) => void;
+
 }
 
-export interface SendMessage {
-  action: 'startTimer' | 'updateObservacao' | 'updateOperador' | 'updateStatusFinal' | 'getState' | 'updateAcionamento';
-  chamado: number;
-  level?: number;
-  duration?: number;
-  observacao?: string;
-  operador?: string;
-  statusFinal?: string;
-  levelStatusKey?: string;
-  status?: string;
-  pessoaAcionada?: string;
-  statusAcionamento?: string;
-}
+const LEVEL_INFO = {
+  1: {
+    title: "Primeiro Acionamento",
+    subtitle: "",
+    nextAction: "Avançar para 1ª Escalação",
+    icon: Clock,
+    color: "from-blue-500 to-blue-600",
+    bgColor: "bg-blue-500/5 border-blue-200",
+    description: "Atendimento Inicial da Equipe"
+  },
+  2: {
+    title: "1ª Escalação",
+    subtitle: "",
+    nextAction: "Avançar para 2ª Escalação",
+    icon: Users,
+    color: "from-orange-500 to-orange-600",
+    bgColor: "bg-orange-500/5 border-orange-200",
+    description: "Acionamento do Gestor de Incidente ou Plantonista"
+  },
+  3: {
+    title: "2ª Escalação",
+    subtitle: "",
+    nextAction: "Avançar para 3ª Escalação",
+    icon: Building2,
+    color: "from-red-500 to-red-600",
+    bgColor: "bg-red-500/5 border-red-200",
+    description: "Acionamento do Coordenador"
+  },
+  4: {
+    title: "3ª Escalação",
+    subtitle: "",
+    nextAction: "Avançar para 4ª Escalação",
+    icon: Users,
+    color: "from-purple-500 to-purple-600",
+    bgColor: "bg-purple-500/5 border-purple-200",
+    description: "Acionamento do Gerente"
+  },
+  5: {
+    title: "4ª Escalação",
+    subtitle: "",
+    nextAction: "Finalizar Chamado",
+    icon: Building2,
+    color: "from-red-600 to-red-700",
+    bgColor: "bg-red-600/5 border-red-300",
+    description: "Acionamento do Kleber Costa"
+  }
+};
 
-export const useWebsocketTimers = () => {
-  const [timers, setTimers] = useState<Map<number, TimerState>>(new Map());
-  const [isConnected, setIsConnected] = useState(false);
-  const ws = useRef<WebSocket | null>(null);
-  const reconnectAttempts = useRef(0);
-  const maxReconnectAttempts = 5;
-  const reconnectTimeout = useRef<NodeJS.Timeout | null>(null);
+export const ModernTimerModal: React.FC<ModernTimerModalProps> = ({
+  isOpen,
+  onClose,
+  chamado,
+  currentLevel,
+  remainingTime,
+  chamadoData,
+  formatTime,
+  onNextLevel,
+  updateStatusFinal,
+  updateObservacao,
+  updateAcionamento
+}) => {
+  const [observacao, setObservacao] = useState('');
+  const [pessoaAcionada, setPessoaAcionada] = useState('');
+  const [statusAtendimento, setStatusAtendimento] = useState('');
+  const [operador, setOperador] = useState('');
+  const [isProcessing, setIsProcessing] = useState(false);
 
-  // Chamados que o cliente quer garantir que sejam consultados ao conectar
-  const watchedChamadosRef = useRef<Set<number>>(new Set());
+  const levelStatusKey = `level${currentLevel}_status`;
+  const [finalizado, setFinalizado] = useState(
+    chamadoData?.statusFinal === "finished" || chamadoData?.[levelStatusKey] === "finished"
+  );
 
-  const connect = useCallback(() => {
+  React.useEffect(() => {
+    setFinalizado(
+      chamadoData?.statusFinal === "finished" || chamadoData?.[levelStatusKey] === "finished"
+    );
+  }, [chamadoData, levelStatusKey]);
+
+  const levelInfo = finalizado
+    ? {
+      title: "Chamado Finalizado",
+      subtitle: "Processo encerrado com sucesso",
+      description: "O chamado foi resolvido e encerrado",
+      icon: CheckCircle,
+      color: "from-success to-success/90",
+      bgColor: "bg-success/5 border-success/20",
+      nextAction: "Finalizado"
+    }
+    : LEVEL_INFO[currentLevel as keyof typeof LEVEL_INFO];
+
+  const validateForm = useCallback(() => {
+    const errors = [];
+
+    if (!operador) {
+      errors.push("Operador é obrigatório");
+    }
+
+    if (!pessoaAcionada.trim()) {
+      errors.push("Nome da pessoa acionada é obrigatório");
+    } else if (pessoaAcionada.trim().length < 2) {
+      errors.push("Nome deve ter pelo menos 2 caracteres");
+    }
+
+    if (!statusAtendimento) {
+      errors.push("Status de atendimento é obrigatório");
+    }
+
+    if (!observacao.trim()) {
+      errors.push("Observações são obrigatórias");
+    } else if (observacao.trim().length < 10) {
+      errors.push("Observações devem ter pelo menos 10 caracteres");
+    }
+
+    if (errors.length > 0) {
+      toast({
+        title: "⚠️ Campos Obrigatórios",
+        description: errors.join(". "),
+        variant: "destructive",
+      });
+      return false;
+    }
+
+    return true;
+  }, [operador, pessoaAcionada, statusAtendimento, observacao]);
+
+  const handleAction = useCallback(async (action: 'next' | 'finish') => {
+    if (!validateForm()) return;
+
+    setIsProcessing(true);
+
     try {
-      if (ws.current && ws.current.readyState === WebSocket.CONNECTING) {
+      const fullObservacao = `Operador: ${operador}\nPessoa Acionada: ${pessoaAcionada.trim()}\nStatus: ${statusAtendimento}\n\nDetalhes: ${observacao.trim()}`;
+
+      if (finalizado && action !== 'finish') {
+        toast({
+          title: "⚠️ Chamado já finalizado",
+          description: "Não é possível alterar níveis pois o chamado está finalizado",
+          variant: "destructive",
+        });
         return;
       }
 
-      const wsUrl = 'wss://rsgjd6wsza.execute-api.us-east-1.amazonaws.com/dev';
-      console.log(`🔌 Tentando conectar no WebSocket: ${wsUrl}`);
+      switch (action) {
+        case 'next': {
+          const updates = [
+            updateStatusFinal(chamado, levelStatusKey, "finished"),
+            updateObservacao(chamado, currentLevel, observacao || ""),
+            updateAcionamento(chamado, currentLevel, operador || "", pessoaAcionada || "", statusAtendimento || "")
+          ];
 
-      ws.current = new WebSocket(wsUrl);
+          if (currentLevel >= 5) {
+            await Promise.all(updates);
+            toast({
+              title: "✅ Chamado Finalizado",
+              description: `Chamado ${chamado} foi finalizado com sucesso!`
+            });
+          } else {
+            await Promise.all(updates);
+            await onNextLevel(chamado, currentLevel + 1, observacao || "");
 
-      const connectionTimeout = setTimeout(() => {
-        if (ws.current && ws.current.readyState === WebSocket.CONNECTING) {
-          ws.current.close();
-          toast({
-            title: "Timeout de Conexão",
-            description: "WebSocket demorou muito para conectar. Tentando novamente...",
-            variant: "destructive",
-          });
-        }
-      }, 10000);
-
-      ws.current.onopen = () => {
-        clearTimeout(connectionTimeout);
-        setIsConnected(true);
-        reconnectAttempts.current = 0;
-
-        console.log('✅ WebSocket conectado com sucesso');
-        toast({
-          title: "Conectado",
-          description: "WebSocket conectado com sucesso",
-        });
-      };
-
-      ws.current.onmessage = (event) => {
-        try {
-          const message: WebSocketMessage = JSON.parse(event.data);
-
-          if (message.state && message.chamado) {
-            setTimers(prev => {
-              const oldState = prev.get(message.chamado);
-              const isDifferent = JSON.stringify(oldState) !== JSON.stringify(message.state);
-
-              if (isDifferent) {
-                console.log(`🔔 Novo evento para chamado ${message.chamado}`, message.state);
-              }
-
-              const newTimers = new Map(prev);
-              newTimers.set(message.chamado, message.state!);
-              return newTimers;
+            const nextLevelInfo = LEVEL_INFO[(currentLevel + 1) as keyof typeof LEVEL_INFO];
+            toast({
+              title: `🚀 ${nextLevelInfo?.title} Iniciado`,
+              description: `Timer de 20 minutos iniciado para ${nextLevelInfo?.title}`,
             });
           }
-        } catch (error) {
-          console.error('❌ Erro ao processar mensagem WebSocket:', error);
+          break;
         }
-      };
 
-      ws.current.onclose = (event) => {
-        clearTimeout(connectionTimeout);
-        setIsConnected(false);
+        case 'finish': {
+          const updates = [
+            updateStatusFinal(chamado, levelStatusKey, "finished"),
+            updateObservacao(chamado, currentLevel, observacao || "")
+          ];
 
-        console.warn('⚠️ WebSocket desconectado - Código:', event.code, 'Motivo:', event.reason);
+          if (pessoaAcionada || statusAtendimento || operador) {
+            updates.push(
+              updateAcionamento(chamado, currentLevel, pessoaAcionada || "", statusAtendimento || "", operador || "")
+            );
+          }
 
-        if (event.code !== 1000 && reconnectAttempts.current < maxReconnectAttempts) {
-          reconnectAttempts.current++;
-          const delay = Math.min(1000 * Math.pow(2, reconnectAttempts.current), 30000);
-          console.log(`🔄 Tentando reconectar em ${delay}ms (tentativa ${reconnectAttempts.current}/${maxReconnectAttempts})`);
-
-          reconnectTimeout.current = setTimeout(() => {
-            connect();
-          }, delay);
-        } else if (reconnectAttempts.current >= maxReconnectAttempts) {
-          console.error('❌ Máximo de tentativas de reconexão atingido');
+          await Promise.all(updates);
+          setFinalizado(true);
           toast({
-            title: "Falha na Conexão",
-            description: "Não foi possível conectar ao WebSocket após várias tentativas",
-            variant: "destructive",
+            title: "✅ Chamado Finalizado",
+            description: `Chamado ${chamado} foi finalizado com sucesso!`,
           });
+          break;
         }
-      };
-
-      ws.current.onerror = () => {
-        clearTimeout(connectionTimeout);
-        console.error('❌ Erro WebSocket detectado');
-      };
-
-    } catch (error) {
-      console.error('❌ Erro ao conectar WebSocket:', error);
-      toast({
-        title: "Erro de Inicialização",
-        description: "Erro ao inicializar conexão WebSocket",
-        variant: "destructive",
-      });
-    }
-  }, []);
-
-  const disconnect = useCallback(() => {
-    if (reconnectTimeout.current) {
-      clearTimeout(reconnectTimeout.current);
-      reconnectTimeout.current = null;
-    }
-
-    if (ws.current) {
-      ws.current.close(1000, 'Desconexão intencional');
-      ws.current = null;
-    }
-
-    setIsConnected(false);
-    console.log('🔌 WebSocket desconectado manualmente');
-  }, []);
-
-  const sendMessage = useCallback((message: SendMessage) => {
-    if (ws.current && ws.current.readyState === WebSocket.OPEN) {
-      try {
-        const payload = JSON.stringify(message); // Armazena o payload em uma variável
-        ws.current.send(payload);
-
-        // Inclui a variável payload no console.log
-        console.log(`📤 Mensagem enviada: ${message.action} (chamado ${message.chamado})`);
-        console.log('Payload:', payload);
-
-        return true;
-      } catch (error) {
-        console.error('❌ Erro ao enviar mensagem:', error);
-        toast({
-          title: "Erro ao Enviar",
-          description: "Não foi possível enviar a mensagem",
-          variant: "destructive",
-        });
-        return false;
       }
-    } else {
-      toast({
-        title: "Não Conectado",
-        description: "WebSocket não está conectado. Tentando reconectar...",
-        variant: "destructive",
-      });
-      connect();
-      return false;
-    }
-  }, [connect]);
-
-  // Ações (mantive todas as existentes)
-  const startTimer = useCallback((chamado: number, level: number, duration: number = 1200) => {
-    return sendMessage({ action: 'startTimer', chamado, level, duration });
-  }, [sendMessage]);
-
-  const updateObservacao = useCallback((chamado: number, level: number, observacao: string) => {
-    return sendMessage({ action: 'updateObservacao', chamado, level, observacao });
-  }, [sendMessage]);
-
-  const updateOperador = useCallback((chamado: number, operador: string) => {
-    return sendMessage({ action: 'updateOperador', chamado, operador });
-  }, [sendMessage]);
-
-  const updateAcionamento = useCallback((chamado: number, level: number, operador: string, pessoaAcionada: string, statusAcionamento: string) => {
-    return sendMessage({ action: 'updateAcionamento', chamado, level, operador, pessoaAcionada});
-  }, [sendMessage]);
-
-  const updateStatusFinal = useCallback((
-    chamado: number,
-    levelOrKeyOrStatus: number | string,
-    maybeStatus?: string
-  ) => {
-    // caso 1: numeric + status -> level number
-    if (typeof levelOrKeyOrStatus === 'number') {
-      const level = levelOrKeyOrStatus;
-      const status = maybeStatus!;
-      const levelStatusKey = `level${level}_status`;
-      return sendMessage({ action: 'updateStatusFinal', chamado, levelStatusKey, status });
-    }
-
-    // caso 2: string + status (treat second param as levelStatusKey)
-    if (typeof maybeStatus === 'string') {
-      const levelStatusKey = levelOrKeyOrStatus;
-      const status = maybeStatus;
-      return sendMessage({ action: 'updateStatusFinal', chamado, levelStatusKey, status });
-    }
-
-    // caso 3: apenas chamado + statusFinal (retrocompatível)
-    const statusFinal = levelOrKeyOrStatus;
-    return sendMessage({ action: 'updateStatusFinal', chamado, statusFinal });
-  }, [sendMessage]);
-
-  const getState = useCallback((chamado: number) => {
-    return sendMessage({ action: 'getState', chamado });
-  }, [sendMessage]);
