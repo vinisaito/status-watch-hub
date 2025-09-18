@@ -200,14 +200,9 @@ export const ModernTimerModal: React.FC<ModernTimerModalProps> = ({
         case 'finish': {
           const updates = [
             updateStatusFinal(chamado, levelStatusKey, "finished"),
-            updateObservacao(chamado, currentLevel, observacao || "")
+            updateObservacao(chamado, currentLevel, observacao || ""),
+            updateAcionamento(chamado, currentLevel, operador || "", pessoaAcionada || "", statusAtendimento || "")
           ];
-
-          if (pessoaAcionada || statusAtendimento || operador) {
-            updates.push(
-              updateAcionamento(chamado, currentLevel, pessoaAcionada || "", statusAtendimento || "", operador || "")
-            );
-          }
 
           await Promise.all(updates);
           setFinalizado(true);
@@ -218,3 +213,24 @@ export const ModernTimerModal: React.FC<ModernTimerModalProps> = ({
           break;
         }
       }
+
+      // Reset form
+      setObservacao('');
+      setPessoaAcionada('');
+      setOperador('');
+      setStatusAtendimento('');
+      onClose();
+
+    } catch (error) {
+      console.error("❌ Erro no handleAction:", error);
+      toast({
+        title: "❌ Erro na Operação",
+        description: "Ocorreu um erro ao processar a ação. Verifique os logs.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsProcessing(false);
+    }
+  }, [validateForm, updateAcionamento, pessoaAcionada, statusAtendimento, observacao, currentLevel, chamado, onNextLevel, onClose, updateStatusFinal, updateObservacao, finalizado, levelStatusKey]);
+
+  if (!levelInfo) return null;
