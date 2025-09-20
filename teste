@@ -1,3 +1,35 @@
+
+interface ModernTimerModalProps {
+  isOpen: boolean;
+  onClose: () => void;
+  chamado: number;
+  currentLevel: number;
+  remainingTime: number;
+  chamadoData?: any;
+  formatTime: (seconds: number) => string;
+  onNextLevel: (chamado: number, level: number, observacao: string) => void;
+  updateStatusFinal: (chamado: number, levelStatusKey: string, status: string) => void;
+  updateObservacao: (chamado: number, level: number, observacao: string) => void;
+  updateAcionamento: (chamado: number, level: number, operador: string, pessoaAcionada: string, statusAcionamento: string) => void;
+  historicoAcionamentos?: {
+    operador: string;
+    pessoaAcionada: string;
+    status: string;
+    observacao: string;
+    dataHora: string;
+    nivel: number;
+  }[];
+}
+
+
+
+
+
+
+
+
+
+
 import { useState, useMemo, useCallback } from 'react';
 import { Check, AlertTriangle, Timer, Play, Pause, CheckCircle, Edit3, Search, ChevronLeft, ChevronRight, ArrowUpDown, ArrowUp, ArrowDown, Settings } from 'lucide-react';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
