@@ -1,388 +1,147 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
-import { toast } from '@/hooks/use-toast';
+chamado
+: 
+10541210
+level1_duration
+: 
+1200
+level1_observacao
+: 
+"asdasdadada"
+level1_operador
+: 
+"CAIO CESAR ALVES DA LUZ"
+level1_pessoaAcionada
+: 
+"dasdasd"
+level1_status
+: 
+"finished"
+level1_statusAcionamento
+: 
+"nao-atendido"
+level1_timerStart
+: 
+"2025-09-20T22:57:41.148853+00:00"
+level1_updatedAt
+: 
+"2025-09-20T22:57:49.296305+00:00"
+level2_duration
+: 
+1200
+level2_observacao
+: 
+"adsdasdasdadas"
+level2_operador
+: 
+"ALEXANDRE LIMA SILVA"
+level2_pessoaAcionada
+: 
+"asdadadad"
+level2_status
+: 
+"finished"
+level2_statusAcionamento
+: 
+"atendido"
+level2_timerStart
+: 
+"2025-09-20T22:57:49.296679+00:00"
+level2_updatedAt
+: 
+"2025-09-20T22:57:59.597664+00:00"
+level3_duration
+: 
+1200
+level3_status
+: 
+"running"
+level3_timerStart
+: 
+"2025-09-20T22:57:59.629718+00:00"
+statusFinal
+: 
+"finished"
+statusFinal_updatedAt
+: 
+"2025-09-20T22:57:59.597664+00:00"
 
-export interface TimerState {
-  chamado: number;
-  operador?: string;
-  statusFinal?: string;
-  statusFinal_updateAt?: string;
-  level1_timerStart?: string;
-  level1_duration?: number;
-  level1_status?: 'running' | 'paused' | 'stopped' | 'finished';
-  level1_observacao?: string;
-  level1_operador?: string;
-  level1_pessoaAcionada?: string;
-  level1_statusAcionamento?: string;
-  level1_updateAt?: string;
-  level2_timerStart?: string;
-  level2_duration?: number;
-  level2_status?: 'running' | 'paused' | 'stopped' | 'finished';
-  level2_observacao?: string;
-  level2_operador?: string;
-  level2_pessoaAcionada?: string;
-  level2_statusAcionamento?: string;
-  level2_updateAt?: string;
-  level3_timerStart?: string;
-  level3_duration?: number;
-  level3_status?: 'running' | 'paused' | 'stopped' | 'finished';
-  level3_observacao?: string;
-  level3_operador?: string;
-  level3_pessoaAcionada?: string;
-  level3_statusAcionamento?: string;
-  level3_updateAt?: string;
-  level4_timerStart?: string;
-  level4_duration?: number;
-  level4_status?: 'running' | 'paused' | 'stopped' | 'finished';
-  level4_observacao?: string;
-  level4_operador?: string;
-  level4_pessoaAcionada?: string;
-  level4_statusAcionamento?: string;
-  level4_updateAt?: string;
-  level5_timerStart?: string;
-  level5_duration?: number;
-  level5_status?: 'running' | 'paused' | 'stopped' | 'finished';
-  level5_observacao?: string;
-  level5_operador?: string;
-  level5_pessoaAcionada?: string;
-  level5_statusAcionamento?: string;
-  level5_updateAt?: string;
-}
 
-export interface WebSocketMessage {
-  event: 'startTimer' | 'updateObservacao' | 'updateOperador' | 'updateStatusFinal' | 'getState' | 'updateAcionamento';
-  chamado: number;
-  level?: number;
-  state?: TimerState;
-}
 
-export interface SendMessage {
-  action: 'startTimer' | 'updateObservacao' | 'updateOperador' | 'updateStatusFinal' | 'getState' | 'updateAcionamento';
-  chamado: number;
-  level?: number;
-  duration?: number;
-  observacao?: string;
-  operador?: string;
-  statusFinal?: string;
-  levelStatusKey?: string;
-  status?: string;
-  pessoaAcionada?: string;
-  statusAcionamento?: string;
-}
 
-export const useWebsocketTimers = () => {
-  const [timers, setTimers] = useState<Map<number, TimerState>>(new Map());
-  const [isConnected, setIsConnected] = useState(false);
-  const ws = useRef<WebSocket | null>(null);
-  const reconnectAttempts = useRef(0);
-  const maxReconnectAttempts = 5;
-  const reconnectTimeout = useRef<NodeJS.Timeout | null>(null);
 
-  // Chamados que o cliente quer garantir que sejam consultados ao conectar
-  const watchedChamadosRef = useRef<Set<number>>(new Set());
 
-  const connect = useCallback(() => {
-    try {
-      if (ws.current && ws.current.readyState === WebSocket.CONNECTING) {
-        return;
-      }
 
-      const wsUrl = 'wss://rsgjd6wsza.execute-api.us-east-1.amazonaws.com/dev';
-      console.log(`🔌 Tentando conectar no WebSocket: ${wsUrl}`);
 
-      ws.current = new WebSocket(wsUrl);
 
-      const connectionTimeout = setTimeout(() => {
-        if (ws.current && ws.current.readyState === WebSocket.CONNECTING) {
-          ws.current.close();
-          toast({
-            title: "Timeout de Conexão",
-            description: "WebSocket demorou muito para conectar. Tentando novamente...",
-            variant: "destructive",
-          });
-        }
-      }, 10000);
 
-      ws.current.onopen = () => {
-        clearTimeout(connectionTimeout);
-        setIsConnected(true);
-        reconnectAttempts.current = 0;
 
-        console.log('✅ WebSocket conectado com sucesso');
-        toast({
-          title: "Conectado",
-          description: "WebSocket conectado com sucesso",
-        });
-      };
 
-      ws.current.onmessage = (event) => {
-        try {
-          const message: WebSocketMessage = JSON.parse(event.data);
 
-          if (message.state && message.chamado) {
-            setTimers(prev => {
-              const oldState = prev.get(message.chamado);
-              const isDifferent = JSON.stringify(oldState) !== JSON.stringify(message.state);
 
-              if (isDifferent) {
-                console.log(`🔔 Novo evento para chamado ${message.chamado}`, message.state);
-              }
 
-              const newTimers = new Map(prev);
-              newTimers.set(message.chamado, message.state!);
-              return newTimers;
-            });
-          }
-        } catch (error) {
-          console.error('❌ Erro ao processar mensagem WebSocket:', error);
-        }
-      };
 
-      ws.current.onclose = (event) => {
-        clearTimeout(connectionTimeout);
-        setIsConnected(false);
 
-        console.warn('⚠️ WebSocket desconectado - Código:', event.code, 'Motivo:', event.reason);
 
-        if (event.code !== 1000 && reconnectAttempts.current < maxReconnectAttempts) {
-          reconnectAttempts.current++;
-          const delay = Math.min(1000 * Math.pow(2, reconnectAttempts.current), 30000);
-          console.log(`🔄 Tentando reconectar em ${delay}ms (tentativa ${reconnectAttempts.current}/${maxReconnectAttempts})`);
 
-          reconnectTimeout.current = setTimeout(() => {
-            connect();
-          }, delay);
-        } else if (reconnectAttempts.current >= maxReconnectAttempts) {
-          console.error('❌ Máximo de tentativas de reconexão atingido');
-          toast({
-            title: "Falha na Conexão",
-            description: "Não foi possível conectar ao WebSocket após várias tentativas",
-            variant: "destructive",
-          });
-        }
-      };
 
-      ws.current.onerror = () => {
-        clearTimeout(connectionTimeout);
-        console.error('❌ Erro WebSocket detectado');
-      };
 
-    } catch (error) {
-      console.error('❌ Erro ao conectar WebSocket:', error);
-      toast({
-        title: "Erro de Inicialização",
-        description: "Erro ao inicializar conexão WebSocket",
-        variant: "destructive",
-      });
-    }
-  }, []);
-
-  const disconnect = useCallback(() => {
-    if (reconnectTimeout.current) {
-      clearTimeout(reconnectTimeout.current);
-      reconnectTimeout.current = null;
-    }
-
-    if (ws.current) {
-      ws.current.close(1000, 'Desconexão intencional');
-      ws.current = null;
-    }
-
-    setIsConnected(false);
-    console.log('🔌 WebSocket desconectado manualmente');
-  }, []);
-
-  const sendMessage = useCallback((message: SendMessage) => {
-    if (ws.current && ws.current.readyState === WebSocket.OPEN) {
-      try {
-        const payload = JSON.stringify(message); // Armazena o payload em uma variável
-        ws.current.send(payload);
-
-        // Inclui a variável payload no console.log
-        console.log(`📤 Mensagem enviada: ${message.action} (chamado ${message.chamado})`);
-        console.log('Payload:', payload);
-
-        return true;
-      } catch (error) {
-        console.error('❌ Erro ao enviar mensagem:', error);
-        toast({
-          title: "Erro ao Enviar",
-          description: "Não foi possível enviar a mensagem",
-          variant: "destructive",
-        });
-        return false;
-      }
-    } else {
-      toast({
-        title: "Não Conectado",
-        description: "WebSocket não está conectado. Tentando reconectar...",
-        variant: "destructive",
-      });
-      connect();
-      return false;
-    }
-  }, [connect]);
-
-  // Ações (mantive todas as existentes)
-  const startTimer = useCallback((chamado: number, level: number, duration: number = 1200) => {
-    return sendMessage({ action: 'startTimer', chamado, level, duration });
-  }, [sendMessage]);
-
-  const updateObservacao = useCallback((chamado: number, level: number, observacao: string) => {
-    return sendMessage({ action: 'updateObservacao', chamado, level, observacao });
-  }, [sendMessage]);
-
-  const updateOperador = useCallback((chamado: number, operador: string) => {
-    return sendMessage({ action: 'updateOperador', chamado, operador });
-  }, [sendMessage]);
-
-  const updateAcionamento = useCallback((chamado: number, level: number, operador: string, pessoaAcionada: string, statusAcionamento: string) => {
-    return sendMessage({ action: 'updateAcionamento', chamado, level, operador, pessoaAcionada, statusAcionamento});
-  }, [sendMessage]);
-
-  const updateStatusFinal = useCallback((
-    chamado: number,
-    levelOrKeyOrStatus: number | string,
-    maybeStatus?: string
-  ) => {
-    // caso 1: numeric + status -> level number
-    if (typeof levelOrKeyOrStatus === 'number') {
-      const level = levelOrKeyOrStatus;
-      const status = maybeStatus!;
-      const levelStatusKey = `level${level}_status`;
-      return sendMessage({ action: 'updateStatusFinal', chamado, levelStatusKey, status });
-    }
-
-    // caso 2: string + status (treat second param as levelStatusKey)
-    if (typeof maybeStatus === 'string') {
-      const levelStatusKey = levelOrKeyOrStatus;
-      const status = maybeStatus;
-      return sendMessage({ action: 'updateStatusFinal', chamado, levelStatusKey, status });
-    }
-
-    // caso 3: apenas chamado + statusFinal (retrocompatível)
-    const statusFinal = levelOrKeyOrStatus;
-    return sendMessage({ action: 'updateStatusFinal', chamado, statusFinal });
-  }, [sendMessage]);
-
-  const getState = useCallback((chamado: number) => {
-    return sendMessage({ action: 'getState', chamado });
-  }, [sendMessage]);
-
-  // Cálculo de tempo restante (sem logs)
-  const getRemainingTime = useCallback((chamado: number, level: number): number => {
-    const timerState = timers.get(chamado);
-    if (!timerState) return 0;
-
-    const levelPrefix = `level${level}` as 'level1' | 'level2' | 'level3' | 'level4' | 'level5';
-    const timerStart = timerState[`${levelPrefix}_timerStart`];
-    const duration = timerState[`${levelPrefix}_duration`];
-    const status = timerState[`${levelPrefix}_status`];
-
-    if (!timerStart || !duration || status !== 'running') return 0;
-
-    try {
-      const startTime = new Date(timerStart).getTime();
-      const endTime = startTime + (duration * 1000);
-      const now = Date.now();
-      return Math.max(0, Math.floor((endTime - now) / 1000));
-    } catch {
-      return 0;
-    }
-  }, [timers]);
-
-  const formatTime = useCallback((seconds: number): string => {
-    const hours = Math.floor(seconds / 3600);
-    const minutes = Math.floor((seconds % 3600) / 60);
-    const secs = seconds % 60;
-
-    if (hours > 0) {
-      return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
-    }
-    return `${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
-  }, []);
-
-  const isTimerActive = useCallback((chamado: number, level: number): boolean => {
-    const timerState = timers.get(chamado);
-    if (!timerState) return false;
-
-    const levelPrefix = `level${level}` as 'level1' | 'level2' | 'level3' | 'level4' | 'level5';
-    return timerState[`${levelPrefix}_status`] === 'running';
-  }, [timers]);
-
-  // Conectar ao montar
-  useEffect(() => {
-    connect();
-    return () => disconnect();
-  }, [connect, disconnect]);
-
-  // Força re-render a cada segundo
-  useEffect(() => {
-    const interval = setInterval(() => {
-      setTimers(prev => new Map(prev));
-    }, 1000);
-    return () => clearInterval(interval);
-  }, []);
-
-  useEffect(() => {
-    if (!isConnected) return;
-
-    try {
-      const currentKeys = Array.from(timers.keys());
-      const watchedKeys = Array.from(watchedChamadosRef.current);
-      const uniqueChamados = Array.from(new Set([...currentKeys, ...watchedKeys]));
-
-      if (uniqueChamados.length === 0) {
-        return;
-      }
-
-      console.log('🔁 Solicitando estado inicial para chamados:', uniqueChamados);
-      uniqueChamados.forEach(chamado => {
-        try {
-          getState(chamado);
-        } catch (err) {
-          console.error(`Erro ao solicitar getState para ${chamado}:`, err);
-        }
-      });
-    } catch (err) {
-      console.error('Erro no efeito de sincronização inicial:', err);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isConnected, getState]);
-
-  const addWatchedChamado = useCallback((chamado: number) => {
-    watchedChamadosRef.current.add(chamado);
-  }, []);
-
-  const removeWatchedChamado = useCallback((chamado: number) => {
-    watchedChamadosRef.current.delete(chamado);
-  }, []);
-
-  const setWatchedChamados = useCallback((chamados: number[]) => {
-    watchedChamadosRef.current = new Set(chamados);
-  }, []);
-
-  const getWatchedChamados = useCallback(() => {
-    return Array.from(watchedChamadosRef.current);
-  }, []);
-
-  return {
-    timers,
-    isConnected,
-    sendMessage,
-    startTimer,
-    updateObservacao,
-    updateOperador,
-    updateAcionamento,
-    updateStatusFinal,
-    getState,
-    getRemainingTime,
-    formatTime,
-    isTimerActive,
-    connect,
-    disconnect,
-    addWatchedChamado,
-    removeWatchedChamado,
-    setWatchedChamados,
-    getWatchedChamados
-  };
-};
+chamado
+: 
+10541210
+level1_duration
+: 
+1200
+level1_observacao
+: 
+"asdasdadada"
+level1_operador
+: 
+"CAIO CESAR ALVES DA LUZ"
+level1_pessoaAcionada
+: 
+"dasdasd"
+level1_status
+: 
+"finished"
+level1_statusAcionamento
+: 
+"nao-atendido"
+level1_timerStart
+: 
+"2025-09-20T22:57:41.148853+00:00"
+level1_updatedAt
+: 
+"2025-09-20T22:57:49.296305+00:00"
+level2_duration
+: 
+1200
+level2_observacao
+: 
+"adsdasdasdadas"
+level2_operador
+: 
+"ALEXANDRE LIMA SILVA"
+level2_pessoaAcionada
+: 
+"asdadadad"
+level2_status
+: 
+"finished"
+level2_statusAcionamento
+: 
+"atendido"
+level2_timerStart
+: 
+"2025-09-20T22:57:49.296679+00:00"
+level2_updatedAt
+: 
+"2025-09-20T22:57:59.597664+00:00"
+statusFinal
+: 
+"finished"
+statusFinal_updatedAt
+: 
+"2025-09-20T22:57:59.597664+00:00"
+[[Prototype]]
+: 
+Object
