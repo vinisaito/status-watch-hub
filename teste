@@ -9,7 +9,7 @@ import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
 import { ProgressIndicator } from '@/components/ui/progress-indicator';
 import { TimerDisplay } from '@/components/ui/timer-display';
-import { ArrowRight, CheckCircle, X, AlertTriangle, Lightbulb, MessageSquare, Timer, Building2, Users, Clock, User, Phone, History, Calendar } from 'lucide-react';
+import { ArrowRight, CheckCircle, X, AlertTriangle, Lightbulb, MessageSquare, Timer, Building2, Users, Clock, User, Phone } from 'lucide-react';
 import { toast } from '@/hooks/use-toast';
 import { cn } from '@/lib/utils';
 
@@ -25,6 +25,14 @@ interface ModernTimerModalProps {
   updateStatusFinal: (chamado: number, levelStatusKey: string, status: string) => void;
   updateObservacao: (chamado: number, level: number, observacao: string) => void;
   updateAcionamento: (chamado: number, level: number, operador: string, pessoaAcionada: string, statusAcionamento: string) => void;
+  historicoAcionamentos?: {
+    operador: string;
+    pessoaAcionada: string;
+    status: string;
+    observacao: string;
+    dataHora: string;
+    nivel: number;
+  }[];
 }
 
 const LEVEL_INFO = {
@@ -75,17 +83,6 @@ const LEVEL_INFO = {
   }
 };
 
-// Interface para histórico de acionamentos
-interface HistoricoAcionamento {
-  level: number;
-  operador?: string;
-  pessoaAcionada?: string;
-  statusAcionamento?: string;
-  observacao?: string;
-  dataHora?: string;
-  status: 'finished' | 'running' | 'pending';
-}
-
 export const ModernTimerModal: React.FC<ModernTimerModalProps> = ({
   isOpen,
   onClose,
@@ -97,7 +94,8 @@ export const ModernTimerModal: React.FC<ModernTimerModalProps> = ({
   onNextLevel,
   updateStatusFinal,
   updateObservacao,
-  updateAcionamento
+  updateAcionamento,
+  historicoAcionamentos = []
 }) => {
   const [observacao, setObservacao] = useState('');
   const [pessoaAcionada, setPessoaAcionada] = useState('');
@@ -114,37 +112,6 @@ export const ModernTimerModal: React.FC<ModernTimerModalProps> = ({
       chamadoData?.statusFinal === "finished" || chamadoData?.[levelStatusKey] === "finished"
     );
   }, [chamadoData, levelStatusKey]);
-
-  // Função para extrair histórico dos acionamentos
-  const getHistoricoAcionamentos = useCallback((): HistoricoAcionamento[] => {
-    if (!chamadoData) return [];
-
-    const historico: HistoricoAcionamento[] = [];
-
-    for (let level = 1; level <= 5; level++) {
-      const statusKey = `level${level}_status`;
-      const status = chamadoData[statusKey];
-      
-      if (status === 'finished' || (level < currentLevel)) {
-        historico.push({
-          level,
-          operador: chamadoData[`level${level}_operador`] || 'N/A',
-          pessoaAcionada: chamadoData[`level${level}_pessoaAcionada`] || 'N/A',
-          statusAcionamento: chamadoData[`level${level}_statusAcionamento`] || 'N/A',
-          observacao: chamadoData[`level${level}_observacao`] || 'Nenhuma observação registrada',
-          dataHora: chamadoData[`level${level}_dataHora`] || new Date().toLocaleString('pt-BR'),
-          status: 'finished'
-        });
-      } else if (level === currentLevel && status === 'running') {
-        // Nível atual em execução - não adiciona ao histórico ainda
-        break;
-      }
-    }
-
-    return historico.sort((a, b) => b.level - a.level); // Mais recente primeiro
-  }, [chamadoData, currentLevel]);
-
-  const historicoAcionamentos = getHistoricoAcionamentos();
 
   const levelInfo = finalizado
     ? {
@@ -280,7 +247,7 @@ export const ModernTimerModal: React.FC<ModernTimerModalProps> = ({
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
-      <DialogContent className="sm:max-w-6xl max-h-[90vh] overflow-y-auto border-border shadow-modal">
+      <DialogContent className="sm:max-w-4xl max-h-[85vh] overflow-y-auto border-border shadow-modal">
         {/* Header Section */}
         <DialogHeader className="relative pb-8">
           <div className={cn(
@@ -348,400 +315,316 @@ export const ModernTimerModal: React.FC<ModernTimerModalProps> = ({
           </div>
         </DialogHeader>
 
-        <div className="grid grid-cols-1 xl:grid-cols-3 gap-8">
-          {/* Coluna Principal - Formulário */}
-          <div className="xl:col-span-2 space-y-8">
-            {/* Timer and Progress Section */}
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-              <TimerDisplay
-                remainingTime={remainingTime}
-                formatTime={formatTime}
-                className="w-full"
-              />
-              <ProgressIndicator
-                currentLevel={currentLevel}
-                className="w-full"
-              />
-            </div>
-
-            <Separator />
-
-            {/* Required Information Section */}
-            <div className="space-y-6">
+        <div className="space-y-8">
+          {/* Histórico de Acionamentos */}
+          {historicoAcionamentos.length > 0 && (
+            <div className="space-y-4">
               <div className="flex items-center gap-3">
-                <Phone className="h-6 w-6 text-primary" />
+                <Lightbulb className="h-6 w-6 text-primary" />
                 <Label className="text-xl font-semibold text-foreground">
-                  Acionamento
+                  Histórico de Acionamentos
                 </Label>
               </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                {/* Operador */}
-                <div className="space-y-3">
-                  <Label htmlFor="operador" className="text-base font-medium flex items-center gap-2">
-                    <User className="h-4 w-4" />
-                    Operador
-                    <span className="text-destructive">*</span>
-                  </Label>
-                  <Select
-                    value={operador}
-                    onValueChange={setOperador}
-                    disabled={isProcessing || finalizado}
-                  >
-                    <SelectTrigger className={cn(
-                      "border-2 focus:border-primary",
-                      operador && "border-success"
-                    )}>
-                      <SelectValue placeholder="Selecione o operador" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="ALBERTO LAGES">ALBERTO LAGES</SelectItem>
-                      <SelectItem value="ALEXANDRE LIMA SILVA">ALEXANDRE LIMA SILVA</SelectItem>
-                      <SelectItem value="ANSELMO ALVES PESSOA">ANSELMO ALVES PESSOA</SelectItem>
-                      <SelectItem value="BRUNO MAZZO FEITOSA">BRUNO MAZZO FEITOSA</SelectItem>
-                      <SelectItem value="CAIO CESAR ALVES DA LUZ">CAIO CESAR ALVES DA LUZ</SelectItem>
-                      <SelectItem value="CLAUDIA ZORZAN DE CAMARGO">CLAUDIA ZORZAN DE CAMARGO</SelectItem>
-                      <SelectItem value="JEFFERSON DA SILVA SOUZA">JEFFERSON DA SILVA SOUZA</SelectItem>
-                      <SelectItem value="JULIANA BEATRIZ DE ANGELO">JULIANA BEATRIZ DE ANGELO</SelectItem>
-                      <SelectItem value="MARIA LUIZA DOS SANTOS COIADO">MARIA LUIZA DOS SANTOS COIADO</SelectItem>
-                      <SelectItem value="RAFAEL NUNES PACHECO">RAFAEL NUNES PACHECO</SelectItem>
-                      <SelectItem value="SERGIO ANTONIO DA SILVA">SERGIO ANTONIO DA SILVA</SelectItem>
-                      <SelectItem value="VICTOR HUGO ALMEIDA FERNANDES">VICTOR HUGO ALMEIDA FERNANDES</SelectItem>
-                      <SelectItem value="VINICIUS RHYU VITURINO SAITO">VINICIUS RHYU VITURINO SAITO</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                {/* Nome da Pessoa Acionada */}
-                <div className="space-y-3">
-                  <Label htmlFor="pessoa-acionada" className="text-base font-medium flex items-center gap-2">
-                    <User className="h-4 w-4" />
-                    Pessoa Acionada
-                    <span className="text-destructive">*</span>
-                  </Label>
-                  <Input
-                    id="pessoa-acionada"
-                    type="text"
-                    value={pessoaAcionada}
-                    onChange={(e) => setPessoaAcionada(e.target.value)}
-                    placeholder="Ex: João Silva, Maria Santos..."
-                    className={cn(
-                      "border-2 focus:border-primary transition-all duration-200",
-                      pessoaAcionada.trim().length >= 2 && "border-success"
-                    )}
-                    disabled={isProcessing || finalizado}
-                    maxLength={100}
-                  />
-                </div>
-
-                {/* Status do Atendimento */}
-                <div className="space-y-3">
-                  <Label htmlFor="status-atendimento" className="text-base font-medium flex items-center gap-2">
-                    <CheckCircle className="h-4 w-4" />
-                    Status do Atendimento
-                    <span className="text-destructive">*</span>
-                  </Label>
-                  <Select
-                    value={statusAtendimento}
-                    onValueChange={(value) => {
-                      console.log("Status selecionado:", value);
-                      setStatusAtendimento(value);
-                    }}
-                    disabled={isProcessing || finalizado}
-                  >
-                    <SelectTrigger className={cn(
-                      "border-2 focus:border-primary",
-                      statusAtendimento && "border-success"
-                    )}>
-                      <SelectValue placeholder="Selecione o status do atendimento" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="atendido">✅ Atendido</SelectItem>
-                      <SelectItem value="nao-atendido">❌ Não Atendido</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
+              <div className="overflow-x-auto">
+                <table className="min-w-full text-sm border rounded-lg bg-background">
+                  <thead>
+                    <tr className="bg-muted">
+                      <th className="px-3 py-2 text-left">Nível</th>
+                      <th className="px-3 py-2 text-left">Operador</th>
+                      <th className="px-3 py-2 text-left">Pessoa Acionada</th>
+                      <th className="px-3 py-2 text-left">Status</th>
+                      <th className="px-3 py-2 text-left">Observação</th>
+                      <th className="px-3 py-2 text-left">Data/Hora</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {historicoAcionamentos.map((h, idx) => (
+                      <tr key={idx} className="border-t">
+                        <td className="px-3 py-2">{h.nivel}</td>
+                        <td className="px-3 py-2">{h.operador}</td>
+                        <td className="px-3 py-2">{h.pessoaAcionada}</td>
+                        <td className="px-3 py-2">{h.status}</td>
+                        <td className="px-3 py-2 whitespace-pre-line">{h.observacao}</td>
+                        <td className="px-3 py-2">{h.dataHora}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
             </div>
+          )}
 
-            <Separator />
+          {/* Timer and Progress Section */}
+          <div className="grid grid-cols-1 xl:grid-cols-2 gap-8">
+            <TimerDisplay
+              remainingTime={remainingTime}
+              formatTime={formatTime}
+              className="w-full"
+            />
+            <ProgressIndicator
+              currentLevel={currentLevel}
+              className="w-full"
+            />
+          </div>
 
-            {/* Observations Section */}
-            <div className="space-y-6">
-              <div className="flex items-center gap-3">
-                <MessageSquare className="h-6 w-6 text-primary" />
-                <Label htmlFor="observacao" className="text-xl font-semibold text-foreground">
-                  Observações
+          <Separator />
+
+          {/* Required Information Section */}
+          <div className="space-y-6">
+            <div className="flex items-center gap-3">
+              <Phone className="h-6 w-6 text-primary" />
+              <Label className="text-xl font-semibold text-foreground">
+                Acionamento
+              </Label>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+              {/* Operador */}
+              <div className="space-y-3">
+                <Label htmlFor="operador" className="text-base font-medium flex items-center gap-2">
+                  <User className="h-4 w-4" />
+                  Operador
+                  <span className="text-destructive">*</span>
                 </Label>
-              </div>
-
-              <Textarea
-                id="observacao"
-                value={observacao}
-                onChange={(e) => setObservacao(e.target.value)}
-                placeholder="Descreva as informações do acionamento"
-                rows={6}
-                className={cn(
-                  "border-2 focus:border-primary transition-all duration-200 resize-none text-base min-h-[120px]",
-                  observacao.trim().length >= 10 && "border-success"
-                )}
-                disabled={isProcessing || finalizado}
-                maxLength={1000}
-              />
-
-              <div className="flex justify-between items-center">
-                <span className={cn(
-                  "text-sm font-medium",
-                  observacao.length > 900 ? "text-warning" : "text-muted-foreground"
-                )}>
-                  {observacao.length}/1000 caracteres
-                </span>
-                {observacao.trim().length >= 10 && (
-                  <div className="flex items-center gap-2 text-success font-medium text-sm">
-                    <CheckCircle className="h-4 w-4" />
-                    <span>Observação válida</span>
-                  </div>
-                )}
-              </div>
-            </div>
-
-            <Separator />
-
-            {/* Action Buttons */}
-            <div className="space-y-6">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {/* Finish Button */}
-                <Button
-                  variant="secondary"
-                  size="lg"
-                  onClick={() => handleAction('finish')}
-                  disabled={!isFormValid || isProcessing || finalizado}
-                  className="h-20"
+                <Select
+                  value={operador}
+                  onValueChange={setOperador}
+                  disabled={isProcessing || finalizado}
                 >
-                  <CheckCircle className="h-6 w-6 mr-3" />
-                  <div className="text-left">
-                    <div className="font-semibold text-base">Acompanhamento Confirmado</div>
-                    <div className="text-sm opacity-90">Finalizar Acompanhamento</div>
-                  </div>
-                </Button>
+                  <SelectTrigger className={cn(
+                    "border-2 focus:border-primary",
+                    operador && "border-success"
+                  )}>
+                    <SelectValue placeholder="Selecione o operador" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="ALBERTO LAGES">ALBERTO LAGES</SelectItem>
+                    <SelectItem value="ALEXANDRE LIMA SILVA">ALEXANDRE LIMA SILVA</SelectItem>
+                    <SelectItem value="ANSELMO ALVES PESSOA">ANSELMO ALVES PESSOA</SelectItem>
+                    <SelectItem value="BRUNO MAZZO FEITOSA">BRUNO MAZZO FEITOSA</SelectItem>
+                    <SelectItem value="CAIO CESAR ALVES DA LUZ">CAIO CESAR ALVES DA LUZ</SelectItem>
+                    <SelectItem value="CLAUDIA ZORZAN DE CAMARGO">CLAUDIA ZORZAN DE CAMARGO</SelectItem>
+                    <SelectItem value="JEFFERSON DA SILVA SOUZA">JEFFERSON DA SILVA SOUZA</SelectItem>
+                    <SelectItem value="JULIANA BEATRIZ DE ANGELO">JULIANA BEATRIZ DE ANGELO</SelectItem>
+                    <SelectItem value="MARIA LUIZA DOS SANTOS COIADO">MARIA LUIZA DOS SANTOS COIADO</SelectItem>
+                    <SelectItem value="RAFAEL NUNES PACHECO">RAFAEL NUNES PACHECO</SelectItem>
+                    <SelectItem value="SERGIO ANTONIO DA SILVA">SERGIO ANTONIO DA SILVA</SelectItem>
+                    <SelectItem value="VICTOR HUGO ALMEIDA FERNANDES">VICTOR HUGO ALMEIDA FERNANDES</SelectItem>
+                    <SelectItem value="VINICIUS RHYU VITURINO SAITO">VINICIUS RHYU VITURINO SAITO</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
 
-                {/* Next Level Button */}
-                <Button
-                  variant="destructive"
-                  size="lg"
-                  onClick={() => handleAction('next')}
-                  disabled={!isFormValid || isProcessing || finalizado}
+              {/* Nome da Pessoa Acionada */}
+              <div className="space-y-3">
+                <Label htmlFor="pessoa-acionada" className="text-base font-medium flex items-center gap-2">
+                  <User className="h-4 w-4" />
+                  Pessoa Acionada
+                  <span className="text-destructive">*</span>
+                </Label>
+                <Input
+                  id="pessoa-acionada"
+                  type="text"
+                  value={pessoaAcionada}
+                  onChange={(e) => setPessoaAcionada(e.target.value)}
+                  placeholder="Ex: João Silva, Maria Santos..."
                   className={cn(
-                    "h-20",
-                    remainingTime < 0 && "animate-timer-alert bg-timer-negative hover:bg-timer-negative/90"
+                    "border-2 focus:border-primary transition-all duration-200",
+                    pessoaAcionada.trim().length >= 2 && "border-success"
                   )}
+                  disabled={isProcessing || finalizado}
+                  maxLength={100}
+                />
+              </div>
+
+              {/* Status do Atendimento */}
+              <div className="space-y-3">
+                <Label htmlFor="status-atendimento" className="text-base font-medium flex items-center gap-2">
+                  <CheckCircle className="h-4 w-4" />
+                  Status do Atendimento
+                  <span className="text-destructive">*</span>
+                </Label>
+                <Select
+                  value={statusAtendimento}
+                  onValueChange={(value) => {
+                    console.log("Status selecionado:", value); // 🔹 log de debug
+                    setStatusAtendimento(value);
+                  }}
+                  disabled={isProcessing || finalizado}
                 >
-                  {finalizado ? (
-                    <>
-                      <CheckCircle className="h-6 w-6 mr-3" />
-                      <div className="text-left">
-                        <div className="font-semibold text-base">Finalizado</div>
-                        <div className="text-sm opacity-90">Chamado encerrado</div>
-                      </div>
-                    </>
-                  ) : currentLevel >= 5 ? (
-                    <>
-                      <CheckCircle className="h-6 w-6 mr-3" />
-                      <div className="text-left">
-                        <div className="font-semibold text-base">Concluir Final</div>
-                        <div className="text-sm opacity-90">Última escalação</div>
-                      </div>
-                    </>
-                  ) : (
-                    <>
-                      <ArrowRight className="h-6 w-6 mr-3" />
-                      <div className="text-left">
-                        <div className="font-semibold text-base">{levelInfo.nextAction}</div>
-                        <div className="text-sm opacity-90">Avançar escalação</div>
-                      </div>
-                    </>
-                  )}
-                </Button>
-              </div>
-            </div>
-
-            {/* Guidelines Section */}
-            <div className="gradient-modal rounded-2xl p-6 border border-border/50">
-              <div className="space-y-4">
-                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
-                  <div className="space-y-2">
-                    <div className="flex items-center gap-2 text-destructive">
-                      <AlertTriangle className="h-5 w-5" />
-                      <span className="font-semibold">Dados Obrigatórios</span>
-                    </div>
-                    <p className="text-sm text-muted-foreground">
-                      Nome da pessoa, status, operador e observações são campos obrigatórios para prosseguir.
-                    </p>
-                  </div>
-
-                  <div className="space-y-2">
-                    <div className="flex items-center gap-2 text-primary">
-                      <Timer className="h-5 w-5" />
-                      <span className="font-semibold">Controle de Tempo</span>
-                    </div>
-                    <p className="text-sm text-muted-foreground">
-                      Cada escalação reinicia automaticamente o timer de 20 minutos.
-                    </p>
-                    {remainingTime < 0 && (
-                      <p className="text-timer-negative text-sm font-bold animate-text-flash">
-                        ⚠️ Timer excedido! Ação urgente necessária.
-                      </p>
-                    )}
-                  </div>
-
-                  <div className="space-y-2">
-                    <div className="flex items-center gap-2 text-success">
-                      <CheckCircle className="h-5 w-5" />
-                      <span className="font-semibold">Documentação</span>
-                    </div>
-                    <p className="text-sm text-muted-foreground">
-                      Todas as informações são automaticamente registradas no histórico.
-                    </p>
-                  </div>
-                </div>
+                  <SelectTrigger className={cn(
+                    "border-2 focus:border-primary",
+                    statusAtendimento && "border-success"
+                  )}>
+                    <SelectValue placeholder="Selecione o status do atendimento" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="atendido">✅ Atendido</SelectItem>
+                    <SelectItem value="nao-atendido">❌ Não Atendido</SelectItem>
+                  </SelectContent>
+                </Select>
               </div>
             </div>
           </div>
 
-          {/* Coluna Lateral - Histórico */}
-          <div className="xl:col-span-1 space-y-6">
-            <div className="sticky top-0">
-              <div className="bg-card border border-border rounded-xl p-6 shadow-lg">
-                <div className="flex items-center gap-3 mb-6">
-                  <History className="h-6 w-6 text-primary" />
-                  <h3 className="text-xl font-semibold text-foreground">
-                    Histórico de Acionamentos
-                  </h3>
-                </div>
+          <Separator />
+          
 
-                {historicoAcionamentos.length === 0 ? (
-                  <div className="text-center py-8">
-                    <div className="rounded-full bg-muted p-4 w-16 h-16 mx-auto mb-4 flex items-center justify-center">
-                      <History className="h-8 w-8 text-muted-foreground" />
-                    </div>
-                    <p className="text-muted-foreground text-sm">
-                      Nenhum acionamento realizado ainda.
-                    </p>
-                  </div>
-                ) : (
-                  <div className="space-y-4 max-h-[600px] overflow-y-auto">
-                    {historicoAcionamentos.map((acionamento, index) => {
-                      const levelInfo = LEVEL_INFO[acionamento.level as keyof typeof LEVEL_INFO];
-                      const LevelIcon = levelInfo?.icon || Clock;
-                      
-                      return (
-                        <div
-                          key={acionamento.level}
-                          className={cn(
-                            "relative border rounded-xl p-4 transition-all duration-200",
-                            "bg-card hover:bg-accent/50 border-border"
-                          )}
-                        >
-                          {/* Timeline connector */}
-                          {index < historicoAcionamentos.length - 1 && (
-                            <div className="absolute left-8 top-16 w-0.5 h-8 bg-border"></div>
-                          )}
-                          
-                          <div className="flex items-start gap-4">
-                            <div className={cn(
-                              "p-2 rounded-lg bg-gradient-to-r flex-shrink-0",
-                              levelInfo?.color || "from-gray-500 to-gray-600",
-                              "text-white shadow-md"
-                            )}>
-                              <LevelIcon className="h-5 w-5" />
-                            </div>
-                            
-                            <div className="flex-1 min-w-0">
-                              <div className="flex items-center gap-2 mb-2">
-                                <h4 className="font-semibold text-sm text-foreground">
-                                  {levelInfo?.title || `Nível ${acionamento.level}`}
-                                </h4>
-                                <Badge 
-                                  variant="secondary" 
-                                  className="text-xs bg-success/10 text-success-foreground"
-                                >
-                                  ✅ Concluído
-                                </Badge>
-                              </div>
-                              
-                              <div className="space-y-2 text-xs">
-                                <div className="flex items-center gap-2 text-muted-foreground">
-                                  <Calendar className="h-3 w-3" />
-                                  <span>{acionamento.dataHora}</span>
-                                </div>
-                                
-                                <div className="space-y-1">
-                                  <div className="flex items-center gap-2">
-                                    <User className="h-3 w-3 text-primary" />
-                                    <span className="font-medium">Operador:</span>
-                                    <span className="text-muted-foreground">
-                                      {acionamento.operador}
-                                    </span>
-                                  </div>
-                                  
-                                  <div className="flex items-center gap-2">
-                                    <Phone className="h-3 w-3 text-primary" />
-                                    <span className="font-medium">Acionada:</span>
-                                    <span className="text-muted-foreground">
-                                      {acionamento.pessoaAcionada}
-                                    </span>
-                                  </div>
-                                  
-                                  <div className="flex items-center gap-2">
-                                    <CheckCircle className="h-3 w-3 text-primary" />
-                                    <span className="font-medium">Status:</span>
-                                    <Badge 
-                                      variant={acionamento.statusAcionamento === 'atendido' ? 'default' : 'destructive'}
-                                      className="text-xs"
-                                    >
-                                      {acionamento.statusAcionamento === 'atendido' ? '✅ Atendido' : '❌ Não Atendido'}
-                                    </Badge>
-                                  </div>
-                                </div>
-                                
-                                {acionamento.observacao && acionamento.observacao !== 'Nenhuma observação registrada' && (
-                                  <div className="mt-3 p-2 bg-muted rounded-md">
-                                    <div className="flex items-start gap-2">
-                                      <MessageSquare className="h-3 w-3 text-primary mt-0.5 flex-shrink-0" />
-                                      <div>
-                                        <span className="font-medium text-xs">Observações:</span>
-                                        <p className="text-xs text-muted-foreground mt-1 break-words">
-                                          {acionamento.observacao}
-                                        </p>
-                                      </div>
-                                    </div>
-                                  </div>
-                                )}
-                              </div>
-                            </div>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
+          {/* Observations Section */}
+          <div className="space-y-6">
+            <div className="flex items-center gap-3">
+              <MessageSquare className="h-6 w-6 text-primary" />
+              <Label htmlFor="observacao" className="text-xl font-semibold text-foreground">
+                Observações
+              </Label>
+            </div>
+
+            <Textarea
+              id="observacao"
+              value={observacao}
+              onChange={(e) => setObservacao(e.target.value)}
+              placeholder="Descreva as informações do acionamento"
+              rows={6}
+              className={cn(
+                "border-2 focus:border-primary transition-all duration-200 resize-none text-base min-h-[120px]",
+                observacao.trim().length >= 10 && "border-success"
+              )}
+              disabled={isProcessing || finalizado}
+              maxLength={1000}
+            />
+
+            <div className="flex justify-between items-center">
+              <span className={cn(
+                "text-sm font-medium",
+                observacao.length > 900 ? "text-warning" : "text-muted-foreground"
+              )}>
+                {observacao.length}/1000 caracteres
+              </span>
+              {observacao.trim().length >= 10 && (
+                <div className="flex items-center gap-2 text-success font-medium text-sm">
+                  <CheckCircle className="h-4 w-4" />
+                  <span>Observação válida</span>
+                </div>
+              )}
+            </div>
+          </div>
+
+          <Separator />
+
+          {/* Action Buttons */}
+          <div className="space-y-6">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {/* Finish Button */}
+              <Button
+                variant="secondary"
+                size="lg"
+                onClick={() => handleAction('finish')}
+                disabled={!isFormValid || isProcessing || finalizado}
+                className="h-20"
+              >
+                <CheckCircle className="h-6 w-6 mr-3" />
+                <div className="text-left">
+                  <div className="font-semibold text-base">Acompanhamento Confirmado</div>
+                  <div className="text-sm opacity-90">Finalizar Acompanhamento</div>
+                </div>
+              </Button>
+
+              {/* Next Level Button */}
+              <Button
+                variant="destructive"
+                size="lg"
+                onClick={() => handleAction('next')}
+                disabled={!isFormValid || isProcessing || finalizado}
+                className={cn(
+                  "h-20",
+                  remainingTime < 0 && "animate-timer-alert bg-timer-negative hover:bg-timer-negative/90"
                 )}
-              </div>
+              >
+                {finalizado ? (
+                  <>
+                    <CheckCircle className="h-6 w-6 mr-3" />
+                    <div className="text-left">
+                      <div className="font-semibold text-base">Finalizado</div>
+                      <div className="text-sm opacity-90">Chamado encerrado</div>
+                    </div>
+                  </>
+                ) : currentLevel >= 5 ? (
+                  <>
+                    <CheckCircle className="h-6 w-6 mr-3" />
+                    <div className="text-left">
+                      <div className="font-semibold text-base">Concluir Final</div>
+                      <div className="text-sm opacity-90">Última escalação</div>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <ArrowRight className="h-6 w-6 mr-3" />
+                    <div className="text-left">
+                      <div className="font-semibold text-base">{levelInfo.nextAction}</div>
+                      <div className="text-sm opacity-90">Avançar escalação</div>
+                    </div>
+                  </>
+                )}
+              </Button>
             </div>
           </div>
+
+          {/* Guidelines Section */}
+          <div className="gradient-modal rounded-2xl p-6 border border-border/50">
+            <div className="space-y-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
+                <div className="space-y-2">
+                  <div className="flex items-center gap-2 text-destructive">
+                    <AlertTriangle className="h-5 w-5" />
+                    <span className="font-semibold">Dados Obrigatórios</span>
+                  </div>
+                  <p className="text-sm text-muted-foreground">
+                    Nome da pessoa, status, operador e observações são campos obrigatórios para prosseguir.
+                  </p>
+                </div>
+
+                <div className="space-y-2">
+                  <div className="flex items-center gap-2 text-primary">
+                    <Timer className="h-5 w-5" />
+                    <span className="font-semibold">Controle de Tempo</span>
+                  </div>
+                  <p className="text-sm text-muted-foreground">
+                    Cada escalação reinicia automaticamente o timer de 20 minutos.
+                  </p>
+                  {remainingTime < 0 && (
+                    <p className="text-timer-negative text-sm font-bold animate-text-flash">
+                      ⚠️ Timer excedido! Ação urgente necessária.
+                    </p>
+                  )}
+                </div>
+
+                <div className="space-y-2">
+                  <div className="flex items-center gap-2 text-success">
+                    <CheckCircle className="h-5 w-5" />
+                    <span className="font-semibold">Documentação</span>
+                  </div>
+                  <p className="text-sm text-muted-foreground">
+                    Todas as informações são automaticamente registradas no histórico.
+                  </p>
+                </div>
+              </div>
+            </div>
+            
+          </div>
+
+          {/* Processing Indicator */}
+          {isProcessing && (
+            <div className="fixed inset-0 bg-background/80 backdrop-blur-sm flex items-center justify-center z-50">
+              <div className="bg-card p-6 rounded-2xl shadow-2xl border border-border">
+                <div className="flex items-center gap-3">
+                  <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-primary"></div>
+                  <span className="text-lg font-medium">Processando ação...</span>
+                </div>
+              </div>
+            </div>
+          )}
+
         </div>
-
-        {/* Processing Indicator */}
-        {isProcessing && (
-          <div className="fixed inset-0 bg-background/80 backdrop-blur-sm flex items-center justify-center z-50">
-            <div className="bg-card p-6 rounded-2xl shadow-2xl border border-border">
-              <div className="flex items-center gap-3">
-                <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-primary"></div>
-                <span className="text-lg font-medium">Processando ação...</span>
-              </div>
-            </div>
-          </div>
-        )}
-
       </DialogContent>
     </Dialog>
   );
