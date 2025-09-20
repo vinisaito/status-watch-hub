@@ -9,8 +9,8 @@ import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-// import { ProgressIndicator } from '@/components/ui/progress-indicator';
-// import { TimerDisplay } from '@/components/ui/timer-display';
+import { ProgressIndicator } from '@/components/ui/progress-indicator';
+import { TimerDisplay } from '@/components/ui/timer-display';
 import { HistoricoAcionamentos } from '@/components/ui/historico-acionamentos';
 import { ArrowRight, CheckCircle, X, AlertTriangle, Lightbulb, MessageSquare, Timer, Building2, Users, Clock, User, Phone, History } from 'lucide-react';
 import { toast } from '@/hooks/use-toast';
@@ -19,13 +19,12 @@ import { cn } from '@/lib/utils';
 interface ModernTimerModalProps {
   isOpen: boolean;
   onClose: () => void;
-  chamado: string; // Changed to string to match ActionTable
+  chamado: number;
   currentLevel: number;
   remainingTime: number;
   chamadoData?: any;
   formatTime: (seconds: number) => string;
-  onNextLevel: (chamado: string, nextLevel: number, observacao: string) => Promise<boolean>;
-  onPreviousLevel?: (chamado: string, previousLevel: number, observacao: string) => Promise<boolean>;
+  onNextLevel: (chamado: number, level: number, observacao: string) => void;
   updateStatusFinal: (chamado: number, levelStatusKey: string, status: string) => void;
   updateObservacao: (chamado: number, level: number, observacao: string) => void;
   updateAcionamento: (chamado: number, level: number, operador: string, pessoaAcionada: string, statusAcionamento: string) => void;
@@ -97,7 +96,6 @@ export const ModernTimerModal: React.FC<ModernTimerModalProps> = ({
   const [statusAtendimento, setStatusAtendimento] = useState('');
   const [operador, setOperador] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
-
   const levelStatusKey = `level${currentLevel}_status`;
   const [finalizado, setFinalizado] = useState(
     chamadoData?.statusFinal === "finished" || chamadoData?.[levelStatusKey] === "finished"
@@ -175,11 +173,10 @@ export const ModernTimerModal: React.FC<ModernTimerModalProps> = ({
 
       switch (action) {
         case 'next': {
-          const chamadoNum = parseInt(chamado);
           const updates = [
-            updateStatusFinal(chamadoNum, levelStatusKey, "finished"),
-            updateObservacao(chamadoNum, currentLevel, observacao || ""),
-            updateAcionamento(chamadoNum, currentLevel, operador || "", pessoaAcionada || "", statusAtendimento || "")
+            updateStatusFinal(chamado, levelStatusKey, "finished"),
+            updateObservacao(chamado, currentLevel, observacao || ""),
+            updateAcionamento(chamado, currentLevel, operador || "", pessoaAcionada || "", statusAtendimento || "")
           ];
 
           if (currentLevel >= 5) {
@@ -202,11 +199,10 @@ export const ModernTimerModal: React.FC<ModernTimerModalProps> = ({
         }
 
         case 'finish': {
-          const chamadoNum = parseInt(chamado);
           const updates = [
-            updateStatusFinal(chamadoNum, levelStatusKey, "finished"),
-            updateObservacao(chamadoNum, currentLevel, observacao || ""),
-            updateAcionamento(chamadoNum, currentLevel, operador || "", pessoaAcionada || "", statusAtendimento || "")
+            updateStatusFinal(chamado, levelStatusKey, "finished"),
+            updateObservacao(chamado, currentLevel, observacao || ""),
+            updateAcionamento(chamado, currentLevel, operador || "", pessoaAcionada || "", statusAtendimento || "")
           ];
 
           await Promise.all(updates);
@@ -328,17 +324,16 @@ export const ModernTimerModal: React.FC<ModernTimerModalProps> = ({
           {/* Tab de Novo Acionamento */}
           <TabsContent value="acionamento" className="space-y-8">
             {/* Timer and Progress Section */}
-            <div className="grid grid-cols-1 gap-8">
-              <div className="p-6 bg-muted/30 rounded-xl border border-border">
-                <div className="text-center space-y-2">
-                  <div className="text-2xl font-mono font-bold text-foreground">
-                    {formatTime(Math.abs(remainingTime))}
-                  </div>
-                  <p className="text-sm text-muted-foreground">
-                    {remainingTime < 0 ? 'Tempo excedido' : 'Tempo restante'}
-                  </p>
-                </div>
-              </div>
+            <div className="grid grid-cols-1 xl:grid-cols-2 gap-8">
+              <TimerDisplay
+                remainingTime={remainingTime}
+                formatTime={formatTime}
+                className="w-full"
+              />
+              <ProgressIndicator
+                currentLevel={currentLevel}
+                className="w-full"
+              />
             </div>
 
             <Separator />
@@ -420,7 +415,10 @@ export const ModernTimerModal: React.FC<ModernTimerModalProps> = ({
                   </Label>
                   <Select
                     value={statusAtendimento}
-                    onValueChange={setStatusAtendimento}
+                    onValueChange={(value) => {
+                      console.log("Status selecionado:", value);
+                      setStatusAtendimento(value);
+                    }}
                     disabled={isProcessing || finalizado}
                   >
                     <SelectTrigger className={cn(
@@ -605,6 +603,169 @@ export const ModernTimerModal: React.FC<ModernTimerModalProps> = ({
 
       </DialogContent>
     </Dialog>
+  );
+};
+
+
+
+
+
+
+
+
+
+import React from 'react';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Badge } from '@/components/ui/badge';
+import { Separator } from '@/components/ui/separator';
+import { Clock, User, Phone, CheckCircle, XCircle, MessageSquare } from 'lucide-react';
+import { cn } from '@/lib/utils';
+
+interface HistoricoAcionamentosProps {
+  chamadoData?: any;
+  currentLevel: number;
+}
+
+const LEVEL_NAMES = {
+  1: "Primeiro Acionamento",
+  2: "1ª Escalação",
+  3: "2ª Escalação", 
+  4: "3ª Escalação",
+  5: "4ª Escalação"
+};
+
+export const HistoricoAcionamentos: React.FC<HistoricoAcionamentosProps> = ({
+  chamadoData,
+  currentLevel
+}) => {
+  if (!chamadoData) {
+    return (
+      <div className="text-center py-8">
+        <p className="text-muted-foreground">Nenhum dado de histórico disponível</p>
+      </div>
+    );
+  }
+
+  const historicData = [];
+  
+  // Gerar histórico para cada nível até o atual
+  for (let level = 1; level <= Math.max(currentLevel, 1); level++) {
+    const levelData = {
+      level,
+      title: LEVEL_NAMES[level as keyof typeof LEVEL_NAMES],
+      operador: chamadoData[`level${level}_operador`] || "N/A",
+      pessoaAcionada: chamadoData[`level${level}_pessoaAcionada`] || "N/A",
+      statusAcionamento: chamadoData[`level${level}_statusAcionamento`] || "N/A",
+      observacao: chamadoData[`level${level}_observacao`] || "N/A",
+      status: chamadoData[`level${level}_status`] || "pending",
+      timestamp: chamadoData[`level${level}_timestamp`] || new Date().toISOString()
+    };
+    
+    // Só adicionar se tem dados relevantes
+    if (levelData.operador !== "N/A" || levelData.pessoaAcionada !== "N/A" || level <= currentLevel) {
+      historicData.push(levelData);
+    }
+  }
+
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center gap-3">
+        <Clock className="h-6 w-6 text-primary" />
+        <h3 className="text-xl font-semibold">Histórico de Acionamentos</h3>
+      </div>
+
+      {historicData.length === 0 ? (
+        <Card>
+          <CardContent className="p-6 text-center">
+            <p className="text-muted-foreground">Nenhum acionamento registrado ainda</p>
+          </CardContent>
+        </Card>
+      ) : (
+        <div className="space-y-4">
+          {historicData.map((item, index) => (
+            <Card key={item.level} className={cn(
+              "border-l-4",
+              item.level === currentLevel && "border-l-primary bg-primary/5",
+              item.status === "finished" && "border-l-success",
+              item.status === "pending" && "border-l-orange-500"
+            )}>
+              <CardHeader className="pb-3">
+                <div className="flex items-center justify-between">
+                  <CardTitle className="text-lg flex items-center gap-2">
+                    <span className="bg-primary text-primary-foreground w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold">
+                      {item.level}
+                    </span>
+                    {item.title}
+                  </CardTitle>
+                  <div className="flex items-center gap-2">
+                    {item.level === currentLevel && (
+                      <Badge variant="outline" className="border-primary text-primary">
+                        Atual
+                      </Badge>
+                    )}
+                    <Badge 
+                      variant={
+                        item.status === "finished" ? "default" : 
+                        item.status === "pending" ? "secondary" : "outline"
+                      }
+                      className={cn(
+                        item.status === "finished" && "bg-success text-success-foreground"
+                      )}
+                    >
+                      {item.statusAcionamento === "atendido" && <CheckCircle className="h-3 w-3 mr-1" />}
+                      {item.statusAcionamento === "nao-atendido" && <XCircle className="h-3 w-3 mr-1" />}
+                      {item.statusAcionamento === "atendido" ? "Atendido" : 
+                       item.statusAcionamento === "nao-atendido" ? "Não Atendido" : 
+                       "Em Andamento"}
+                    </Badge>
+                  </div>
+                </div>
+              </CardHeader>
+              
+              <CardContent className="space-y-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <div className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
+                      <User className="h-4 w-4" />
+                      Operador
+                    </div>
+                    <p className="text-sm bg-muted p-2 rounded">{item.operador}</p>
+                  </div>
+                  
+                  <div className="space-y-2">
+                    <div className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
+                      <Phone className="h-4 w-4" />
+                      Pessoa Acionada
+                    </div>
+                    <p className="text-sm bg-muted p-2 rounded">{item.pessoaAcionada}</p>
+                  </div>
+                </div>
+                
+                {item.observacao && item.observacao !== "N/A" && (
+                  <div className="space-y-2">
+                    <div className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
+                      <MessageSquare className="h-4 w-4" />
+                      Observações
+                    </div>
+                    <div className="bg-muted p-3 rounded text-sm">
+                      {item.observacao.split('\n').map((line, idx) => (
+                        <div key={idx}>{line}</div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                
+                <div className="text-xs text-muted-foreground">
+                  {new Date(item.timestamp).toLocaleString('pt-BR')}
+                </div>
+              </CardContent>
+              
+              {index < historicData.length - 1 && <Separator className="my-4" />}
+            </Card>
+          ))}
+        </div>
+      )}
+    </div>
   );
 };
 
