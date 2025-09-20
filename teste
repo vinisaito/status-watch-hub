@@ -17,7 +17,7 @@ import { useEffect } from 'react';
 import { useWebsocketTimers } from "@/hooks/useWebsocketTimers";
 
 // Modern Timer Management Modal
-import { ModernTimerModal } from '@/components/ActionTable/ModernTimerModal';
+import { ModernTimerModal } from '@/components/ui/modern-timer-modal';
 
 interface AlertData {
   id: string;
@@ -214,9 +214,9 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
   }, []);
 
   // CORRIGIDO: Função para avançar para próximo nível
-  const handleNextLevel = useCallback(async (chamado: string, nextLevel: number, observacao: string) => {
+  const handleNextLevel = useCallback(async (chamado: number, nextLevel: number, observacao: string) => {
     try {
-      const chamadoNum = parseInt(chamado);
+      const chamadoNum = chamado;
       const duration = 1200; // 20 minutos para cada etapa
 
       // Primeiro salvar a observação do nível atual
@@ -246,65 +246,6 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
       throw error;
     }
   }, [startTimer, updateObservacao, getState, getCurrentActiveLevel]);
-
-  // CORRIGIDO: Função para voltar ao nível anterior
-  const handlePreviousLevel = useCallback(async (chamado: string, previousLevel: number, observacao: string) => {
-    try {
-      const chamadoNum = parseInt(chamado);
-
-      // Salvar observação do nível atual
-      const currentLevel = getCurrentActiveLevel(chamadoNum);
-      if (currentLevel && observacao.trim()) {
-        updateObservacao(chamadoNum, currentLevel, observacao.trim());
-      }
-
-      // Iniciar o nível anterior
-      const duration = 1200; // 20 minutos
-      const success = startTimer(chamadoNum, previousLevel, duration);
-
-      if (success) {
-        // Aguardar um momento para garantir que o timer foi iniciado
-        await new Promise(resolve => setTimeout(resolve, 500));
-
-        // Atualizar estado
-        getState(chamadoNum);
-
-        return true;
-      }
-
-      return false;
-    } catch (error) {
-      console.error('Erro em handlePreviousLevel:', error);
-      throw error;
-    }
-  }, [startTimer, updateObservacao, getState, getCurrentActiveLevel]);
-
-  // CORRIGIDO: Função para finalizar chamado
-  const handleFinalize = useCallback(async (chamado: string, observacao: string) => {
-    try {
-      const chamadoNum = parseInt(chamado);
-
-      // Salvar observação final
-      const currentLevel = getCurrentActiveLevel(chamadoNum);
-      if (currentLevel && observacao.trim()) {
-        updateObservacao(chamadoNum, currentLevel, observacao.trim());
-      }
-
-      // Finalizar o chamado
-      updateStatusFinal(chamadoNum, 'finalizado');
-
-      // Aguardar um momento para garantir que o status foi atualizado
-      await new Promise(resolve => setTimeout(resolve, 500));
-
-      // Atualizar estado
-      getState(chamadoNum);
-
-      return true;
-    } catch (error) {
-      console.error('Erro em handleFinalize:', error);
-      throw error;
-    }
-  }, [updateObservacao, updateStatusFinal, getState, getCurrentActiveLevel]);
 
   // Handlers para observação
   const handleOpenObservacao = useCallback((chamado: string) => {
@@ -824,13 +765,12 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
                 setTimerManagementOpen(false);
                 setSelectedChamadoForTimer('');
               }}
-              chamado={selectedChamadoForTimer}
+              chamado={parseInt(selectedChamadoForTimer)}
               currentLevel={getCurrentActiveLevel(parseInt(selectedChamadoForTimer)) || 1}
               remainingTime={getCurrentActiveLevel(parseInt(selectedChamadoForTimer)) ? getRemainingTime(parseInt(selectedChamadoForTimer), getCurrentActiveLevel(parseInt(selectedChamadoForTimer))!) : 0}
-              chamadoData={timers.get(parseInt(selectedChamadoForTimer))} // 🔹 ADICIONADO: dados do timer para o histórico
+              chamadoData={timers.get(parseInt(selectedChamadoForTimer))}
               formatTime={formatTime}
               onNextLevel={handleNextLevel}
-              onPreviousLevel={handlePreviousLevel} // 🔹 ADICIONADO: função de retroceder nível
               updateObservacao={updateObservacao}
               updateAcionamento={updateAcionamento}
               updateStatusFinal={updateStatusFinal}
