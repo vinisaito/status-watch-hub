@@ -9,6 +9,7 @@ import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
 import { ProgressIndicator } from '@/components/ui/progress-indicator';
 import { TimerDisplay } from '@/components/ui/timer-display';
+import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion';
 import { 
   ArrowRight, 
   CheckCircle, 
@@ -27,7 +28,8 @@ import {
   Activity,
   AlertCircle,
   CheckCircle2,
-  XCircle
+  XCircle,
+  History
 } from 'lucide-react';
 import { toast } from '@/hooks/use-toast';
 import { cn } from '@/lib/utils';
@@ -344,141 +346,142 @@ export const ModernTimerModal: React.FC<ModernTimerModalProps> = ({
         </DialogHeader>
 
         <div className="space-y-8">
-          {/* Histórico de Acionamentos - NOVO DESIGN */}
+          {/* Histórico de Acionamentos - Dropdown */}
           {historicoAcionamentos.length > 0 && (
-            <div className="space-y-4">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <div className="p-2 bg-primary/10 rounded-lg">
-                    <Activity className="h-5 w-5 text-primary" />
-                  </div>
-                  <div>
-                    <Label className="text-xl font-semibold text-foreground">
+            <Accordion type="single" collapsible className="w-full">
+              <AccordionItem value="historico" className="border-2 border-border rounded-lg bg-card">
+                <AccordionTrigger className="px-6 py-4 hover:no-underline hover:bg-muted/50 transition-colors">
+                  <div className="flex items-center gap-3">
+                    <History className="h-6 w-6 text-primary" />
+                    <span className="text-xl font-semibold text-foreground">
                       Histórico de Acionamentos
-                    </Label>
-                    <p className="text-sm text-muted-foreground">
-                      {historicoAcionamentos.length} {historicoAcionamentos.length === 1 ? 'registro' : 'registros'}
-                    </p>
+                    </span>
+                    <Badge variant="secondary" className="ml-2">
+                      {historicoAcionamentos.length} registro(s)
+                    </Badge>
                   </div>
-                </div>
-              </div>
-
-              <div className="relative">
-                {/* Timeline line */}
-                <div className="absolute left-6 top-8 bottom-4 w-0.5 bg-gradient-to-b from-primary/30 via-primary/20 to-transparent" />
-                
-                <div className="space-y-4">
-                  {historicoAcionamentos.map((h, idx) => {
-                    const levelColor = LEVEL_COLORS[h.nivel as keyof typeof LEVEL_COLORS] || LEVEL_COLORS[1];
-                    const StatusIcon = h.status === 'atendido' ? CheckCircle2 : XCircle;
-                    const statusColor = h.status === 'atendido' ? 'text-green-500' : 'text-red-500';
-                    const statusBg = h.status === 'atendido' ? 'bg-green-500/10' : 'bg-red-500/10';
+                </AccordionTrigger>
+                <AccordionContent className="px-6 pb-6 pt-2">
+                  <div className="relative">
+                    {/* Timeline line */}
+                    <div className="absolute left-6 top-8 bottom-4 w-0.5 bg-gradient-to-b from-primary/30 via-primary/20 to-transparent" />
                     
-                    return (
-                      <div key={idx} className="relative flex gap-4 group">
-                        {/* Timeline node */}
-                        <div className="relative z-10">
-                          <div className={cn(
-                            "w-12 h-12 rounded-xl flex items-center justify-center font-bold shadow-sm transition-all duration-200 group-hover:scale-110",
-                            levelColor.bg,
-                            levelColor.border,
-                            levelColor.text,
-                            "border"
-                          )}>
-                            {h.nivel}
-                          </div>
-                        </div>
-
-                        {/* Content card */}
-                        <div className="flex-1 bg-card rounded-xl border p-5 shadow-sm hover:shadow-md transition-all duration-200 group-hover:border-primary/30">
-                          {/* Header with operator and status */}
-                          <div className="flex flex-wrap items-start justify-between gap-4 mb-4">
-                            <div className="space-y-3 flex-1">
-                              {/* Operator info */}
-                              <div className="flex items-center gap-3">
-                                <div className="p-2 bg-primary/5 rounded-lg">
-                                  <User className="h-4 w-4 text-primary" />
-                                </div>
-                                <div>
-                                  <p className="text-xs text-muted-foreground">Operador</p>
-                                  <p className="font-semibold text-sm">{h.operador}</p>
+                    <div className="space-y-4">
+                      {[...historicoAcionamentos]
+                        .sort((a, b) => b.nivel - a.nivel)
+                        .map((h, idx) => {
+                          const levelColor = LEVEL_COLORS[h.nivel as keyof typeof LEVEL_COLORS] || LEVEL_COLORS[1];
+                          const StatusIcon = h.status === 'atendido' ? CheckCircle2 : XCircle;
+                          const statusColor = h.status === 'atendido' ? 'text-green-500' : 'text-red-500';
+                          const statusBg = h.status === 'atendido' ? 'bg-green-500/10' : 'bg-red-500/10';
+                          
+                          return (
+                            <div key={idx} className="relative flex gap-4 group">
+                              {/* Timeline node */}
+                              <div className="relative z-10">
+                                <div className={cn(
+                                  "w-12 h-12 rounded-xl flex items-center justify-center font-bold shadow-sm transition-all duration-200 group-hover:scale-110",
+                                  levelColor.bg,
+                                  levelColor.border,
+                                  levelColor.text,
+                                  "border"
+                                )}>
+                                  {h.nivel}
                                 </div>
                               </div>
 
-                              {/* Person contacted */}
-                              <div className="flex items-center gap-3">
-                                <div className="p-2 bg-primary/5 rounded-lg">
-                                  <Phone className="h-4 w-4 text-primary" />
+                              {/* Content card */}
+                              <div className="flex-1 bg-background rounded-xl border p-5 shadow-sm hover:shadow-md transition-all duration-200 group-hover:border-primary/30">
+                                {/* Header with operator and status */}
+                                <div className="flex flex-wrap items-start justify-between gap-4 mb-4">
+                                  <div className="space-y-3 flex-1">
+                                    {/* Operator info */}
+                                    <div className="flex items-center gap-3">
+                                      <div className="p-2 bg-primary/5 rounded-lg">
+                                        <User className="h-4 w-4 text-primary" />
+                                      </div>
+                                      <div>
+                                        <p className="text-xs text-muted-foreground">Operador</p>
+                                        <p className="font-semibold text-sm">{h.operador}</p>
+                                      </div>
+                                    </div>
+
+                                    {/* Person contacted */}
+                                    <div className="flex items-center gap-3">
+                                      <div className="p-2 bg-primary/5 rounded-lg">
+                                        <Phone className="h-4 w-4 text-primary" />
+                                      </div>
+                                      <div>
+                                        <p className="text-xs text-muted-foreground">Pessoa Acionada</p>
+                                        <p className="font-semibold text-sm">{h.pessoaAcionada}</p>
+                                      </div>
+                                    </div>
+                                  </div>
+
+                                  {/* Status badge */}
+                                  <div className="flex flex-col items-end gap-2">
+                                    <div className={cn(
+                                      "flex items-center gap-2 px-3 py-1.5 rounded-full",
+                                      statusBg
+                                    )}>
+                                      <StatusIcon className={cn("h-4 w-4", statusColor)} />
+                                      <span className={cn("text-sm font-medium capitalize", statusColor)}>
+                                        {h.status === 'atendido' ? 'Atendido' : 'Não Atendido'}
+                                      </span>
+                                    </div>
+
+                                    {/* Date and time */}
+                                    <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                                      <Calendar className="h-3 w-3" />
+                                      <span>{h.updatedAt}</span>
+                                    </div>
+                                  </div>
                                 </div>
-                                <div>
-                                  <p className="text-xs text-muted-foreground">Pessoa Acionada</p>
-                                  <p className="font-semibold text-sm">{h.pessoaAcionada}</p>
+
+                                {/* Observation section */}
+                                {h.observacao && (
+                                  <div className="mt-4 pt-4 border-t">
+                                    <div className="flex items-start gap-3">
+                                      <div className="p-1.5 bg-muted rounded">
+                                        <MessageSquare className="h-3.5 w-3.5 text-muted-foreground" />
+                                      </div>
+                                      <div className="flex-1">
+                                        <p className="text-xs text-muted-foreground mb-1">Observações</p>
+                                        <p className="text-sm leading-relaxed whitespace-pre-line text-foreground/90">
+                                          {h.observacao}
+                                        </p>
+                                      </div>
+                                    </div>
+                                  </div>
+                                )}
+
+                                {/* Level badge */}
+                                <div className="flex items-center gap-2 mt-4">
+                                  <Badge 
+                                    variant="outline" 
+                                    className={cn(
+                                      "text-xs",
+                                      levelColor.border,
+                                      levelColor.text
+                                    )}
+                                  >
+                                    {LEVEL_INFO[h.nivel as keyof typeof LEVEL_INFO]?.title || `Nível ${h.nivel}`}
+                                  </Badge>
+                                  {idx === 0 && (
+                                    <Badge variant="secondary" className="text-xs">
+                                      Mais recente
+                                    </Badge>
+                                  )}
                                 </div>
                               </div>
                             </div>
-
-                            {/* Status badge */}
-                            <div className="flex flex-col items-end gap-2">
-                              <div className={cn(
-                                "flex items-center gap-2 px-3 py-1.5 rounded-full",
-                                statusBg
-                              )}>
-                                <StatusIcon className={cn("h-4 w-4", statusColor)} />
-                                <span className={cn("text-sm font-medium capitalize", statusColor)}>
-                                  {h.status === 'atendido' ? 'Atendido' : 'Não Atendido'}
-                                </span>
-                              </div>
-
-                              {/* Date and time */}
-                              <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                                <Calendar className="h-3 w-3" />
-                                <span>{h.updatedAt}</span>
-                              </div>
-                            </div>
-                          </div>
-
-                          {/* Observation section */}
-                          {h.observacao && (
-                            <div className="mt-4 pt-4 border-t">
-                              <div className="flex items-start gap-3">
-                                <div className="p-1.5 bg-muted rounded">
-                                  <MessageSquare className="h-3.5 w-3.5 text-muted-foreground" />
-                                </div>
-                                <div className="flex-1">
-                                  <p className="text-xs text-muted-foreground mb-1">Observações</p>
-                                  <p className="text-sm leading-relaxed whitespace-pre-line text-foreground/90">
-                                    {h.observacao}
-                                  </p>
-                                </div>
-                              </div>
-                            </div>
-                          )}
-
-                          {/* Level badge */}
-                          <div className="flex items-center gap-2 mt-4">
-                            <Badge 
-                              variant="outline" 
-                              className={cn(
-                                "text-xs",
-                                levelColor.border,
-                                levelColor.text
-                              )}
-                            >
-                              {LEVEL_INFO[h.nivel as keyof typeof LEVEL_INFO]?.title || `Nível ${h.nivel}`}
-                            </Badge>
-                            {idx === 0 && (
-                              <Badge variant="secondary" className="text-xs">
-                                Mais recente
-                              </Badge>
-                            )}
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            </div>
+                          );
+                        })}
+                    </div>
+                  </div>
+                </AccordionContent>
+              </AccordionItem>
+            </Accordion>
           )}
 
           {/* Timer and Progress Section */}
