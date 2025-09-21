@@ -7,9 +7,11 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
+import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { ProgressIndicator } from '@/components/ui/progress-indicator';
 import { TimerDisplay } from '@/components/ui/timer-display';
-import { ArrowRight, CheckCircle, X, AlertTriangle, Lightbulb, MessageSquare, Timer, Building2, Users, Clock, User, Phone } from 'lucide-react';
+import { ArrowRight, CheckCircle, X, AlertTriangle, Lightbulb, MessageSquare, Timer, Building2, Users, Clock, User, Phone, ChevronDown, ChevronUp, History, Calendar } from 'lucide-react';
 import { toast } from '@/hooks/use-toast';
 import { cn } from '@/lib/utils';
 
@@ -42,8 +44,8 @@ const LEVEL_INFO = {
     subtitle: "",
     nextAction: "Avançar para 1ª Escalação",
     icon: Clock,
-    color: "from-blue-500 to-blue-600",
-    bgColor: "bg-blue-500/5 border-blue-200",
+    color: "from-primary to-primary/80",
+    bgColor: "bg-primary/5 border-primary/20",
     description: "Atendimento Inicial da Equipe"
   },
   2: {
@@ -51,8 +53,8 @@ const LEVEL_INFO = {
     subtitle: "",
     nextAction: "Avançar para 2ª Escalação",
     icon: Users,
-    color: "from-orange-500 to-orange-600",
-    bgColor: "bg-orange-500/5 border-orange-200",
+    color: "from-accent to-accent/80",
+    bgColor: "bg-accent/5 border-accent/20",
     description: "Acionamento do Gestor de Incidente ou Plantonista"
   },
   3: {
@@ -60,8 +62,8 @@ const LEVEL_INFO = {
     subtitle: "",
     nextAction: "Avançar para 3ª Escalação",
     icon: Building2,
-    color: "from-red-500 to-red-600",
-    bgColor: "bg-red-500/5 border-red-200",
+    color: "from-secondary to-secondary/80",
+    bgColor: "bg-secondary/5 border-secondary/20",
     description: "Acionamento do Coordenador"
   },
   4: {
@@ -69,8 +71,8 @@ const LEVEL_INFO = {
     subtitle: "",
     nextAction: "Avançar para 4ª Escalação",
     icon: Users,
-    color: "from-purple-500 to-purple-600",
-    bgColor: "bg-purple-500/5 border-purple-200",
+    color: "from-muted to-muted/80",
+    bgColor: "bg-muted/5 border-muted/20",
     description: "Acionamento do Gerente"
   },
   5: {
@@ -78,10 +80,66 @@ const LEVEL_INFO = {
     subtitle: "",
     nextAction: "Finalizar Chamado",
     icon: Building2,
-    color: "from-red-600 to-red-700",
-    bgColor: "bg-red-600/5 border-red-300",
+    color: "from-destructive to-destructive/80",
+    bgColor: "bg-destructive/5 border-destructive/20",
     description: "Acionamento do Kleber Costa"
   }
+};
+
+const HistoricoCard: React.FC<{ historico: any; index: number }> = ({ historico, index }) => {
+  const levelInfo = LEVEL_INFO[historico.nivel as keyof typeof LEVEL_INFO];
+  const LevelIcon = levelInfo?.icon || Clock;
+  
+  return (
+    <Card className="hover:shadow-md transition-all duration-200 border-l-4" style={{ borderLeftColor: `hsl(var(--${historico.nivel <= 2 ? 'primary' : historico.nivel <= 3 ? 'accent' : 'destructive'}))` }}>
+      <CardHeader className="pb-3">
+        <div className="flex items-start justify-between">
+          <div className="flex items-center gap-3">
+            <div className={cn(
+              "p-2 rounded-lg",
+              `bg-${historico.nivel <= 2 ? 'primary' : historico.nivel <= 3 ? 'accent' : 'destructive'}/10`
+            )}>
+              <LevelIcon className="h-4 w-4" />
+            </div>
+            <div>
+              <div className="font-semibold text-sm">
+                {levelInfo?.title || `Nível ${historico.nivel}`}
+              </div>
+              <div className="text-xs text-muted-foreground">
+                {historico.updatedAt}
+              </div>
+            </div>
+          </div>
+          <Badge 
+            variant={historico.status === 'atendido' ? 'default' : 'destructive'}
+            className="text-xs"
+          >
+            {historico.status === 'atendido' ? '✅ Atendido' : '❌ Não Atendido'}
+          </Badge>
+        </div>
+      </CardHeader>
+      <CardContent className="pt-0 space-y-2">
+        <div className="grid grid-cols-2 gap-3 text-sm">
+          <div>
+            <span className="text-muted-foreground">Operador:</span>
+            <p className="font-medium truncate">{historico.operador}</p>
+          </div>
+          <div>
+            <span className="text-muted-foreground">Pessoa Acionada:</span>
+            <p className="font-medium truncate">{historico.pessoaAcionada}</p>
+          </div>
+        </div>
+        {historico.observacao && (
+          <div className="text-sm">
+            <span className="text-muted-foreground">Observação:</span>
+            <p className="text-muted-foreground mt-1 line-clamp-2">
+              {historico.observacao}
+            </p>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
 };
 
 export const ModernTimerModal: React.FC<ModernTimerModalProps> = ({
@@ -103,6 +161,8 @@ export const ModernTimerModal: React.FC<ModernTimerModalProps> = ({
   const [statusAtendimento, setStatusAtendimento] = useState('');
   const [operador, setOperador] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
+  const [isHistoricoOpen, setIsHistoricoOpen] = useState(false);
+  
   const levelStatusKey = `level${currentLevel}_status`;
   const [finalizado, setFinalizado] = useState(
     chamadoData?.statusFinal === "finished" || chamadoData?.[levelStatusKey] === "finished"
@@ -120,8 +180,8 @@ export const ModernTimerModal: React.FC<ModernTimerModalProps> = ({
       subtitle: "Processo encerrado com sucesso",
       description: "O chamado foi resolvido e encerrado",
       icon: CheckCircle,
-      color: "from-success to-success/90",
-      bgColor: "bg-success/5 border-success/20",
+      color: "from-primary to-primary/80",
+      bgColor: "bg-primary/5 border-primary/20",
       nextAction: "Finalizado"
     }
     : LEVEL_INFO[currentLevel as keyof typeof LEVEL_INFO];
@@ -248,115 +308,93 @@ export const ModernTimerModal: React.FC<ModernTimerModalProps> = ({
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
-      <DialogContent className="sm:max-w-4xl max-h-[85vh] overflow-y-auto border-border shadow-modal">
+      <DialogContent className="sm:max-w-4xl max-h-[90vh] overflow-y-auto">
         {/* Header Section */}
-        <DialogHeader className="relative pb-8">
+        <DialogHeader className="relative pb-6">
           <div className={cn(
             "absolute inset-0 bg-gradient-to-r opacity-5 rounded-t-lg",
             levelInfo.color
           )} />
 
-          <div className="relative z-10 space-y-6">
-            <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-6">
-              <div className="flex items-center gap-6">
+          <div className="relative z-10 space-y-4">
+            <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
+              <div className="flex items-center gap-4">
                 <div className={cn(
-                  "p-4 rounded-2xl bg-gradient-to-r shadow-lg",
+                  "p-3 rounded-xl bg-gradient-to-r",
                   levelInfo.color,
-                  "text-white"
+                  "text-white shadow-lg"
                 )}>
-                  <LevelIcon className="h-10 w-10" />
+                  <LevelIcon className="h-8 w-8" />
                 </div>
 
-                <div className="space-y-2">
-                  <DialogTitle className="text-3xl lg:text-4xl font-bold text-foreground">
+                <div className="space-y-1">
+                  <DialogTitle className="text-2xl font-bold">
                     {levelInfo.title}
                   </DialogTitle>
-                  <p className="text-lg text-muted-foreground">
-                    {levelInfo.subtitle}
+                  <p className="text-muted-foreground">
+                    {levelInfo.description}
                   </p>
-                  <div className="flex items-center gap-3">
-                    <Badge variant="outline" className="text-sm font-medium">
+                  <div className="flex items-center gap-2">
+                    <Badge variant="outline" className="text-xs">
                       Chamado #{chamado}
                     </Badge>
                     <Badge
                       variant={finalizado ? "default" : "secondary"}
-                      className={cn(
-                        "text-sm font-medium",
-                        finalizado && "bg-success text-success-foreground"
-                      )}
+                      className="text-xs"
                     >
                       {finalizado ? "Finalizado" : "Em Andamento"}
                     </Badge>
-                    {remainingTime < 0 && (
-                      <Badge
-                        variant="destructive"
-                        className="text-sm font-bold animate-text-flash bg-timer-negative text-white"
-                      >
-                        🚨 TEMPO EXCEDIDO
-                      </Badge>
-                    )}
                   </div>
                 </div>
               </div>
             </div>
-
-            <div className={cn(
-              "p-4 rounded-xl border-l-4",
-              levelInfo.bgColor
-            )}>
-              <p className="text-sm text-muted-foreground">
-                {levelInfo.description}
-              </p>
-              {remainingTime < 0 && (
-                <p className="text-timer-negative font-bold animate-text-flash mt-2">
-                  ⚠️ O tempo limite foi excedido! Ação urgente necessária.
-                </p>
-              )}
-            </div>
           </div>
         </DialogHeader>
 
-        <div className="space-y-8">
-          {/* Histórico de Acionamentos */}
+        <div className="space-y-6">
+          {/* Histórico de Acionamentos - Collapsible */}
           {historicoAcionamentos.length > 0 && (
-            <div className="space-y-4">
-              <div className="flex items-center gap-3">
-                <Lightbulb className="h-6 w-6 text-primary" />
-                <Label className="text-xl font-semibold text-foreground">
-                  Histórico de Acionamentos
-                </Label>
-              </div>
-              <div className="overflow-x-auto">
-                <table className="min-w-full text-sm border rounded-lg bg-background">
-                  <thead>
-                    <tr className="bg-muted">
-                      <th className="px-3 py-2 text-left">Nível</th>
-                      <th className="px-3 py-2 text-left">Operador</th>
-                      <th className="px-3 py-2 text-left">Pessoa Acionada</th>
-                      <th className="px-3 py-2 text-left">Status</th>
-                      <th className="px-3 py-2 text-left">Observação</th>
-                      <th className="px-3 py-2 text-left">Data/Hora</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {historicoAcionamentos.map((h, idx) => (
-                      <tr key={idx} className="border-t">
-                        <td className="px-3 py-2">{h.nivel}</td>
-                        <td className="px-3 py-2">{h.operador}</td>
-                        <td className="px-3 py-2">{h.pessoaAcionada}</td>
-                        <td className="px-3 py-2">{h.status}</td>
-                        <td className="px-3 py-2 whitespace-pre-line">{h.observacao}</td>
-                        <td className="px-3 py-2">{h.updatedAt}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
+            <Collapsible 
+              open={isHistoricoOpen} 
+              onOpenChange={setIsHistoricoOpen}
+              className="space-y-2"
+            >
+              <CollapsibleTrigger asChild>
+                <Button 
+                  variant="outline" 
+                  className="w-full justify-between h-12 hover:bg-muted/50"
+                >
+                  <div className="flex items-center gap-2">
+                    <History className="h-4 w-4" />
+                    <span className="font-medium">Histórico de Acionamentos</span>
+                    <Badge variant="secondary" className="ml-2">
+                      {historicoAcionamentos.length}
+                    </Badge>
+                  </div>
+                  {isHistoricoOpen ? (
+                    <ChevronUp className="h-4 w-4" />
+                  ) : (
+                    <ChevronDown className="h-4 w-4" />
+                  )}
+                </Button>
+              </CollapsibleTrigger>
+              
+              <CollapsibleContent className="space-y-3">
+                <div className="grid gap-3 max-h-64 overflow-y-auto pr-2">
+                  {historicoAcionamentos.map((historico, index) => (
+                    <HistoricoCard 
+                      key={index} 
+                      historico={historico} 
+                      index={index} 
+                    />
+                  ))}
+                </div>
+              </CollapsibleContent>
+            </Collapsible>
           )}
 
           {/* Timer and Progress Section */}
-          <div className="grid grid-cols-1 xl:grid-cols-2 gap-8">
+          <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
             <TimerDisplay
               remainingTime={remainingTime}
               formatTime={formatTime}
@@ -371,19 +409,19 @@ export const ModernTimerModal: React.FC<ModernTimerModalProps> = ({
           <Separator />
 
           {/* Required Information Section */}
-          <div className="space-y-6">
-            <div className="flex items-center gap-3">
-              <Phone className="h-6 w-6 text-primary" />
-              <Label className="text-xl font-semibold text-foreground">
-                Acionamento
+          <div className="space-y-4">
+            <div className="flex items-center gap-2">
+              <Phone className="h-5 w-5 text-primary" />
+              <Label className="text-lg font-semibold">
+                Dados do Acionamento
               </Label>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               {/* Operador */}
-              <div className="space-y-3">
-                <Label htmlFor="operador" className="text-base font-medium flex items-center gap-2">
-                  <User className="h-4 w-4" />
+              <div className="space-y-2">
+                <Label htmlFor="operador" className="text-sm font-medium flex items-center gap-2">
+                  <User className="h-3 w-3" />
                   Operador
                   <span className="text-destructive">*</span>
                 </Label>
@@ -393,8 +431,8 @@ export const ModernTimerModal: React.FC<ModernTimerModalProps> = ({
                   disabled={isProcessing || finalizado}
                 >
                   <SelectTrigger className={cn(
-                    "border-2 focus:border-primary",
-                    operador && "border-success"
+                    "border-2 focus:border-primary transition-colors",
+                    operador && "border-primary/50"
                   )}>
                     <SelectValue placeholder="Selecione o operador" />
                   </SelectTrigger>
@@ -417,9 +455,9 @@ export const ModernTimerModal: React.FC<ModernTimerModalProps> = ({
               </div>
 
               {/* Nome da Pessoa Acionada */}
-              <div className="space-y-3">
-                <Label htmlFor="pessoa-acionada" className="text-base font-medium flex items-center gap-2">
-                  <User className="h-4 w-4" />
+              <div className="space-y-2">
+                <Label htmlFor="pessoa-acionada" className="text-sm font-medium flex items-center gap-2">
+                  <User className="h-3 w-3" />
                   Pessoa Acionada
                   <span className="text-destructive">*</span>
                 </Label>
@@ -428,10 +466,10 @@ export const ModernTimerModal: React.FC<ModernTimerModalProps> = ({
                   type="text"
                   value={pessoaAcionada}
                   onChange={(e) => setPessoaAcionada(e.target.value)}
-                  placeholder="Ex: João Silva, Maria Santos..."
+                  placeholder="Nome da pessoa acionada"
                   className={cn(
-                    "border-2 focus:border-primary transition-all duration-200",
-                    pessoaAcionada.trim().length >= 2 && "border-success"
+                    "border-2 focus:border-primary transition-colors",
+                    pessoaAcionada.trim().length >= 2 && "border-primary/50"
                   )}
                   disabled={isProcessing || finalizado}
                   maxLength={100}
@@ -439,25 +477,22 @@ export const ModernTimerModal: React.FC<ModernTimerModalProps> = ({
               </div>
 
               {/* Status do Atendimento */}
-              <div className="space-y-3">
-                <Label htmlFor="status-atendimento" className="text-base font-medium flex items-center gap-2">
-                  <CheckCircle className="h-4 w-4" />
+              <div className="space-y-2">
+                <Label htmlFor="status-atendimento" className="text-sm font-medium flex items-center gap-2">
+                  <CheckCircle className="h-3 w-3" />
                   Status do Atendimento
                   <span className="text-destructive">*</span>
                 </Label>
                 <Select
                   value={statusAtendimento}
-                  onValueChange={(value) => {
-                    console.log("Status selecionado:", value); // 🔹 log de debug
-                    setStatusAtendimento(value);
-                  }}
+                  onValueChange={setStatusAtendimento}
                   disabled={isProcessing || finalizado}
                 >
                   <SelectTrigger className={cn(
-                    "border-2 focus:border-primary",
-                    statusAtendimento && "border-success"
+                    "border-2 focus:border-primary transition-colors",
+                    statusAtendimento && "border-primary/50"
                   )}>
-                    <SelectValue placeholder="Selecione o status do atendimento" />
+                    <SelectValue placeholder="Status do atendimento" />
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="atendido">✅ Atendido</SelectItem>
@@ -469,13 +504,12 @@ export const ModernTimerModal: React.FC<ModernTimerModalProps> = ({
           </div>
 
           <Separator />
-          
 
           {/* Observations Section */}
-          <div className="space-y-6">
-            <div className="flex items-center gap-3">
-              <MessageSquare className="h-6 w-6 text-primary" />
-              <Label htmlFor="observacao" className="text-xl font-semibold text-foreground">
+          <div className="space-y-4">
+            <div className="flex items-center gap-2">
+              <MessageSquare className="h-5 w-5 text-primary" />
+              <Label htmlFor="observacao" className="text-lg font-semibold">
                 Observações
               </Label>
             </div>
@@ -484,27 +518,24 @@ export const ModernTimerModal: React.FC<ModernTimerModalProps> = ({
               id="observacao"
               value={observacao}
               onChange={(e) => setObservacao(e.target.value)}
-              placeholder="Descreva as informações do acionamento"
-              rows={6}
+              placeholder="Descreva as informações do acionamento..."
+              rows={4}
               className={cn(
-                "border-2 focus:border-primary transition-all duration-200 resize-none text-base min-h-[120px]",
-                observacao.trim().length >= 10 && "border-success"
+                "border-2 focus:border-primary transition-colors resize-none",
+                observacao.trim().length >= 10 && "border-primary/50"
               )}
               disabled={isProcessing || finalizado}
               maxLength={1000}
             />
 
-            <div className="flex justify-between items-center">
-              <span className={cn(
-                "text-sm font-medium",
-                observacao.length > 900 ? "text-warning" : "text-muted-foreground"
-              )}>
+            <div className="flex justify-between items-center text-xs">
+              <span className="text-muted-foreground">
                 {observacao.length}/1000 caracteres
               </span>
               {observacao.trim().length >= 10 && (
-                <div className="flex items-center gap-2 text-success font-medium text-sm">
-                  <CheckCircle className="h-4 w-4" />
-                  <span>Observação válida</span>
+                <div className="flex items-center gap-1 text-primary">
+                  <CheckCircle className="h-3 w-3" />
+                  <span>Válido</span>
                 </div>
               )}
             </div>
@@ -513,118 +544,69 @@ export const ModernTimerModal: React.FC<ModernTimerModalProps> = ({
           <Separator />
 
           {/* Action Buttons */}
-          <div className="space-y-6">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {/* Finish Button */}
-              <Button
-                variant="secondary"
-                size="lg"
-                onClick={() => handleAction('finish')}
-                disabled={!isFormValid || isProcessing || finalizado}
-                className="h-20"
-              >
-                <CheckCircle className="h-6 w-6 mr-3" />
-                <div className="text-left">
-                  <div className="font-semibold text-base">Acompanhamento Confirmado</div>
-                  <div className="text-sm opacity-90">Finalizar Acompanhamento</div>
-                </div>
-              </Button>
-
-              {/* Next Level Button */}
-              <Button
-                variant="destructive"
-                size="lg"
-                onClick={() => handleAction('next')}
-                disabled={!isFormValid || isProcessing || finalizado}
-                className={cn(
-                  "h-20",
-                  remainingTime < 0 && "animate-timer-alert bg-timer-negative hover:bg-timer-negative/90"
-                )}
-              >
-                {finalizado ? (
-                  <>
-                    <CheckCircle className="h-6 w-6 mr-3" />
-                    <div className="text-left">
-                      <div className="font-semibold text-base">Finalizado</div>
-                      <div className="text-sm opacity-90">Chamado encerrado</div>
-                    </div>
-                  </>
-                ) : currentLevel >= 5 ? (
-                  <>
-                    <CheckCircle className="h-6 w-6 mr-3" />
-                    <div className="text-left">
-                      <div className="font-semibold text-base">Concluir Final</div>
-                      <div className="text-sm opacity-90">Última escalação</div>
-                    </div>
-                  </>
-                ) : (
-                  <>
-                    <ArrowRight className="h-6 w-6 mr-3" />
-                    <div className="text-left">
-                      <div className="font-semibold text-base">{levelInfo.nextAction}</div>
-                      <div className="text-sm opacity-90">Avançar escalação</div>
-                    </div>
-                  </>
-                )}
-              </Button>
-            </div>
-          </div>
-
-          {/* Guidelines Section */}
-          <div className="gradient-modal rounded-2xl p-6 border border-border/50">
-            <div className="space-y-4">
-              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
-                <div className="space-y-2">
-                  <div className="flex items-center gap-2 text-destructive">
-                    <AlertTriangle className="h-5 w-5" />
-                    <span className="font-semibold">Dados Obrigatórios</span>
-                  </div>
-                  <p className="text-sm text-muted-foreground">
-                    Nome da pessoa, status, operador e observações são campos obrigatórios para prosseguir.
-                  </p>
-                </div>
-
-                <div className="space-y-2">
-                  <div className="flex items-center gap-2 text-primary">
-                    <Timer className="h-5 w-5" />
-                    <span className="font-semibold">Controle de Tempo</span>
-                  </div>
-                  <p className="text-sm text-muted-foreground">
-                    Cada escalação reinicia automaticamente o timer de 20 minutos.
-                  </p>
-                  {remainingTime < 0 && (
-                    <p className="text-timer-negative text-sm font-bold animate-text-flash">
-                      ⚠️ Timer excedido! Ação urgente necessária.
-                    </p>
-                  )}
-                </div>
-
-                <div className="space-y-2">
-                  <div className="flex items-center gap-2 text-success">
-                    <CheckCircle className="h-5 w-5" />
-                    <span className="font-semibold">Documentação</span>
-                  </div>
-                  <p className="text-sm text-muted-foreground">
-                    Todas as informações são automaticamente registradas no histórico.
-                  </p>
-                </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {/* Finish Button */}
+            <Button
+              variant="secondary"
+              size="lg"
+              onClick={() => handleAction('finish')}
+              disabled={!isFormValid || isProcessing || finalizado}
+              className="h-16"
+            >
+              <CheckCircle className="h-5 w-5 mr-2" />
+              <div className="text-left">
+                <div className="font-semibold">Finalizar Acompanhamento</div>
+                <div className="text-xs opacity-80">Encerrar chamado</div>
               </div>
-            </div>
-            
+            </Button>
+
+            {/* Next Level Button */}
+            <Button
+              variant="default"
+              size="lg"
+              onClick={() => handleAction('next')}
+              disabled={!isFormValid || isProcessing || finalizado}
+              className="h-16"
+            >
+              {finalizado ? (
+                <>
+                  <CheckCircle className="h-5 w-5 mr-2" />
+                  <div className="text-left">
+                    <div className="font-semibold">Finalizado</div>
+                    <div className="text-xs opacity-80">Chamado encerrado</div>
+                  </div>
+                </>
+              ) : currentLevel >= 5 ? (
+                <>
+                  <CheckCircle className="h-5 w-5 mr-2" />
+                  <div className="text-left">
+                    <div className="font-semibold">Concluir Final</div>
+                    <div className="text-xs opacity-80">Última escalação</div>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <ArrowRight className="h-5 w-5 mr-2" />
+                  <div className="text-left">
+                    <div className="font-semibold">{levelInfo.nextAction}</div>
+                    <div className="text-xs opacity-80">Próxima escalação</div>
+                  </div>
+                </>
+              )}
+            </Button>
           </div>
 
           {/* Processing Indicator */}
           {isProcessing && (
             <div className="fixed inset-0 bg-background/80 backdrop-blur-sm flex items-center justify-center z-50">
-              <div className="bg-card p-6 rounded-2xl shadow-2xl border border-border">
+              <Card className="p-6">
                 <div className="flex items-center gap-3">
-                  <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-primary"></div>
-                  <span className="text-lg font-medium">Processando ação...</span>
+                  <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-primary"></div>
+                  <span className="font-medium">Processando...</span>
                 </div>
-              </div>
+              </Card>
             </div>
           )}
-
         </div>
       </DialogContent>
     </Dialog>
