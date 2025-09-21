@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback } from 'react';
+import { useState, useMemo, useCallback, useEffect } from 'react';
 import { Check, AlertTriangle, Timer, Play, Pause, CheckCircle, Edit3, Search, ChevronLeft, ChevronRight, ArrowUpDown, ArrowUp, ArrowDown, Settings } from 'lucide-react';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
@@ -9,15 +9,6 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { toast } from '@/hooks/use-toast';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
-import { Textarea } from '@/components/ui/textarea';
-import { useEffect } from 'react';
-
-// WebSocket hook
-import { useWebsocketTimers } from "@/hooks/useWebsocketTimers";
-
-// Modern Timer Management Modal
-import { ModernTimerModal } from '@/components/ActionTable/ModernTimerModal';
 
 interface AlertData {
   id: string;
@@ -44,10 +35,159 @@ type SortDirection = 'asc' | 'desc' | null;
 // Informações dos níveis de escalação
 const LEVEL_NAMES = {
   1: "Primeiro Acionamento",
-  2: "1ª Escalação",
+  2: "1ª Escalação", 
   3: "2ª Escalação",
   4: "3ª Escalação",
   5: "4ª Escalação"
+};
+
+// Mock do hook WebSocket para demonstração
+const useMockWebsocketTimers = () => {
+  const [timers, setTimers] = useState<Map<number, any>>(new Map());
+  const [alertedChamados, setAlertedChamados] = useState<Set<string>>(new Set());
+
+  // Função para formatar tempo
+  const formatTime = (seconds: number) => {
+    if (seconds <= 0) return '00:00';
+    const minutes = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+  };
+
+  // Função para obter tempo restante
+  const getRemainingTime = (chamado: number, level: number) => {
+    const timer = timers.get(chamado);
+    if (!timer || !timer[`level${level}_endTime`]) return 0;
+    
+    const now = Date.now();
+    const endTime = timer[`level${level}_endTime`];
+    const remaining = Math.max(0, Math.floor((endTime - now) / 1000));
+    
+    return remaining;
+  };
+
+  // Função para verificar se timer está ativo
+  const isTimerActive = (chamado: number, level: number) => {
+    const timer = timers.get(chamado);
+    return timer && timer[`level${level}_status`] === 'running';
+  };
+
+  // Função para iniciar timer
+  const startTimer = (chamado: number, level: number, duration: number) => {
+    const endTime = Date.now() + (duration * 1000);
+    
+    setTimers(prev => {
+      const newTimers = new Map(prev);
+      const existingTimer = newTimers.get(chamado) || {};
+      
+      newTimers.set(chamado, {
+        ...existingTimer,
+        [`level${level}_status`]: 'running',
+        [`level${level}_endTime`]: endTime,
+        [`level${level}_startTime`]: Date.now()
+      });
+      
+      return newTimers;
+    });
+
+    toast({
+      title: `🚀 ${LEVEL_NAMES[level as keyof typeof LEVEL_NAMES]} Iniciado`,
+      description: `Timer de ${Math.floor(duration / 60)} minutos iniciado para chamado ${chamado}`,
+    });
+
+    return true;
+  };
+
+  // Função para finalizar chamado
+  const updateStatusFinal = (chamado: number, status: string) => {
+    setTimers(prev => {
+      const newTimers = new Map(prev);
+      const existingTimer = newTimers.get(chamado) || {};
+      
+      newTimers.set(chamado, {
+        ...existingTimer,
+        statusFinal: status
+      });
+      
+      return newTimers;
+    });
+  };
+
+  // Função para obter nível ativo atual
+  const getCurrentActiveLevel = (chamado: number) => {
+    const timer = timers.get(chamado);
+    if (!timer) return null;
+
+    for (let level = 1; level <= 5; level++) {
+      if (timer[`level${level}_status`] === 'running') {
+        return level;
+      }
+    }
+    return null;
+  };
+
+  // Avisos baseados no tempo restante
+  const checkTimeWarnings = useCallback(() => {
+    timers.forEach((timer, chamado) => {
+      const activeLevel = getCurrentActiveLevel(chamado);
+      if (!activeLevel) return;
+
+      const remaining = getRemainingTime(chamado, activeLevel);
+      const alertKey = `${chamado}-${activeLevel}`;
+
+      // Avisos progressivos
+      if (remaining === 600 && !alertedChamados.has(`${alertKey}-10min`)) {
+        // 10 minutos restantes
+        toast({
+          title: "⚠️ Aviso - 10 minutos restantes",
+          description: `Chamado ${chamado} - ${LEVEL_NAMES[activeLevel as keyof typeof LEVEL_NAMES]}`,
+          variant: "destructive",
+        });
+        setAlertedChamados(prev => new Set(prev).add(`${alertKey}-10min`));
+      } else if (remaining === 300 && !alertedChamados.has(`${alertKey}-5min`)) {
+        // 5 minutos restantes
+        toast({
+          title: "🚨 URGENTE - 5 minutos restantes",
+          description: `Chamado ${chamado} - ${LEVEL_NAMES[activeLevel as keyof typeof LEVEL_NAMES]}`,
+          variant: "destructive",
+        });
+        setAlertedChamados(prev => new Set(prev).add(`${alertKey}-5min`));
+      } else if (remaining === 60 && !alertedChamados.has(`${alertKey}-1min`)) {
+        // 1 minuto restante
+        toast({
+          title: "🔥 CRÍTICO - 1 minuto restante",
+          description: `Chamado ${chamado} - ${LEVEL_NAMES[activeLevel as keyof typeof LEVEL_NAMES]}`,
+          variant: "destructive",
+        });
+        setAlertedChamados(prev => new Set(prev).add(`${alertKey}-1min`));
+      } else if (remaining === 0 && !alertedChamados.has(`${alertKey}-expired`)) {
+        // Tempo esgotado
+        toast({
+          title: "⏰ TEMPO ESGOTADO",
+          description: `Chamado ${chamado} - ${LEVEL_NAMES[activeLevel as keyof typeof LEVEL_NAMES]} - Ação imediata necessária!`,
+          variant: "destructive",
+        });
+        setAlertedChamados(prev => new Set(prev).add(`${alertKey}-expired`));
+      }
+    });
+  }, [timers, alertedChamados, getCurrentActiveLevel, getRemainingTime]);
+
+  // Verificar avisos a cada segundo
+  useEffect(() => {
+    const interval = setInterval(checkTimeWarnings, 1000);
+    return () => clearInterval(interval);
+  }, [checkTimeWarnings]);
+
+  return {
+    timers,
+    isConnected: true,
+    startTimer,
+    updateStatusFinal,
+    getRemainingTime,
+    formatTime,
+    isTimerActive,
+    getCurrentActiveLevel
+  };
 };
 
 export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: ActionTableProps) => {
@@ -58,43 +198,16 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
   const [sortField, setSortField] = useState<SortField>('chamado');
   const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
 
-  // Estados dos modais
-  const [observacaoDialogOpen, setObservacaoDialogOpen] = useState(false);
-  const [timerManagementOpen, setTimerManagementOpen] = useState(false);
-  const [selectedChamadoForEdit, setSelectedChamadoForEdit] = useState<string>('');
-  const [selectedChamadoForTimer, setSelectedChamadoForTimer] = useState<string>('');
-  const [observacaoText, setObservacaoText] = useState('');
-  const [operadorText, setOperadorText] = useState('');
-
-  // WebSocket
+  // Mock WebSocket
   const {
     timers,
     isConnected,
     startTimer,
-    updateObservacao,
-    updateOperador,
     updateStatusFinal,
-    updateAcionamento,
     getRemainingTime,
     formatTime,
-    isTimerActive,
-    getState,
-    setWatchedChamados
-  } = useWebsocketTimers();
-
-  // Primeiro registrar os chamados que queremos monitorar
-  useEffect(() => {
-    if (!alertData || alertData.length === 0) return;
-
-    const chamadosNum = alertData.map(a => parseInt(a.chamado));
-    setWatchedChamados(chamadosNum);
-
-    // Forçar getState imediatamente
-    chamadosNum.forEach(chamado => getState(chamado));
-  }, [alertData, setWatchedChamados, getState]);
-
-  // Estados locais para observações
-  const [localObservacoes, setLocalObservacoes] = useState<Map<string, { observacao: string; operador: string }>>(new Map());
+    getCurrentActiveLevel
+  } = useMockWebsocketTimers();
 
   // Funções utilitárias
   const formatDate = useCallback((dateString: string) => {
@@ -153,59 +266,37 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
       : 'bg-yellow-500 text-yellow-950';
   }, []);
 
-  // Função para obter o nível atual ativo do timer
-  const getCurrentActiveLevel = useCallback((chamado: number) => {
-    const timerState = timers.get(chamado);
-    if (!timerState) return null;
-
-    // Verificar levels de 1 a 5 para encontrar o ativo
-    for (let level = 1; level <= 5; level++) {
-      const statusKey = `level${level}_status` as keyof typeof timerState;
-      if (timerState[statusKey] === 'running') {
-        return level;
-      }
+  // Função para obter badge de aviso baseado no tempo restante
+  const getTimeWarningBadge = useCallback((remainingTime: number) => {
+    if (remainingTime <= 0) {
+      return (
+        <Badge variant="destructive" className="text-xs animate-pulse bg-red-600 text-white">
+          ⏰ ESGOTADO
+        </Badge>
+      );
+    } else if (remainingTime <= 60) {
+      return (
+        <Badge variant="destructive" className="text-xs animate-pulse bg-red-500 text-white">
+          🔥 1 min restante
+        </Badge>
+      );
+    } else if (remainingTime <= 300) {
+      return (
+        <Badge variant="destructive" className="text-xs animate-pulse bg-orange-500 text-white">
+          🚨 Últimos 5 min
+        </Badge>
+      );
+    } else if (remainingTime <= 600) {
+      return (
+        <Badge variant="destructive" className="text-xs bg-yellow-500 text-white">
+          ⚠️ 10 min restantes
+        </Badge>
+      );
     }
     return null;
-  }, [timers]);
+  }, []);
 
-  // Função para montar o histórico de acionamentos do chamado
-  const getHistoricoAcionamentos = useCallback((chamadoNum: number) => {
-    const timerState = timers.get(chamadoNum);
-    if (!timerState) return [];
-
-    const historico: {
-      operador: string;
-      pessoaAcionada: string;
-      status: string;
-      observacao: string;
-      dataHora: string;
-      updatedAt: string;
-      nivel: number;
-    }[] = [];
-
-    for (let nivel = 1; nivel <= 5; nivel++) {
-      const operador = timerState[`level${nivel}_operador`] || '';
-      const pessoaAcionada = timerState[`level${nivel}_pessoaAcionada`] || '';
-      const status = timerState[`level${nivel}_statusAcionamento`] || '';
-      const observacao = timerState[`level${nivel}_observacao`] || '';
-      const dataHora = timerState[`level${nivel}_dataHora`] || '';
-      const updatedAt = timerState[`level${nivel}_updatedAt`] || '';
-      if (operador || pessoaAcionada || status || observacao || dataHora) {
-        historico.push({
-          operador,
-          pessoaAcionada,
-          status,
-          observacao,
-          dataHora,
-          updatedAt: formatDate(updatedAt),
-          nivel,
-        });
-      }
-    }
-    return historico;
-  }, [timers]);
-
-  // Handlers para acionamento
+  // Handlers
   const handleAcknowledgment = useCallback(async (alert: AlertData) => {
     try {
       toast({
@@ -223,168 +314,17 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
     }
   }, [onUpdateAcknowledgment]);
 
-  // Handlers para timer
   const handleStartTimer = useCallback((chamado: string) => {
     const chamadoNum = parseInt(chamado);
     const duration = 1200; // 20 minutos em segundos
 
-    console.log(`Iniciando Primeiro Acionamento para chamado ${chamado}`);
-
     const success = startTimer(chamadoNum, 1, duration);
 
     if (success) {
-      toast({
-        title: "🚀 Primeiro Acionamento Iniciado",
-        description: `Timer de 20 minutos iniciado para chamado ${chamado}`,
-      });
-
-      setTimeout(() => {
-        getState(chamadoNum);
-      }, 1000);
+      // Toast já é mostrado no startTimer
     }
-  }, [startTimer, getState]);
+  }, [startTimer]);
 
-  // Handlers para gerenciamento de etapas
-  const handleOpenTimerManagement = useCallback((chamado: string) => {
-    setSelectedChamadoForTimer(chamado);
-    setTimerManagementOpen(true);
-  }, []);
-
-  // CORRIGIDO: Função para avançar para próximo nível
-  const handleNextLevel = useCallback(async (chamado: string, nextLevel: number, observacao: string) => {
-    try {
-      const chamadoNum = parseInt(chamado);
-      const duration = 1200; // 20 minutos para cada etapa
-
-      // Primeiro salvar a observação do nível atual
-      const currentLevel = getCurrentActiveLevel(chamadoNum);
-      if (currentLevel && observacao.trim()) {
-        updateObservacao(chamadoNum, currentLevel, observacao.trim());
-      }
-
-      // Iniciar o próximo nível
-      const success = startTimer(chamadoNum, nextLevel, duration);
-
-      if (success) {
-        const levelName = LEVEL_NAMES[nextLevel as keyof typeof LEVEL_NAMES] || `Nível ${nextLevel}`;
-
-        // Aguardar um momento para garantir que o timer foi iniciado
-        await new Promise(resolve => setTimeout(resolve, 500));
-
-        // Atualizar estado
-        getState(chamadoNum);
-
-        return true;
-      }
-
-      return false;
-    } catch (error) {
-      console.error('Erro em handleNextLevel:', error);
-      throw error;
-    }
-  }, [startTimer, updateObservacao, getState, getCurrentActiveLevel]);
-
-  // CORRIGIDO: Função para voltar ao nível anterior
-  const handlePreviousLevel = useCallback(async (chamado: string, previousLevel: number, observacao: string) => {
-    try {
-      const chamadoNum = parseInt(chamado);
-
-      // Salvar observação do nível atual
-      const currentLevel = getCurrentActiveLevel(chamadoNum);
-      if (currentLevel && observacao.trim()) {
-        updateObservacao(chamadoNum, currentLevel, observacao.trim());
-      }
-
-      // Iniciar o nível anterior
-      const duration = 1200; // 20 minutos
-      const success = startTimer(chamadoNum, previousLevel, duration);
-
-      if (success) {
-        // Aguardar um momento para garantir que o timer foi iniciado
-        await new Promise(resolve => setTimeout(resolve, 500));
-
-        // Atualizar estado
-        getState(chamadoNum);
-
-        return true;
-      }
-
-      return false;
-    } catch (error) {
-      console.error('Erro em handlePreviousLevel:', error);
-      throw error;
-    }
-  }, [startTimer, updateObservacao, getState, getCurrentActiveLevel]);
-
-  // CORRIGIDO: Função para finalizar chamado
-  const handleFinalize = useCallback(async (chamado: string, observacao: string) => {
-    try {
-      const chamadoNum = parseInt(chamado);
-
-      // Salvar observação final
-      const currentLevel = getCurrentActiveLevel(chamadoNum);
-      if (currentLevel && observacao.trim()) {
-        updateObservacao(chamadoNum, currentLevel, observacao.trim());
-      }
-
-      // Finalizar o chamado
-      updateStatusFinal(chamadoNum, 'finalizado');
-
-      // Aguardar um momento para garantir que o status foi atualizado
-      await new Promise(resolve => setTimeout(resolve, 500));
-
-      // Atualizar estado
-      getState(chamadoNum);
-
-      return true;
-    } catch (error) {
-      console.error('Erro em handleFinalize:', error);
-      throw error;
-    }
-  }, [updateObservacao, updateStatusFinal, getState, getCurrentActiveLevel]);
-
-  // Handlers para observação
-  const handleOpenObservacao = useCallback((chamado: string) => {
-    setSelectedChamadoForEdit(chamado);
-    const existing = localObservacoes.get(chamado);
-    setObservacaoText(existing?.observacao || '');
-    setOperadorText(existing?.operador || '');
-    setObservacaoDialogOpen(true);
-  }, [localObservacoes]);
-
-  const handleSaveObservacao = useCallback(() => {
-    if (!selectedChamadoForEdit) return;
-
-    const chamadoNum = parseInt(selectedChamadoForEdit);
-
-    if (observacaoText.trim()) {
-      updateObservacao(chamadoNum, 1, observacaoText.trim());
-    }
-
-    if (operadorText.trim()) {
-      updateOperador(chamadoNum, operadorText.trim());
-    }
-
-    setLocalObservacoes(prev => {
-      const newMap = new Map(prev);
-      newMap.set(selectedChamadoForEdit, {
-        observacao: observacaoText.trim(),
-        operador: operadorText.trim()
-      });
-      return newMap;
-    });
-
-    setObservacaoDialogOpen(false);
-    setObservacaoText('');
-    setOperadorText('');
-
-    toast({
-      title: "✅ Observação Salva",
-      description: `Observação do chamado ${selectedChamadoForEdit} foi salva`,
-    });
-  }, [selectedChamadoForEdit, observacaoText, operadorText, updateObservacao, updateOperador]);
-
-  // Handlers para ordenação
   const handleSort = useCallback((field: SortField) => {
     if (sortField === field) {
       if (sortDirection === 'asc') {
@@ -465,7 +405,6 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
     return { sortedAndPaginatedData: paginatedData, totalPages };
   }, [filteredData, currentPage, itemsPerPage, sortField, sortDirection]);
 
-  // Handlers para paginação
   const handleItemsPerPageChange = useCallback((value: string) => {
     const num = parseInt(value, 10);
     setItemsPerPage(num);
@@ -478,13 +417,8 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
 
   return (
     <TooltipProvider>
-      <Card className="bg-card border-border shadow-elegant">
+      <Card className="bg-card border-border shadow-lg">
         <CardHeader>
-          {/* Status da Conexão WebSocket */}
-          <div className="flex items-center justify-between mb-4">
-            
-          </div>
-
           {/* Campo de Pesquisa */}
           <div className="relative mb-4">
             <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
@@ -512,7 +446,6 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
         </CardHeader>
 
         <CardContent>
-          {/* Responsive Layout */}
           <div className="w-full">
             <Table className="w-full">
               <TableHeader>
@@ -587,36 +520,35 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
                       {getSortIcon('severidade_chamado')}
                     </Button>
                   </TableHead>
-                  <TableHead className="text-muted-foreground w-[200px] text-center">
+                  <TableHead className="text-muted-foreground w-[220px] text-center">
                     <span className="text-xs font-medium">Timer WebSocket</span>
                   </TableHead>
                   <TableHead className="text-muted-foreground w-[60px] text-center">Chat</TableHead>
-                  <TableHead className="text-muted-foreground w-[80px] text-center">Observação</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {loading ? (
                   <TableRow>
-                    <TableCell colSpan={10} className="text-center py-8">
+                    <TableCell colSpan={9} className="text-center py-8">
                       <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary mb-4"></div>
                       <p>Carregando dados...</p>
                     </TableCell>
                   </TableRow>
                 ) : sortedAndPaginatedData.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={10} className="text-center py-8 text-muted-foreground">
+                    <TableCell colSpan={9} className="text-center py-8 text-muted-foreground">
                       {searchTerm ? 'Nenhum resultado encontrado' : 'Nenhum dado disponível'}
                     </TableCell>
                   </TableRow>
                 ) : (
                   sortedAndPaginatedData.map((alert) => {
                     const isChat = alert.acionado === 'true' || alert.chat;
-                    const observacao = localObservacoes.get(alert.chamado);
                     const chamadoNum = parseInt(alert.chamado);
                     const activeLevel = getCurrentActiveLevel(chamadoNum);
                     const timerState = timers.get(chamadoNum);
                     const remainingTime = activeLevel ? getRemainingTime(chamadoNum, activeLevel) : 0;
                     const isFinalized = timerState?.statusFinal === 'finalizado';
+                    const timeWarningBadge = getTimeWarningBadge(remainingTime);
 
                     return (
                       <TableRow key={alert.id} className="border-border hover:bg-accent transition-colors">
@@ -677,38 +609,37 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
                             ) : activeLevel && timerState ? (
                               <div className="space-y-1 text-center">
                                 <div className="flex items-center gap-1 justify-center">
-                                  <Timer className="h-3 w-3 text-timer-active animate-pulse" />
-                                  <Badge className="bg-timer-active text-white text-xs font-semibold px-2 py-1 whitespace-nowrap">
+                                  <Timer className="h-3 w-3 text-primary animate-pulse" />
+                                  <Badge className="bg-primary text-white text-xs font-semibold px-2 py-1 whitespace-nowrap">
                                     {LEVEL_NAMES[activeLevel as keyof typeof LEVEL_NAMES]}
                                   </Badge>
                                 </div>
-                                <div className="text-lg font-mono font-black text-timer-active tracking-wide">
+                                <div className={`text-lg font-mono font-black tracking-wide ${
+                                  remainingTime <= 0 ? 'text-red-600 animate-pulse' :
+                                  remainingTime <= 300 ? 'text-orange-500' : 'text-primary'
+                                }`}>
                                   {formatTime(remainingTime)}
                                 </div>
+                                {timeWarningBadge}
                                 <Button
-                                  variant="timer"
+                                  variant="outline"
                                   size="sm"
-                                  onClick={() => handleOpenTimerManagement(alert.chamado)}
+                                  onClick={() => updateStatusFinal(chamadoNum, 'finalizado')}
                                   className="h-6 px-2 text-xs font-semibold"
                                 >
                                   <Settings className="h-3 w-3 mr-1" />
-                                  Gerenciar
+                                  Finalizar
                                 </Button>
                                 {timerState.operador && (
                                   <div className="text-xs text-muted-foreground bg-muted rounded px-2 py-1">
                                     👤 {timerState.operador}
                                   </div>
                                 )}
-                                {remainingTime <= 300 && remainingTime > 0 && (
-                                  <Badge variant="destructive" className="text-xs animate-pulse">
-                                    ⚠️ Últimos 5 min
-                                  </Badge>
-                                )}
                               </div>
                             ) : (
                               <div className="flex flex-col items-center gap-2">
                                 <Button
-                                  variant="timer"
+                                  variant="default"
                                   size="sm"
                                   onClick={() => handleStartTimer(alert.chamado)}
                                   className="h-7 px-3 text-xs font-semibold whitespace-nowrap"
@@ -728,7 +659,7 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
                           <Tooltip>
                             <TooltipTrigger asChild>
                               <Button
-                                variant={isChat ? "success" : "outline"}
+                                variant={isChat ? "default" : "outline"}
                                 size="sm"
                                 onClick={() => !isChat && handleAcknowledgment(alert)}
                                 disabled={isChat}
@@ -743,27 +674,6 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
                             </TooltipTrigger>
                             <TooltipContent>
                               <p>{isChat ? 'Já acionado' : 'Acionar grupo'}</p>
-                            </TooltipContent>
-                          </Tooltip>
-                        </TableCell>
-                        <TableCell>
-                          <Tooltip>
-                            <TooltipTrigger asChild>
-                              <Button
-                                variant={observacao ? "success" : "outline"}
-                                size="sm"
-                                onClick={() => handleOpenObservacao(alert.chamado)}
-                                className="h-8 w-8 p-0"
-                              >
-                                {observacao ? (
-                                  <CheckCircle className="h-4 w-4" />
-                                ) : (
-                                  <Edit3 className="h-4 w-4" />
-                                )}
-                              </Button>
-                            </TooltipTrigger>
-                            <TooltipContent>
-                              <p>{observacao ? 'Observação salva' : 'Adicionar observação'}</p>
                             </TooltipContent>
                           </Tooltip>
                         </TableCell>
@@ -852,88 +762,6 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
               </div>
             </div>
           )}
-
-          {/* Modern Timer Management Modal */}
-          {selectedChamadoForTimer && (
-            <ModernTimerModal
-              isOpen={timerManagementOpen}
-              onClose={() => {
-                setTimerManagementOpen(false);
-                setSelectedChamadoForTimer('');
-              }}
-              chamado={selectedChamadoForTimer}
-              currentLevel={getCurrentActiveLevel(parseInt(selectedChamadoForTimer)) || 1}
-              remainingTime={getCurrentActiveLevel(parseInt(selectedChamadoForTimer)) ? getRemainingTime(parseInt(selectedChamadoForTimer), getCurrentActiveLevel(parseInt(selectedChamadoForTimer))!) : 0}
-              formatTime={formatTime}
-              updateObservacao={updateObservacao}
-              updateAcionamento={updateAcionamento}
-              updateStatusFinal={updateStatusFinal}
-              onNextLevel={handleNextLevel}
-              onPreviousLevel={handlePreviousLevel}
-              historicoAcionamentos={getHistoricoAcionamentos(parseInt(selectedChamadoForTimer))}
-            />
-          )}
-
-          {/* Modal de Observação */}
-          <Dialog open={observacaoDialogOpen} onOpenChange={setObservacaoDialogOpen}>
-            <DialogContent className="sm:max-w-lg border-border bg-card shadow-modal">
-              <DialogHeader className="text-left">
-                <DialogTitle className="text-xl bg-gradient-to-r from-primary to-primary/70 bg-clip-text text-transparent">
-                  📝 Observação - Chamado {selectedChamadoForEdit}
-                </DialogTitle>
-                <DialogDescription className="text-muted-foreground">
-                  Registre observações importantes e defina o operador responsável pelo chamado
-                </DialogDescription>
-              </DialogHeader>
-              <div className="space-y-6 pt-2">
-                <div className="space-y-2">
-                  <Label htmlFor="operador" className="text-sm font-semibold text-foreground">
-                    👤 Operador Responsável
-                  </Label>
-                  <Input
-                    id="operador"
-                    value={operadorText}
-                    onChange={(e) => setOperadorText(e.target.value)}
-                    placeholder="Ex: João Silva"
-                    className="border-border focus:border-primary transition-colors"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="observacao" className="text-sm font-semibold text-foreground">
-                    📄 Observações
-                  </Label>
-                  <Textarea
-                    id="observacao"
-                    value={observacaoText}
-                    onChange={(e) => setObservacaoText(e.target.value)}
-                    placeholder="Descreva o status atual, ações tomadas, próximos passos..."
-                    rows={5}
-                    className="border-border focus:border-primary transition-colors resize-none"
-                  />
-                  <div className="text-xs text-muted-foreground">
-                    {observacaoText.length}/500 caracteres
-                  </div>
-                </div>
-                <div className="flex justify-end gap-3 pt-4 border-t border-border">
-                  <Button
-                    variant="outline"
-                    onClick={() => setObservacaoDialogOpen(false)}
-                    className="px-6"
-                  >
-                    Cancelar
-                  </Button>
-                  <Button
-                    variant="timer"
-                    onClick={handleSaveObservacao}
-                    className="px-6"
-                    disabled={!operadorText.trim() && !observacaoText.trim()}
-                  >
-                    💾 Salvar Observação
-                  </Button>
-                </div>
-              </div>
-            </DialogContent>
-          </Dialog>
         </CardContent>
       </Card>
     </TooltipProvider>
