@@ -7,10 +7,9 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { ProgressIndicator } from '@/components/ui/progress-indicator';
 import { TimerDisplay } from '@/components/ui/timer-display';
-import { ArrowRight, CheckCircle, X, AlertTriangle, Lightbulb, MessageSquare, Timer, Building2, Users, Clock, User, Phone, ChevronDown, ChevronUp, History } from 'lucide-react';
+import { ArrowRight, CheckCircle, X, AlertTriangle, Lightbulb, MessageSquare, Timer, Building2, Users, Clock, User, Phone } from 'lucide-react';
 import { toast } from '@/hooks/use-toast';
 import { cn } from '@/lib/utils';
 
@@ -104,8 +103,6 @@ export const ModernTimerModal: React.FC<ModernTimerModalProps> = ({
   const [statusAtendimento, setStatusAtendimento] = useState('');
   const [operador, setOperador] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
-  const [isHistoricoOpen, setIsHistoricoOpen] = useState(false);
-  
   const levelStatusKey = `level${currentLevel}_status`;
   const [finalizado, setFinalizado] = useState(
     chamadoData?.statusFinal === "finished" || chamadoData?.[levelStatusKey] === "finished"
@@ -322,71 +319,40 @@ export const ModernTimerModal: React.FC<ModernTimerModalProps> = ({
         <div className="space-y-8">
           {/* Histórico de Acionamentos */}
           {historicoAcionamentos.length > 0 && (
-            <Collapsible 
-              open={isHistoricoOpen} 
-              onOpenChange={setIsHistoricoOpen}
-              className="space-y-4"
-            >
-              <CollapsibleTrigger asChild>
-                <Button 
-                  variant="outline" 
-                  className="w-full justify-between h-14 hover:bg-muted/50 border-2"
-                >
-                  <div className="flex items-center gap-3">
-                    <History className="h-5 w-5 text-primary" />
-                    <span className="font-semibold text-lg">Histórico de Acionamentos</span>
-                    <Badge variant="secondary" className="ml-2 font-medium">
-                      {historicoAcionamentos.length} registro{historicoAcionamentos.length > 1 ? 's' : ''}
-                    </Badge>
-                  </div>
-                  {isHistoricoOpen ? (
-                    <ChevronUp className="h-5 w-5" />
-                  ) : (
-                    <ChevronDown className="h-5 w-5" />
-                  )}
-                </Button>
-              </CollapsibleTrigger>
-              
-              <CollapsibleContent className="space-y-3">
-                <div className="max-h-64 overflow-y-auto pr-2 space-y-3">
-                  {historicoAcionamentos.map((h, idx) => (
-                    <div key={idx} className="p-4 border rounded-lg hover:bg-muted/20 transition-colors">
-                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 text-sm">
-                        <div>
-                          <span className="text-muted-foreground font-medium">Nível:</span>
-                          <p className="font-semibold">{h.nivel}</p>
-                        </div>
-                        <div>
-                          <span className="text-muted-foreground font-medium">Operador:</span>
-                          <p className="font-semibold truncate">{h.operador}</p>
-                        </div>
-                        <div>
-                          <span className="text-muted-foreground font-medium">Pessoa Acionada:</span>
-                          <p className="font-semibold truncate">{h.pessoaAcionada}</p>
-                        </div>
-                        <div>
-                          <span className="text-muted-foreground font-medium">Status:</span>
-                          <Badge 
-                            variant={h.status === 'atendido' ? 'default' : 'destructive'}
-                            className="text-xs"
-                          >
-                            {h.status === 'atendido' ? '✅ Atendido' : '❌ Não Atendido'}
-                          </Badge>
-                        </div>
-                        <div>
-                          <span className="text-muted-foreground font-medium">Data/Hora:</span>
-                          <p className="font-semibold text-xs">{h.updatedAt}</p>
-                        </div>
-                        <div className="md:col-span-2 lg:col-span-1">
-                          <span className="text-muted-foreground font-medium">Observação:</span>
-                          <p className="text-xs mt-1 text-muted-foreground line-clamp-2">{h.observacao}</p>
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </CollapsibleContent>
-            </Collapsible>
+            <div className="space-y-4">
+              <div className="flex items-center gap-3">
+                <Lightbulb className="h-6 w-6 text-primary" />
+                <Label className="text-xl font-semibold text-foreground">
+                  Histórico de Acionamentos
+                </Label>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="min-w-full text-sm border rounded-lg bg-background">
+                  <thead>
+                    <tr className="bg-muted">
+                      <th className="px-3 py-2 text-left">Nível</th>
+                      <th className="px-3 py-2 text-left">Operador</th>
+                      <th className="px-3 py-2 text-left">Pessoa Acionada</th>
+                      <th className="px-3 py-2 text-left">Status</th>
+                      <th className="px-3 py-2 text-left">Observação</th>
+                      <th className="px-3 py-2 text-left">Data/Hora</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {historicoAcionamentos.map((h, idx) => (
+                      <tr key={idx} className="border-t">
+                        <td className="px-3 py-2">{h.nivel}</td>
+                        <td className="px-3 py-2">{h.operador}</td>
+                        <td className="px-3 py-2">{h.pessoaAcionada}</td>
+                        <td className="px-3 py-2">{h.status}</td>
+                        <td className="px-3 py-2 whitespace-pre-line">{h.observacao}</td>
+                        <td className="px-3 py-2">{h.updatedAt}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
           )}
 
           {/* Timer and Progress Section */}
