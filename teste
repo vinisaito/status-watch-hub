@@ -44,18 +44,31 @@ def broadcast(data):
     for c in conns:
         send_to_connection(c["connectionId"], data)
 
-def update_chamado(trace, chamado, update):
-    log(trace, "Atualizando chamado", chamado=chamado, update=update)
-    table.update_item(
-        Key={"chamado": chamado},
-        UpdateExpression="SET " + ", ".join(f"#{k} = :{k}" for k in update.keys()),
-        ExpressionAttributeNames={f"#{k}": k for k in update.keys()},
-        ExpressionAttributeValues={f":{k}": v for k, v in update.items()},
-    )
+def update_chamado(trace, chamado, update, expected=None, expr_names=None, expr_values=None):
+    log(trace, "Atualizando chamado", chamado=chamado, update=update, expected=expected)
 
-    # 🔑 Buscar o estado completo do DynamoDB
-    resp = table.get_item(Key={"chamado": chamado})
-    state = resp.get("Item", {})
+    params = {
+        "Key": {"chamado": chamado},
+        "UpdateExpression": "SET " + ", ".join(f"#{k} = :{k}" for k in update.keys()),
+        "ExpressionAttributeNames": {f"#{k}": k for k in update.keys()},
+        "ExpressionAttributeValues": {f":{k}": v for k, v in update.items()},
+        "ReturnValues": "ALL_NEW"
+    }
+
+    if expected:
+        params["ConditionExpression"] = expected
+        if expr_names:
+            params["ExpressionAttributeNames"].update(expr_names)
+        if expr_values:
+            params["ExpressionAttributeValues"].update(expr_values)
+
+    try:
+        resp = table.update_item(**params)
+        state = resp.get("Attributes", {})
+    except dynamodb.meta.client.exceptions.ConditionalCheckFailedException:
+        log(trace, "Condicional falhou — outro operador já atualizou", chamado=chamado)
+        raise Exception("Conflito de concorrência: outro operador já atualizou este chamado")
+
     log(trace, "Chamado atualizado (state completo)", state=state)
     return state
 
@@ -113,7 +126,12 @@ def handle_update_status_final(event, trace, body):
     level = body.get("level")  # opcional
     now = datetime.now(timezone.utc).isoformat()
 
-    # Pega o estado atual do chamado
+    # 🔒 Evita finalizar duas vezes
+    expected = "attribute_not_exists(#sf) OR #sf <> :finished"
+    expr_names = {"#sf": "statusFinal"}
+    expr_values = {":finished": "finished"}
+
+    # Pega estado atual para decidir qual level finalizar
     resp = table.get_item(Key={"chamado": chamado})
     state_atual = resp.get("Item", {})
 
@@ -129,11 +147,10 @@ def handle_update_status_final(event, trace, body):
                 update[f"level{i}_updatedAt"] = now
                 break
 
-    state = update_chamado(trace, chamado, update)
+    state = update_chamado(trace, chamado, update, expected, expr_names, expr_values)
     broadcast({"event": "updateStatusFinal", "chamado": chamado, "state": state})
     return {"statusCode": 200, "body": json.dumps({"msg": "Status final atualizado"}, cls=DecimalEncoder)}
 
-    
 def handle_update_acionamento(event, trace, body):
     chamado = int(body["chamado"])
     level = int(body.get("level", 1))
@@ -144,7 +161,7 @@ def handle_update_acionamento(event, trace, body):
     status_acionamento = body.get("statusAcionamento")
     operador = body.get("operador")
 
-    update = {f"level{level}_updatedAt": now}  # sempre marca o horário da alteração
+    update = {f"level{level}_updatedAt": now}
 
     if observacao is not None:
         update[f"level{level}_observacao"] = observacao
@@ -155,7 +172,12 @@ def handle_update_acionamento(event, trace, body):
     if operador is not None:
         update[f"level{level}_operador"] = operador
 
-    state = update_chamado(trace, chamado, update)
+    # 🔒 Só deixa atualizar se o nível ainda não estiver finalizado
+    expected = "attribute_not_exists(#lvl) OR #lvl <> :finished"
+    expr_names = {"#lvl": f"level{level}_status"}
+    expr_values = {":finished": "finished"}
+
+    state = update_chamado(trace, chamado, update, expected, expr_names, expr_values)
 
     broadcast({
         "event": "updateAcionamento",
@@ -171,7 +193,6 @@ def handle_get_state(event, trace, body):
     state = resp.get("Item", {})
     log(trace, "Estado retornado", chamado=chamado, state=state)
 
-    # Enviar resposta padronizada só para o cliente que pediu
     conn_id = event["requestContext"]["connectionId"]
     payload = {"event": "getState", "chamado": chamado, "state": state}
     send_to_connection(conn_id, payload)
