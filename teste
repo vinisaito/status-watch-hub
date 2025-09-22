@@ -15,9 +15,11 @@ const handleAction = useCallback(async (action: 'next' | 'finish') => {
 
     switch (action) {
       case 'next': {
-        const currentLevelKey = `statusNivel${currentLevel}`; // 🔹 gera chave dinâmica
+        // 🔹 sempre fecha o nível atual (ex: statusNivel1, statusNivel2...)
+        const currentLevelKey = `statusNivel${currentLevel}`;
+
         const updates = [
-          updateStatusFinal(chamado, currentLevelKey, "finished"), // 🔹 fecha nível atual
+          updateStatusFinal(chamado, currentLevelKey, "finished"), // ✅ fecha apenas o nível
           updateObservacao(chamado, currentLevel, observacao || ""),
           updateAcionamento(chamado, currentLevel, operador || "", pessoaAcionada || "", statusAtendimento || "")
         ];
@@ -42,8 +44,9 @@ const handleAction = useCallback(async (action: 'next' | 'finish') => {
       }
 
       case 'finish': {
+        // 🔹 só fecha o chamado final
         const updates = [
-          updateStatusFinal(chamado, levelStatusKey, "finished"), // 🔹 só marca o statusFinal
+          updateStatusFinal(chamado, "statusFinal", "finished"), // ✅ apenas statusFinal
           updateObservacao(chamado, currentLevel, observacao || ""),
           updateAcionamento(chamado, currentLevel, operador || "", pessoaAcionada || "", statusAtendimento || "")
         ];
@@ -87,6 +90,5 @@ const handleAction = useCallback(async (action: 'next' | 'finish') => {
   onClose,
   updateStatusFinal,
   updateObservacao,
-  finalizado,
-  levelStatusKey
+  finalizado
 ]);
