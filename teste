@@ -3,17 +3,37 @@ const updateStatusFinal = useCallback((
   levelOrKey: string | number,
   status: string
 ) => {
-  if (typeof levelOrKey === 'number') {
-    // 🔹 Atualiza status do nível (ex: level2_status)
+  if (typeof levelOrKey === "number") {
+    // 🔹 Caso: atualizar um levelX_status
     const levelStatusKey = `level${levelOrKey}_status`;
-    return sendMessage({ action: 'updateStatusFinal', chamado, levelStatusKey, status });
+    console.log("[updateStatusFinal] Atualizando nível:", { chamado, levelStatusKey, status });
+
+    return sendMessage({
+      action: "updateStatusFinal",
+      chamado,
+      levelStatusKey,
+      status,
+    });
   }
 
-  if (levelOrKey === 'statusFinal') {
-    // 🔹 Atualiza statusFinal
-    return sendMessage({ action: 'updateStatusFinal', chamado, statusFinal: status });
+  if (levelOrKey === "statusFinal") {
+    // 🔹 Caso: finalizar chamado inteiro
+    console.log("[updateStatusFinal] Finalizando chamado:", { chamado, statusFinal: status });
+
+    return sendMessage({
+      action: "updateStatusFinal",
+      chamado,
+      statusFinal: status,
+    });
   }
 
-  // 🔹 Atualiza um campo específico já passado como string (ex: "level3_status")
-  return sendMessage({ action: 'updateStatusFinal', chamado, levelStatusKey: levelOrKey, status });
+  // 🔹 Caso: chave explícita (ex: "level3_status")
+  console.log("[updateStatusFinal] Atualizando chave explícita:", { chamado, levelStatusKey: levelOrKey, status });
+
+  return sendMessage({
+    action: "updateStatusFinal",
+    chamado,
+    levelStatusKey: levelOrKey,
+    status,
+  });
 }, [sendMessage]);
