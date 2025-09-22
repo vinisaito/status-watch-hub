@@ -1,757 +1,92 @@
-import React, { useState, useCallback } from 'react';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { Button } from '@/components/ui/button';
-import { Textarea } from '@/components/ui/textarea';
-import { Input } from '@/components/ui/input';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Label } from '@/components/ui/label';
-import { Badge } from '@/components/ui/badge';
-import { Separator } from '@/components/ui/separator';
-import { ProgressIndicator } from '@/components/ui/progress-indicator';
-import { TimerDisplay } from '@/components/ui/timer-display';
-import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion';
-import { 
-  ArrowRight, 
-  CheckCircle, 
-  InfoIcon, 
-  AlertTriangle, 
-  Eye, 
-  MessageSquare, 
-  Timer, 
-  AlertOctagon, 
-  Zap, 
-  Clock, 
-  User, 
-  Phone,
-  Calendar,
-  ChevronRight,
-  Activity,
-  AlertCircle,
-  CheckCircle2,
-  XCircle,
-  History
-} from 'lucide-react';
-import { toast } from '@/hooks/use-toast';
-import { cn } from '@/lib/utils';
+const handleAction = useCallback(async (action: 'next' | 'finish') => {
+  if (!validateForm()) return;
 
-interface ModernTimerModalProps {
-  isOpen: boolean;
-  onClose: () => void;
-  chamado: number;
-  currentLevel: number;
-  remainingTime: number;
-  chamadoData?: any;
-  formatTime: (seconds: number) => string;
-  onNextLevel: (chamado: number, level: number, observacao: string) => void;
-  updateStatusFinal: (chamado: number, levelStatusKey: string, status: string) => void;
-  updateObservacao: (chamado: number, level: number, observacao: string) => void;
-  updateAcionamento: (chamado: number, level: number, operador: string, pessoaAcionada: string, statusAcionamento: string) => void;
-  historicoAcionamentos?: {
-    operador: string;
-    pessoaAcionada: string;
-    status: string;
-    observacao: string;
-    dataHora: string;
-    updatedAt: string;
-    nivel: number;
-  }[];
-}
+  setIsProcessing(true);
 
-const LEVEL_INFO = {
-  1: {
-    title: "Primeiro Acionamento",
-    subtitle: "",
-    nextAction: "Avançar para 1ª Escalação",
-    icon: Clock,
-    color: "from-blue-500 to-blue-500",
-    bgColor: "bg-blue-500/5 border-blue-500",
-    description: "Atendimento Inicial da Equipe"
-  },
-  2: {
-    title: "1ª Escalação",
-    subtitle: "",
-    nextAction: "Avançar para 2ª Escalação",
-    icon: Eye,
-    color: "from-yellow-500 to-yellow-500",
-    bgColor: "bg-yellow-500/5 border-yellow-500",
-    description: "Acionamento do Gestor de Incidente ou Plantonista"
-  },
-  3: {
-    title: "2ª Escalação",
-    subtitle: "",
-    nextAction: "Avançar para 3ª Escalação",
-    icon: Zap,
-    color: "from-orange-500 to-orange-500",
-    bgColor: "bg-orange-500/5 border-orange-500",
-    description: "Acionamento do Coordenador"
-  },
-  4: {
-    title: "3ª Escalação",
-    subtitle: "",
-    nextAction: "Avançar para 4ª Escalação",
-    icon: AlertOctagon,
-    color: "from-red-500 to-red-500",
-    bgColor: "bg-red-500/5 border-red-500",
-    description: "Acionamento do Gerente"
-  },
-  5: {
-    title: "4ª Escalação",
-    subtitle: "",
-    nextAction: "Finalizar Chamado",
-    icon: InfoIcon,
-    color: "from-purple-500 to-purple-500",
-    bgColor: "bg-purple-500/5 border-purple-500",
-    description: "Acionamento do Kleber Costa"
+  try {
+    if (finalizado && action !== 'finish') {
+      toast({
+        title: "⚠️ Chamado já finalizado",
+        description: "Não é possível alterar níveis pois o chamado está finalizado",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    switch (action) {
+      case 'next': {
+        const currentLevelKey = `statusNivel${currentLevel}`; // 🔹 gera chave dinâmica
+        const updates = [
+          updateStatusFinal(chamado, currentLevelKey, "finished"), // 🔹 fecha nível atual
+          updateObservacao(chamado, currentLevel, observacao || ""),
+          updateAcionamento(chamado, currentLevel, operador || "", pessoaAcionada || "", statusAtendimento || "")
+        ];
+
+        await Promise.all(updates);
+
+        if (currentLevel >= 5) {
+          toast({
+            title: "🚀 Última Escalação",
+            description: `Chamado ${chamado} chegou ao último nível.`,
+          });
+        } else {
+          await onNextLevel(chamado, currentLevel + 1, observacao || "");
+
+          const nextLevelInfo = LEVEL_INFO[(currentLevel + 1) as keyof typeof LEVEL_INFO];
+          toast({
+            title: `🚀 ${nextLevelInfo?.title} Iniciado`,
+            description: `Timer de 20 minutos iniciado para ${nextLevelInfo?.title}`,
+          });
+        }
+        break;
+      }
+
+      case 'finish': {
+        const updates = [
+          updateStatusFinal(chamado, levelStatusKey, "finished"), // 🔹 só marca o statusFinal
+          updateObservacao(chamado, currentLevel, observacao || ""),
+          updateAcionamento(chamado, currentLevel, operador || "", pessoaAcionada || "", statusAtendimento || "")
+        ];
+
+        await Promise.all(updates);
+        setFinalizado(true);
+        toast({
+          title: "✅ Chamado Finalizado",
+          description: `Chamado ${chamado} foi finalizado com sucesso!`,
+        });
+        break;
+      }
+    }
+
+    // Reset form
+    setObservacao('');
+    setPessoaAcionada('');
+    setOperador('');
+    setStatusAtendimento('');
+    onClose();
+
+  } catch (error) {
+    console.error("❌ Erro no handleAction:", error);
+    toast({
+      title: "❌ Erro na Operação",
+      description: "Ocorreu um erro ao processar a ação. Verifique os logs.",
+      variant: "destructive",
+    });
+  } finally {
+    setIsProcessing(false);
   }
-};
-
-const LEVEL_COLORS = {
-  1: { bg: "bg-blue-500/10", border: "border-blue-500/30", text: "text-blue-700 dark:text-blue-400", icon: "text-blue-500" },
-  2: { bg: "bg-yellow-500/10", border: "border-yellow-500/30", text: "text-yellow-700 dark:text-yellow-400", icon: "text-yellow-500" },
-  3: { bg: "bg-orange-500/10", border: "border-orange-500/30", text: "text-orange-700 dark:text-orange-400", icon: "text-orange-500" },
-  4: { bg: "bg-red-500/10", border: "border-red-500/30", text: "text-red-700 dark:text-red-400", icon: "text-red-500" },
-  5: { bg: "bg-purple-600/10", border: "border-purple-600/30", text: "text-purple-700 dark:text-purple-400", icon: "text-purple-600" },
-};
-
-export const ModernTimerModal: React.FC<ModernTimerModalProps> = ({
-  isOpen,
-  onClose,
-  chamado,
+}, [
+  validateForm,
+  updateAcionamento,
+  pessoaAcionada,
+  statusAtendimento,
+  observacao,
   currentLevel,
-  remainingTime,
-  chamadoData,
-  formatTime,
+  chamado,
   onNextLevel,
+  onClose,
   updateStatusFinal,
   updateObservacao,
-  updateAcionamento,
-  historicoAcionamentos = []
-}) => {
-  const [observacao, setObservacao] = useState('');
-  const [pessoaAcionada, setPessoaAcionada] = useState('');
-  const [statusAtendimento, setStatusAtendimento] = useState('');
-  const [operador, setOperador] = useState('');
-  const [isProcessing, setIsProcessing] = useState(false);
-  const levelStatusKey = `level${currentLevel}_status`;
-  const [finalizado, setFinalizado] = useState(
-    chamadoData?.statusFinal === "finished" || chamadoData?.[levelStatusKey] === "finished"
-  );
-
-  React.useEffect(() => {
-    setFinalizado(
-      chamadoData?.statusFinal === "finished" || chamadoData?.[levelStatusKey] === "finished"
-    );
-  }, [chamadoData, levelStatusKey]);
-
-  const levelInfo = finalizado
-    ? {
-      title: "Chamado Finalizado",
-      subtitle: "Processo encerrado com sucesso",
-      description: "O chamado foi resolvido e encerrado",
-      icon: CheckCircle,
-      color: "from-success to-success/90",
-      bgColor: "bg-success/5 border-success/20",
-      nextAction: "Finalizado"
-    }
-    : LEVEL_INFO[currentLevel as keyof typeof LEVEL_INFO];
-
-  const validateForm = useCallback(() => {
-    const errors = [];
-
-    if (!operador) {
-      errors.push("Operador é obrigatório");
-    }
-
-    if (!pessoaAcionada.trim()) {
-      errors.push("Nome da pessoa acionada é obrigatório");
-    } else if (pessoaAcionada.trim().length < 2) {
-      errors.push("Nome deve ter pelo menos 2 caracteres");
-    }
-
-    if (!statusAtendimento) {
-      errors.push("Status de atendimento é obrigatório");
-    }
-
-    if (!observacao.trim()) {
-      errors.push("Observações são obrigatórias");
-    } else if (observacao.trim().length < 10) {
-      errors.push("Observações devem ter pelo menos 10 caracteres");
-    }
-
-    if (errors.length > 0) {
-      toast({
-        title: "⚠️ Campos Obrigatórios",
-        description: errors.join(". "),
-        variant: "destructive",
-      });
-      return false;
-    }
-
-    return true;
-  }, [operador, pessoaAcionada, statusAtendimento, observacao]);
-
-  const handleAction = useCallback(async (action: 'next' | 'finish') => {
-    if (!validateForm()) return;
-
-    setIsProcessing(true);
-
-    try {
-      const fullObservacao = `Operador: ${operador}\nPessoa Acionada: ${pessoaAcionada.trim()}\nStatus: ${statusAtendimento}\n\nDetalhes: ${observacao.trim()}`;
-
-      if (finalizado && action !== 'finish') {
-        toast({
-          title: "⚠️ Chamado já finalizado",
-          description: "Não é possível alterar níveis pois o chamado está finalizado",
-          variant: "destructive",
-        });
-        return;
-      }
-
-      switch (action) {
-        case 'next': {
-          const updates = [
-            updateStatusFinal(chamado, levelStatusKey, "finished"),
-            updateObservacao(chamado, currentLevel, observacao || ""),
-            updateAcionamento(chamado, currentLevel, operador || "", pessoaAcionada || "", statusAtendimento || "")
-          ];
-
-          if (currentLevel >= 5) {
-            await Promise.all(updates);
-            toast({
-              title: "✅ Chamado Finalizado",
-              description: `Chamado ${chamado} foi finalizado com sucesso!`
-            });
-          } else {
-            await Promise.all(updates);
-            await onNextLevel(chamado, currentLevel + 1, observacao || "");
-
-            const nextLevelInfo = LEVEL_INFO[(currentLevel + 1) as keyof typeof LEVEL_INFO];
-            toast({
-              title: `🚀 ${nextLevelInfo?.title} Iniciado`,
-              description: `Timer de 20 minutos iniciado para ${nextLevelInfo?.title}`,
-            });
-          }
-          break;
-        }
-
-        case 'finish': {
-          const updates = [
-            updateStatusFinal(chamado, levelStatusKey, "finished"),
-            updateObservacao(chamado, currentLevel, observacao || ""),
-            updateAcionamento(chamado, currentLevel, operador || "", pessoaAcionada || "", statusAtendimento || "")
-          ];
-
-          await Promise.all(updates);
-          setFinalizado(true);
-          toast({
-            title: "✅ Chamado Finalizado",
-            description: `Chamado ${chamado} foi finalizado com sucesso!`,
-          });
-          break;
-        }
-      }
-
-      // Reset form
-      setObservacao('');
-      setPessoaAcionada('');
-      setOperador('');
-      setStatusAtendimento('');
-      onClose();
-
-    } catch (error) {
-      console.error("❌ Erro no handleAction:", error);
-      toast({
-        title: "❌ Erro na Operação",
-        description: "Ocorreu um erro ao processar a ação. Verifique os logs.",
-        variant: "destructive",
-      });
-    } finally {
-      setIsProcessing(false);
-    }
-  }, [validateForm, updateAcionamento, pessoaAcionada, statusAtendimento, observacao, currentLevel, chamado, onNextLevel, onClose, updateStatusFinal, updateObservacao, finalizado, levelStatusKey]);
-
-  if (!levelInfo) return null;
-
-  const LevelIcon = levelInfo.icon;
-  const isFormValid = operador && pessoaAcionada.trim().length >= 2 && statusAtendimento && observacao.trim().length >= 10;
-
-  return (
-    <Dialog open={isOpen} onOpenChange={onClose}>
-      <DialogContent className="sm:max-w-4xl max-h-[85vh] overflow-y-auto border-border shadow-modal">
-        {/* Header Section */}
-        <DialogHeader className="relative pb-8">
-
-          <div className="relative z-10 space-y-6">
-            <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-6">
-              <div className="flex items-center gap-6">
-                <div className={cn(
-                  "p-4 rounded-2xl bg-gradient-to-r shadow-lg",
-                  levelInfo.color,
-                  "text-white"
-                )}>
-                  <LevelIcon className="h-10 w-10" />
-                </div>
-
-                <div className="space-y-2">
-                  <DialogTitle className="text-3xl lg:text-4xl font-bold text-foreground">
-                    {levelInfo.title}
-                  </DialogTitle>
-                  <p className="text-lg text-muted-foreground">
-                    {levelInfo.subtitle}
-                  </p>
-                  <div className="flex items-center gap-3">
-                    <Badge variant="outline" className="text-sm font-medium">
-                      Chamado #{chamado}
-                    </Badge>
-                    <Badge
-                      variant={finalizado ? "default" : "secondary"}
-                      className={cn(
-                        "text-sm font-medium",
-                        finalizado && "bg-success text-success-foreground"
-                      )}
-                    >
-                      {finalizado ? "Finalizado" : "Em Andamento"}
-                    </Badge>
-                    {remainingTime < 0 && (
-                      <Badge
-                        variant="destructive"
-                        className="text-sm font-bold animate-text-flash bg-timer-negative text-white"
-                      >
-                        🚨 TEMPO EXCEDIDO
-                      </Badge>
-                    )}
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <div className={cn(
-              "p-4 rounded-xl border-l-4",
-              levelInfo.bgColor
-            )}>
-              <p className="text-sm text-muted-foreground">
-                {levelInfo.description}
-              </p>
-              {remainingTime < 0 && (
-                <p className="text-timer-negative font-bold animate-text-flash mt-2">
-                  ⚠️ O tempo limite foi excedido! Ação urgente necessária.
-                </p>
-              )}
-            </div>
-          </div>
-        </DialogHeader>
-
-        <div className="space-y-8">
-          {/* Histórico de Acionamentos - Dropdown */}
-          {historicoAcionamentos.length > 0 && (
-            <Accordion type="single" collapsible className="w-full">
-              <AccordionItem value="historico" className="border-2 border-border rounded-lg bg-card">
-                <AccordionTrigger className="px-6 py-4 hover:no-underline hover:bg-muted/50 transition-colors">
-                  <div className="flex items-center gap-3">
-                    <History className="h-6 w-6 text-primary" />
-                    <span className="text-xl font-semibold text-foreground">
-                      Histórico de Acionamentos
-                    </span>
-                    <Badge variant="secondary" className="ml-2">
-                      {historicoAcionamentos.length} registro(s)
-                    </Badge>
-                  </div>
-                </AccordionTrigger>
-                <AccordionContent className="px-6 pb-6 pt-2">
-                  <div className="relative">
-                    {/* Timeline line */}
-                    <div className="absolute left-6 top-8 bottom-4 w-0.5 bg-gradient-to-b from-primary/30 via-primary/20 to-transparent" />
-                    
-                    <div className="space-y-4">
-                      {[...historicoAcionamentos]
-                        .sort((a, b) => b.nivel - a.nivel)
-                        .map((h, idx) => {
-                          const levelColor = LEVEL_COLORS[h.nivel as keyof typeof LEVEL_COLORS] || LEVEL_COLORS[1];
-                          const StatusIcon = h.status === 'atendido' ? CheckCircle2 : XCircle;
-                          const statusColor = h.status === 'atendido' ? 'text-green-500' : 'text-red-500';
-                          const statusBg = h.status === 'atendido' ? 'bg-green-500/10' : 'bg-red-500/10';
-                          
-                          return (
-                            <div key={idx} className="relative flex gap-4 group">
-                              {/* Timeline node */}
-                              <div className="relative z-10">
-                                <div className={cn(
-                                  "w-12 h-12 rounded-xl flex items-center justify-center font-bold shadow-sm transition-all duration-200 group-hover:scale-110",
-                                  levelColor.bg,
-                                  levelColor.border,
-                                  levelColor.text,
-                                  "border"
-                                )}>
-                                  {h.nivel}
-                                </div>
-                              </div>
-
-                              {/* Content card */}
-                              <div className="flex-1 bg-background rounded-xl border p-5 shadow-sm hover:shadow-md transition-all duration-200 group-hover:border-primary/30">
-                                {/* Header with operator and status */}
-                                <div className="flex flex-wrap items-start justify-between gap-4 mb-4">
-                                  <div className="space-y-3 flex-1">
-                                    {/* Operator info */}
-                                    <div className="flex items-center gap-3">
-                                      <div className="p-2 bg-primary/5 rounded-lg">
-                                        <User className="h-4 w-4 text-primary" />
-                                      </div>
-                                      <div>
-                                        <p className="text-xs text-muted-foreground">Operador</p>
-                                        <p className="font-semibold text-sm">{h.operador}</p>
-                                      </div>
-                                    </div>
-
-                                    {/* Person contacted */}
-                                    <div className="flex items-center gap-3">
-                                      <div className="p-2 bg-primary/5 rounded-lg">
-                                        <Phone className="h-4 w-4 text-primary" />
-                                      </div>
-                                      <div>
-                                        <p className="text-xs text-muted-foreground">Pessoa Acionada</p>
-                                        <p className="font-semibold text-sm">{h.pessoaAcionada}</p>
-                                      </div>
-                                    </div>
-                                  </div>
-
-                                  {/* Status badge */}
-                                  <div className="flex flex-col items-end gap-2">
-                                    <div className={cn(
-                                      "flex items-center gap-2 px-3 py-1.5 rounded-full",
-                                      statusBg
-                                    )}>
-                                      <StatusIcon className={cn("h-4 w-4", statusColor)} />
-                                      <span className={cn("text-sm font-medium capitalize", statusColor)}>
-                                        {h.status === 'atendido' ? 'Atendido' : 'Não Atendido'}
-                                      </span>
-                                    </div>
-
-                                    {/* Date and time */}
-                                    <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                                      <Calendar className="h-3 w-3" />
-                                      <span>{h.updatedAt}</span>
-                                    </div>
-                                  </div>
-                                </div>
-
-                                {/* Observation section */}
-                                {h.observacao && (
-                                  <div className="mt-4 pt-4 border-t">
-                                    <div className="flex items-start gap-3">
-                                      <div className="p-1.5 bg-muted rounded">
-                                        <MessageSquare className="h-3.5 w-3.5 text-muted-foreground" />
-                                      </div>
-                                      <div className="flex-1">
-                                        <p className="text-xs text-muted-foreground mb-1">Observações</p>
-                                        <p className="text-sm leading-relaxed whitespace-pre-line text-foreground/90">
-                                          {h.observacao}
-                                        </p>
-                                      </div>
-                                    </div>
-                                  </div>
-                                )}
-
-                                {/* Level badge */}
-                                <div className="flex items-center gap-2 mt-4">
-                                  <Badge 
-                                    variant="outline" 
-                                    className={cn(
-                                      "text-xs",
-                                      levelColor.border,
-                                      levelColor.text
-                                    )}
-                                  >
-                                    {LEVEL_INFO[h.nivel as keyof typeof LEVEL_INFO]?.title || `Nível ${h.nivel}`}
-                                  </Badge>
-                                  {idx === 0 && (
-                                    <Badge variant="secondary" className="text-xs">
-                                      Mais recente
-                                    </Badge>
-                                  )}
-                                </div>
-                              </div>
-                            </div>
-                          );
-                        })}
-                    </div>
-                  </div>
-                </AccordionContent>
-              </AccordionItem>
-            </Accordion>
-          )}
-
-          {/* Timer and Progress Section */}
-          <div className="grid grid-cols-1 xl:grid-cols-2 gap-8">
-            <TimerDisplay
-              remainingTime={remainingTime}
-              formatTime={formatTime}
-              className="w-full"
-            />
-            <ProgressIndicator
-              currentLevel={currentLevel}
-              className="w-full"
-            />
-          </div>
-
-          <Separator />
-
-          {/* Required Information Section */}
-          <div className="space-y-6">
-            <div className="flex items-center gap-3">
-              <Phone className="h-6 w-6 text-primary" />
-              <Label className="text-xl font-semibold text-foreground">
-                Acionamento
-              </Label>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-              {/* Operador */}
-              <div className="space-y-3">
-                <Label htmlFor="operador" className="text-base font-medium flex items-center gap-2">
-                  <User className="h-4 w-4" />
-                  Operador
-                  <span className="text-destructive">*</span>
-                </Label>
-                <Select
-                  value={operador}
-                  onValueChange={setOperador}
-                  disabled={isProcessing || finalizado}
-                >
-                  <SelectTrigger className={cn(
-                    "border-2 focus:border-primary",
-                    operador && "border-success"
-                  )}>
-                    <SelectValue placeholder="Selecione o operador" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="ALBERTO LAGES">ALBERTO LAGES</SelectItem>
-                    <SelectItem value="ALEXANDRE LIMA SILVA">ALEXANDRE LIMA SILVA</SelectItem>
-                    <SelectItem value="ANSELMO ALVES PESSOA">ANSELMO ALVES PESSOA</SelectItem>
-                    <SelectItem value="BRUNO MAZZO FEITOSA">BRUNO MAZZO FEITOSA</SelectItem>
-                    <SelectItem value="CAIO CESAR ALVES DA LUZ">CAIO CESAR ALVES DA LUZ</SelectItem>
-                    <SelectItem value="CLAUDIA ZORZAN DE CAMARGO">CLAUDIA ZORZAN DE CAMARGO</SelectItem>
-                    <SelectItem value="JEFFERSON DA SILVA SOUZA">JEFFERSON DA SILVA SOUZA</SelectItem>
-                    <SelectItem value="JULIANA BEATRIZ DE ANGELO">JULIANA BEATRIZ DE ANGELO</SelectItem>
-                    <SelectItem value="MARIA LUIZA DOS SANTOS COIADO">MARIA LUIZA DOS SANTOS COIADO</SelectItem>
-                    <SelectItem value="RAFAEL NUNES PACHECO">RAFAEL NUNES PACHECO</SelectItem>
-                    <SelectItem value="SERGIO ANTONIO DA SILVA">SERGIO ANTONIO DA SILVA</SelectItem>
-                    <SelectItem value="VICTOR HUGO ALMEIDA FERNANDES">VICTOR HUGO ALMEIDA FERNANDES</SelectItem>
-                    <SelectItem value="VINICIUS RHYU VITURINO SAITO">VINICIUS RHYU VITURINO SAITO</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-
-              {/* Nome da Pessoa Acionada */}
-              <div className="space-y-3">
-                <Label htmlFor="pessoa-acionada" className="text-base font-medium flex items-center gap-2">
-                  <User className="h-4 w-4" />
-                  Pessoa Acionada
-                  <span className="text-destructive">*</span>
-                </Label>
-                <Input
-                  id="pessoa-acionada"
-                  type="text"
-                  value={pessoaAcionada}
-                  onChange={(e) => setPessoaAcionada(e.target.value)}
-                  placeholder="Ex: João Silva, Maria Santos..."
-                  className={cn(
-                    "border-2 focus:border-primary transition-all duration-200",
-                    pessoaAcionada.trim().length >= 2 && "border-success"
-                  )}
-                  disabled={isProcessing || finalizado}
-                  maxLength={100}
-                />
-              </div>
-
-              {/* Status do Atendimento */}
-              <div className="space-y-3">
-                <Label htmlFor="status-atendimento" className="text-base font-medium flex items-center gap-2">
-                  <CheckCircle className="h-4 w-4" />
-                  Status do Atendimento
-                  <span className="text-destructive">*</span>
-                </Label>
-                <Select
-                  value={statusAtendimento}
-                  onValueChange={(value) => {
-                    console.log("Status selecionado:", value); // 🔹 log de debug
-                    setStatusAtendimento(value);
-                  }}
-                  disabled={isProcessing || finalizado}
-                >
-                  <SelectTrigger className={cn(
-                    "border-2 focus:border-primary",
-                    statusAtendimento && "border-success"
-                  )}>
-                    <SelectValue placeholder="Selecione o status do atendimento" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="atendido">✅ Atendido</SelectItem>
-                    <SelectItem value="nao-atendido">❌ Não Atendido</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-          </div>
-
-          <Separator />
-          
-
-          {/* Observations Section */}
-          <div className="space-y-6">
-            <div className="flex items-center gap-3">
-              <MessageSquare className="h-6 w-6 text-primary" />
-              <Label htmlFor="observacao" className="text-xl font-semibold text-foreground">
-                Observações
-              </Label>
-            </div>
-
-            <Textarea
-              id="observacao"
-              value={observacao}
-              onChange={(e) => setObservacao(e.target.value)}
-              placeholder="Descreva as informações do acionamento"
-              rows={6}
-              className={cn(
-                "border-2 focus:border-primary transition-all duration-200 resize-none text-base min-h-[120px]",
-                observacao.trim().length >= 10 && "border-success"
-              )}
-              disabled={isProcessing || finalizado}
-              maxLength={1000}
-            />
-
-            <div className="flex justify-between items-center">
-              <span className={cn(
-                "text-sm font-medium",
-                observacao.length > 900 ? "text-warning" : "text-muted-foreground"
-              )}>
-                {observacao.length}/1000 caracteres
-              </span>
-              {observacao.trim().length >= 10 && (
-                <div className="flex items-center gap-2 text-success font-medium text-sm">
-                  <CheckCircle className="h-4 w-4" />
-                  <span>Observação válida</span>
-                </div>
-              )}
-            </div>
-          </div>
-
-          <Separator />
-
-          {/* Action Buttons */}
-          <div className="space-y-6">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {/* Finish Button */}
-              <Button
-                variant="secondary"
-                size="lg"
-                onClick={() => handleAction('finish')}
-                disabled={!isFormValid || isProcessing || finalizado}
-                className="h-20"
-              >
-                <CheckCircle className="h-6 w-6 mr-3" />
-                <div className="text-left">
-                  <div className="font-semibold text-base">Acompanhamento Confirmado</div>
-                  <div className="text-sm opacity-90">Finalizar Acompanhamento</div>
-                </div>
-              </Button>
-
-              {/* Next Level Button */}
-              <Button
-                variant="destructive"
-                size="lg"
-                onClick={() => handleAction('next')}
-                disabled={!isFormValid || isProcessing || finalizado}
-                className={cn(
-                  "h-20",
-                  remainingTime < 0 && "animate-timer-alert bg-timer-negative hover:bg-timer-negative/90"
-                )}
-              >
-                {finalizado ? (
-                  <>
-                    <CheckCircle className="h-6 w-6 mr-3" />
-                    <div className="text-left">
-                      <div className="font-semibold text-base">Finalizado</div>
-                      <div className="text-sm opacity-90">Chamado encerrado</div>
-                    </div>
-                  </>
-                ) : currentLevel >= 5 ? (
-                  <>
-                    <CheckCircle className="h-6 w-6 mr-3" />
-                    <div className="text-left">
-                      <div className="font-semibold text-base">Concluir Final</div>
-                      <div className="text-sm opacity-90">Última escalação</div>
-                    </div>
-                  </>
-                ) : (
-                  <>
-                    <ArrowRight className="h-6 w-6 mr-3" />
-                    <div className="text-left">
-                      <div className="font-semibold text-base">{levelInfo.nextAction}</div>
-                      <div className="text-sm opacity-90">Avançar escalação</div>
-                    </div>
-                  </>
-                )}
-              </Button>
-            </div>
-          </div>
-
-          {/* Guidelines Section */}
-          <div className="gradient-modal rounded-2xl p-6 border border-border/50">
-            <div className="space-y-4">
-              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
-                <div className="space-y-2">
-                  <div className="flex items-center gap-2 text-destructive">
-                    <AlertTriangle className="h-5 w-5" />
-                    <span className="font-semibold">Dados Obrigatórios</span>
-                  </div>
-                  <p className="text-sm text-muted-foreground">
-                    Nome da pessoa, status, operador e observações são campos obrigatórios para prosseguir.
-                  </p>
-                </div>
-
-                <div className="space-y-2">
-                  <div className="flex items-center gap-2 text-primary">
-                    <Timer className="h-5 w-5" />
-                    <span className="font-semibold">Controle de Tempo</span>
-                  </div>
-                  <p className="text-sm text-muted-foreground">
-                    Cada escalação reinicia automaticamente o timer de 20 minutos.
-                  </p>
-                  {remainingTime < 0 && (
-                    <p className="text-timer-negative text-sm font-bold animate-text-flash">
-                      ⚠️ Timer excedido! Ação urgente necessária.
-                    </p>
-                  )}
-                </div>
-
-                <div className="space-y-2">
-                  <div className="flex items-center gap-2 text-success">
-                    <CheckCircle className="h-5 w-5" />
-                    <span className="font-semibold">Documentação</span>
-                  </div>
-                  <p className="text-sm text-muted-foreground">
-                    Todas as informações são automaticamente registradas no histórico.
-                  </p>
-                </div>
-              </div>
-            </div>
-            
-          </div>
-
-          {/* Processing Indicator */}
-          {isProcessing && (
-            <div className="fixed inset-0 bg-background/80 backdrop-blur-sm flex items-center justify-center z-50">
-              <div className="bg-card p-6 rounded-2xl shadow-2xl border border-border">
-                <div className="flex items-center gap-3">
-                  <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-primary"></div>
-                  <span className="text-lg font-medium">Processando ação...</span>
-                </div>
-              </div>
-            </div>
-          )}
-
-        </div>
-      </DialogContent>
-    </Dialog>
-  );
-};
+  finalizado,
+  levelStatusKey
+]);
