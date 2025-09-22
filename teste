@@ -13,143 +13,11 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } f
 import { Textarea } from '@/components/ui/textarea';
 import { useEffect } from 'react';
 
-// Mock do hook WebSocket para demonstração
-const useMockWebsocketTimers = () => {
-  const [timers, setTimers] = useState<Map<number, any>>(new Map());
-  const [alertedChamados, setAlertedChamados] = useState<Set<string>>(new Set());
+// WebSocket hook
+import { useWebsocketTimers } from "@/hooks/useWebsocketTimers";
 
-  // Função para formatar tempo
-  const formatTime = (seconds: number) => {
-    if (seconds <= 0) return '00:00';
-    const minutes = Math.floor(seconds / 60);
-    const secs = seconds % 60;
-    return `${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
-  };
-
-  // Função para obter tempo restante
-  const getRemainingTime = (chamado: number, level: number) => {
-    const timer = timers.get(chamado);
-    if (!timer || !timer[`level${level}_endTime`]) return 0;
-    
-    const now = Date.now();
-    const endTime = timer[`level${level}_endTime`];
-    const remaining = Math.max(0, Math.floor((endTime - now) / 1000));
-    
-    return remaining;
-  };
-
-  // Função para verificar se timer está ativo
-  const isTimerActive = (chamado: number, level: number) => {
-    const timer = timers.get(chamado);
-    return timer && timer[`level${level}_status`] === 'running';
-  };
-
-  // Função para iniciar timer
-  const startTimer = (chamado: number, level: number, duration: number) => {
-    const endTime = Date.now() + (duration * 1000);
-    
-    setTimers(prev => {
-      const newTimers = new Map(prev);
-      const existingTimer = newTimers.get(chamado) || {};
-      
-      newTimers.set(chamado, {
-        ...existingTimer,
-        [`level${level}_status`]: 'running',
-        [`level${level}_endTime`]: endTime,
-        [`level${level}_startTime`]: Date.now()
-      });
-      
-      return newTimers;
-    });
-
-    return true;
-  };
-
-  // Função para finalizar chamado
-  const updateStatusFinal = (chamado: number, status: string) => {
-    setTimers(prev => {
-      const newTimers = new Map(prev);
-      const existingTimer = newTimers.get(chamado) || {};
-      
-      newTimers.set(chamado, {
-        ...existingTimer,
-        statusFinal: status
-      });
-      
-      return newTimers;
-    });
-  };
-
-  // Função para atualizar observação
-  const updateObservacao = (chamado: number, level: number, observacao: string) => {
-    setTimers(prev => {
-      const newTimers = new Map(prev);
-      const existingTimer = newTimers.get(chamado) || {};
-      
-      newTimers.set(chamado, {
-        ...existingTimer,
-        [`level${level}_observacao`]: observacao
-      });
-      
-      return newTimers;
-    });
-  };
-
-  // Função para atualizar acionamento
-  const updateAcionamento = (chamado: number, level: number, operador: string, pessoaAcionada: string, statusAcionamento: string) => {
-    setTimers(prev => {
-      const newTimers = new Map(prev);
-      const existingTimer = newTimers.get(chamado) || {};
-      
-      newTimers.set(chamado, {
-        ...existingTimer,
-        [`level${level}_operador`]: operador,
-        [`level${level}_pessoaAcionada`]: pessoaAcionada,
-        [`level${level}_statusAcionamento`]: statusAcionamento,
-        [`level${level}_updatedAt`]: new Date().toISOString()
-      });
-      
-      return newTimers;
-    });
-  };
-
-  const updateOperador = (chamado: number, operador: string) => {
-    setTimers(prev => {
-      const newTimers = new Map(prev);
-      const existingTimer = newTimers.get(chamado) || {};
-      
-      newTimers.set(chamado, {
-        ...existingTimer,
-        operador
-      });
-      
-      return newTimers;
-    });
-  };
-
-  const getState = (chamado: number) => {
-    return timers.get(chamado);
-  };
-
-  const setWatchedChamados = (chamados: number[]) => {
-    // Mock implementation
-  };
-
-  return {
-    timers,
-    isConnected: true,
-    startTimer,
-    updateObservacao,
-    updateOperador,
-    updateStatusFinal,
-    updateAcionamento,
-    getRemainingTime,
-    formatTime,
-    isTimerActive,
-    getState,
-    setWatchedChamados
-  };
-};
+// Modern Timer Management Modal
+import { ModernTimerModal } from '@/components/ActionTable/ModernTimerModal';
 
 interface AlertData {
   id: string;
@@ -198,7 +66,7 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
   const [observacaoText, setObservacaoText] = useState('');
   const [operadorText, setOperadorText] = useState('');
 
-  // Mock WebSocket
+  // WebSocket
   const {
     timers,
     isConnected,
@@ -212,7 +80,7 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
     isTimerActive,
     getState,
     setWatchedChamados
-  } = useMockWebsocketTimers();
+  } = useWebsocketTimers();
 
   // Primeiro registrar os chamados que queremos monitorar
   useEffect(() => {
@@ -383,18 +251,19 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
   }, []);
 
   // CORRIGIDO: Função para avançar para próximo nível
-  const handleNextLevel = useCallback(async (chamado: number, nextLevel: number, observacao: string) => {
+  const handleNextLevel = useCallback(async (chamado: string, nextLevel: number, observacao: string) => {
     try {
+      const chamadoNum = parseInt(chamado);
       const duration = 1200; // 20 minutos para cada etapa
 
       // Primeiro salvar a observação do nível atual
-      const currentLevel = getCurrentActiveLevel(chamado);
+      const currentLevel = getCurrentActiveLevel(chamadoNum);
       if (currentLevel && observacao.trim()) {
-        updateObservacao(chamado, currentLevel, observacao.trim());
+        updateObservacao(chamadoNum, currentLevel, observacao.trim());
       }
 
       // Iniciar o próximo nível
-      const success = startTimer(chamado, nextLevel, duration);
+      const success = startTimer(chamadoNum, nextLevel, duration);
 
       if (success) {
         const levelName = LEVEL_NAMES[nextLevel as keyof typeof LEVEL_NAMES] || `Nível ${nextLevel}`;
@@ -403,7 +272,7 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
         await new Promise(resolve => setTimeout(resolve, 500));
 
         // Atualizar estado
-        getState(chamado);
+        getState(chamadoNum);
 
         return true;
       }
@@ -414,6 +283,65 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
       throw error;
     }
   }, [startTimer, updateObservacao, getState, getCurrentActiveLevel]);
+
+  // CORRIGIDO: Função para voltar ao nível anterior
+  const handlePreviousLevel = useCallback(async (chamado: string, previousLevel: number, observacao: string) => {
+    try {
+      const chamadoNum = parseInt(chamado);
+
+      // Salvar observação do nível atual
+      const currentLevel = getCurrentActiveLevel(chamadoNum);
+      if (currentLevel && observacao.trim()) {
+        updateObservacao(chamadoNum, currentLevel, observacao.trim());
+      }
+
+      // Iniciar o nível anterior
+      const duration = 1200; // 20 minutos
+      const success = startTimer(chamadoNum, previousLevel, duration);
+
+      if (success) {
+        // Aguardar um momento para garantir que o timer foi iniciado
+        await new Promise(resolve => setTimeout(resolve, 500));
+
+        // Atualizar estado
+        getState(chamadoNum);
+
+        return true;
+      }
+
+      return false;
+    } catch (error) {
+      console.error('Erro em handlePreviousLevel:', error);
+      throw error;
+    }
+  }, [startTimer, updateObservacao, getState, getCurrentActiveLevel]);
+
+  // CORRIGIDO: Função para finalizar chamado
+  const handleFinalize = useCallback(async (chamado: string, observacao: string) => {
+    try {
+      const chamadoNum = parseInt(chamado);
+
+      // Salvar observação final
+      const currentLevel = getCurrentActiveLevel(chamadoNum);
+      if (currentLevel && observacao.trim()) {
+        updateObservacao(chamadoNum, currentLevel, observacao.trim());
+      }
+
+      // Finalizar o chamado
+      updateStatusFinal(chamadoNum, 'finalizado');
+
+      // Aguardar um momento para garantir que o status foi atualizado
+      await new Promise(resolve => setTimeout(resolve, 500));
+
+      // Atualizar estado
+      getState(chamadoNum);
+
+      return true;
+    } catch (error) {
+      console.error('Erro em handleFinalize:', error);
+      throw error;
+    }
+  }, [updateObservacao, updateStatusFinal, getState, getCurrentActiveLevel]);
 
   // Handlers para observação
   const handleOpenObservacao = useCallback((chamado: string) => {
@@ -552,6 +480,11 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
     <TooltipProvider>
       <Card className="bg-card border-border shadow-elegant">
         <CardHeader>
+          {/* Status da Conexão WebSocket */}
+          <div className="flex items-center justify-between mb-4">
+            
+          </div>
+
           {/* Campo de Pesquisa */}
           <div className="relative mb-4">
             <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
@@ -658,25 +591,27 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
                     <span className="text-xs font-medium">Timer WebSocket</span>
                   </TableHead>
                   <TableHead className="text-muted-foreground w-[60px] text-center">Chat</TableHead>
+                  <TableHead className="text-muted-foreground w-[80px] text-center">Observação</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {loading ? (
                   <TableRow>
-                    <TableCell colSpan={9} className="text-center py-8">
+                    <TableCell colSpan={10} className="text-center py-8">
                       <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary mb-4"></div>
                       <p>Carregando dados...</p>
                     </TableCell>
                   </TableRow>
                 ) : sortedAndPaginatedData.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={9} className="text-center py-8 text-muted-foreground">
+                    <TableCell colSpan={10} className="text-center py-8 text-muted-foreground">
                       {searchTerm ? 'Nenhum resultado encontrado' : 'Nenhum dado disponível'}
                     </TableCell>
                   </TableRow>
                 ) : (
                   sortedAndPaginatedData.map((alert) => {
                     const isChat = alert.acionado === 'true' || alert.chat;
+                    const observacao = localObservacoes.get(alert.chamado);
                     const chamadoNum = parseInt(alert.chamado);
                     const activeLevel = getCurrentActiveLevel(chamadoNum);
                     const timerState = timers.get(chamadoNum);
@@ -751,7 +686,7 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
                                   {formatTime(remainingTime)}
                                 </div>
                                 <Button
-                                  variant="outline"
+                                  variant="timer"
                                   size="sm"
                                   onClick={() => handleOpenTimerManagement(alert.chamado)}
                                   className="h-6 px-2 text-xs font-semibold"
@@ -764,31 +699,16 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
                                     👤 {timerState.operador}
                                   </div>
                                 )}
-                                {remainingTime <= 600 && remainingTime > 300 && (
+                                {remainingTime <= 300 && remainingTime > 0 && (
                                   <Badge variant="destructive" className="text-xs animate-pulse">
-                                    ⚠️ Últimos 10 min
-                                  </Badge>
-                                )}
-                                {remainingTime <= 300 && remainingTime > 60 && (
-                                  <Badge variant="destructive" className="text-xs animate-pulse">
-                                    🚨 Últimos 5 min
-                                  </Badge>
-                                )}
-                                {remainingTime <= 60 && remainingTime > 0 && (
-                                  <Badge variant="destructive" className="text-xs animate-pulse bg-red-600">
-                                    🚨 ÚLTIMO MINUTO
-                                  </Badge>
-                                )}
-                                {remainingTime <= 0 && (
-                                  <Badge variant="destructive" className="text-xs animate-pulse bg-red-700">
-                                    🚨 TEMPO ESGOTADO
+                                    ⚠️ Últimos 5 min
                                   </Badge>
                                 )}
                               </div>
                             ) : (
                               <div className="flex flex-col items-center gap-2">
                                 <Button
-                                  variant="default"
+                                  variant="timer"
                                   size="sm"
                                   onClick={() => handleStartTimer(alert.chamado)}
                                   className="h-7 px-3 text-xs font-semibold whitespace-nowrap"
@@ -808,7 +728,7 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
                           <Tooltip>
                             <TooltipTrigger asChild>
                               <Button
-                                variant={isChat ? "default" : "outline"}
+                                variant={isChat ? "success" : "outline"}
                                 size="sm"
                                 onClick={() => !isChat && handleAcknowledgment(alert)}
                                 disabled={isChat}
@@ -826,6 +746,27 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
                             </TooltipContent>
                           </Tooltip>
                         </TableCell>
+                        <TableCell>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <Button
+                                variant={observacao ? "success" : "outline"}
+                                size="sm"
+                                onClick={() => handleOpenObservacao(alert.chamado)}
+                                className="h-8 w-8 p-0"
+                              >
+                                {observacao ? (
+                                  <CheckCircle className="h-4 w-4" />
+                                ) : (
+                                  <Edit3 className="h-4 w-4" />
+                                )}
+                              </Button>
+                            </TooltipTrigger>
+                            <TooltipContent>
+                              <p>{observacao ? 'Observação salva' : 'Adicionar observação'}</p>
+                            </TooltipContent>
+                          </Tooltip>
+                        </TableCell>
                       </TableRow>
                     );
                   })
@@ -834,92 +775,404 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
             </Table>
           </div>
 
-          {/* Paginação */}
-          {!loading && sortedAndPaginatedData.length > 0 && totalPages > 1 && (
-            <div className="flex flex-col sm:flex-row items-center justify-between mt-4 pt-4 border-t border-border gap-4">
-              <div className="text-sm text-muted-foreground text-center sm:text-left">
-                Mostrando {((currentPage - 1) * itemsPerPage) + 1} a {Math.min(currentPage * itemsPerPage, filteredData.length)} de {filteredData.length} registros
-                {searchTerm && filteredData.length !== alertData.length && ` (filtrados de ${alertData.length})`}
-              </div>
 
-              <div className="flex items-center gap-2">
-                <Label htmlFor="itemsPerPage" className="text-sm font-medium whitespace-nowrap">
-                  Por Página:
-                </Label>
-                <Select value={itemsPerPage.toString()} onValueChange={handleItemsPerPageChange}>
-                  <SelectTrigger className="w-20">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="5">5</SelectItem>
-                    <SelectItem value="10">10</SelectItem>
-                    <SelectItem value="15">15</SelectItem>
-                    <SelectItem value="20">20</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
 
-              <div className="flex items-center gap-2">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => handlePageChange(currentPage - 1)}
-                  disabled={currentPage === 1}
-                  className="h-8 px-3"
-                >
-                  <ChevronLeft className="h-4 w-4 mr-1" />
-                  Anterior
-                </Button>
 
-                <div className="flex items-center gap-1">
-                  {[...Array(Math.min(totalPages, 5))].map((_, index) => {
-                    let page;
-                    if (totalPages <= 5) {
-                      page = index + 1;
-                    } else if (currentPage <= 3) {
-                      page = index + 1;
-                    } else if (currentPage >= totalPages - 2) {
-                      page = totalPages - 4 + index;
-                    } else {
-                      page = currentPage - 2 + index;
-                    }
 
-                    return (
-                      <Button
-                        key={page}
-                        variant={currentPage === page ? "default" : "outline"}
-                        size="sm"
-                        onClick={() => handlePageChange(page)}
-                        className="h-8 w-8 p-0"
-                      >
-                        {page}
-                      </Button>
-                    );
-                  })}
-                </div>
 
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => handlePageChange(currentPage + 1)}
-                  disabled={currentPage === totalPages}
-                  className="h-8 px-3"
-                >
-                  Próximo
-                  <ChevronRight className="h-4 w-4 ml-1" />
-                </Button>
-              </div>
-            </div>
-          )}
 
-          {/* Modern Timer Management Modal */}
-          {selectedChamadoForTimer && (
-            <div>
-              {/* Modal placeholder - ModernTimerModal component needs to be created */}
-            </div>
-          )}
-        </CardContent>
-      </Card>
-    </TooltipProvider>
-  );
+
+
+
+
+
+
+
+import { useState, useEffect, useCallback, useRef } from 'react';
+import { toast } from '@/hooks/use-toast';
+
+export interface TimerState {
+  chamado: number;
+  operador?: string;
+  statusFinal?: string;
+  statusFinal_updateAt?: string;
+  level1_timerStart?: string;
+  level1_duration?: number;
+  level1_status?: 'running' | 'paused' | 'stopped' | 'finished';
+  level1_observacao?: string;
+  level1_operador?: string;
+  level1_pessoaAcionada?: string;
+  level1_statusAcionamento?: string;
+  level1_updateAt?: string;
+  level2_timerStart?: string;
+  level2_duration?: number;
+  level2_status?: 'running' | 'paused' | 'stopped' | 'finished';
+  level2_observacao?: string;
+  level2_operador?: string;
+  level2_pessoaAcionada?: string;
+  level2_statusAcionamento?: string;
+  level2_updateAt?: string;
+  level3_timerStart?: string;
+  level3_duration?: number;
+  level3_status?: 'running' | 'paused' | 'stopped' | 'finished';
+  level3_observacao?: string;
+  level3_operador?: string;
+  level3_pessoaAcionada?: string;
+  level3_statusAcionamento?: string;
+  level3_updateAt?: string;
+  level4_timerStart?: string;
+  level4_duration?: number;
+  level4_status?: 'running' | 'paused' | 'stopped' | 'finished';
+  level4_observacao?: string;
+  level4_operador?: string;
+  level4_pessoaAcionada?: string;
+  level4_statusAcionamento?: string;
+  level4_updateAt?: string;
+  level5_timerStart?: string;
+  level5_duration?: number;
+  level5_status?: 'running' | 'paused' | 'stopped' | 'finished';
+  level5_observacao?: string;
+  level5_operador?: string;
+  level5_pessoaAcionada?: string;
+  level5_statusAcionamento?: string;
+  level5_updateAt?: string;
+}
+
+export interface WebSocketMessage {
+  event: 'startTimer' | 'updateObservacao' | 'updateOperador' | 'updateStatusFinal' | 'getState' | 'updateAcionamento';
+  chamado: number;
+  level?: number;
+  state?: TimerState;
+}
+
+export interface SendMessage {
+  action: 'startTimer' | 'updateObservacao' | 'updateOperador' | 'updateStatusFinal' | 'getState' | 'updateAcionamento';
+  chamado: number;
+  level?: number;
+  duration?: number;
+  observacao?: string;
+  operador?: string;
+  statusFinal?: string;
+  levelStatusKey?: string;
+  status?: string;
+  pessoaAcionada?: string;
+  statusAcionamento?: string;
+}
+
+export const useWebsocketTimers = () => {
+  const [timers, setTimers] = useState<Map<number, TimerState>>(new Map());
+  const [isConnected, setIsConnected] = useState(false);
+  const ws = useRef<WebSocket | null>(null);
+  const reconnectAttempts = useRef(0);
+  const maxReconnectAttempts = 5;
+  const reconnectTimeout = useRef<NodeJS.Timeout | null>(null);
+
+  // Chamados que o cliente quer garantir que sejam consultados ao conectar
+  const watchedChamadosRef = useRef<Set<number>>(new Set());
+
+  const connect = useCallback(() => {
+    try {
+      if (ws.current && ws.current.readyState === WebSocket.CONNECTING) {
+        return;
+      }
+
+      const wsUrl = 'wss://rsgjd6wsza.execute-api.us-east-1.amazonaws.com/dev';
+      console.log(`🔌 Tentando conectar no WebSocket: ${wsUrl}`);
+
+      ws.current = new WebSocket(wsUrl);
+
+      const connectionTimeout = setTimeout(() => {
+        if (ws.current && ws.current.readyState === WebSocket.CONNECTING) {
+          ws.current.close();
+          toast({
+            title: "Timeout de Conexão",
+            description: "WebSocket demorou muito para conectar. Tentando novamente...",
+            variant: "destructive",
+          });
+        }
+      }, 10000);
+
+      ws.current.onopen = () => {
+        clearTimeout(connectionTimeout);
+        setIsConnected(true);
+        reconnectAttempts.current = 0;
+
+        console.log('✅ WebSocket conectado com sucesso');
+        toast({
+          title: "Conectado",
+          description: "WebSocket conectado com sucesso",
+        });
+      };
+
+      ws.current.onmessage = (event) => {
+        try {
+          const message: WebSocketMessage = JSON.parse(event.data);
+
+          if (message.state && message.chamado) {
+            setTimers(prev => {
+              const oldState = prev.get(message.chamado);
+              const isDifferent = JSON.stringify(oldState) !== JSON.stringify(message.state);
+
+              if (isDifferent) {
+                console.log(`🔔 Novo evento para chamado ${message.chamado}`, message.state);
+              }
+
+              const newTimers = new Map(prev);
+              newTimers.set(message.chamado, message.state!);
+              return newTimers;
+            });
+          }
+        } catch (error) {
+          console.error('❌ Erro ao processar mensagem WebSocket:', error);
+        }
+      };
+
+      ws.current.onclose = (event) => {
+        clearTimeout(connectionTimeout);
+        setIsConnected(false);
+
+        console.warn('⚠️ WebSocket desconectado - Código:', event.code, 'Motivo:', event.reason);
+
+        if (event.code !== 1000 && reconnectAttempts.current < maxReconnectAttempts) {
+          reconnectAttempts.current++;
+          const delay = Math.min(1000 * Math.pow(2, reconnectAttempts.current), 30000);
+          console.log(`🔄 Tentando reconectar em ${delay}ms (tentativa ${reconnectAttempts.current}/${maxReconnectAttempts})`);
+
+          reconnectTimeout.current = setTimeout(() => {
+            connect();
+          }, delay);
+        } else if (reconnectAttempts.current >= maxReconnectAttempts) {
+          console.error('❌ Máximo de tentativas de reconexão atingido');
+          toast({
+            title: "Falha na Conexão",
+            description: "Não foi possível conectar ao WebSocket após várias tentativas",
+            variant: "destructive",
+          });
+        }
+      };
+
+      ws.current.onerror = () => {
+        clearTimeout(connectionTimeout);
+        console.error('❌ Erro WebSocket detectado');
+      };
+
+    } catch (error) {
+      console.error('❌ Erro ao conectar WebSocket:', error);
+      toast({
+        title: "Erro de Inicialização",
+        description: "Erro ao inicializar conexão WebSocket",
+        variant: "destructive",
+      });
+    }
+  }, []);
+
+  const disconnect = useCallback(() => {
+    if (reconnectTimeout.current) {
+      clearTimeout(reconnectTimeout.current);
+      reconnectTimeout.current = null;
+    }
+
+    if (ws.current) {
+      ws.current.close(1000, 'Desconexão intencional');
+      ws.current = null;
+    }
+
+    setIsConnected(false);
+    console.log('🔌 WebSocket desconectado manualmente');
+  }, []);
+
+  const sendMessage = useCallback((message: SendMessage) => {
+    if (ws.current && ws.current.readyState === WebSocket.OPEN) {
+      try {
+        const payload = JSON.stringify(message); // Armazena o payload em uma variável
+        ws.current.send(payload);
+
+        // Inclui a variável payload no console.log
+        console.log(`📤 Mensagem enviada: ${message.action} (chamado ${message.chamado})`);
+        console.log('Payload:', payload);
+
+        return true;
+      } catch (error) {
+        console.error('❌ Erro ao enviar mensagem:', error);
+        toast({
+          title: "Erro ao Enviar",
+          description: "Não foi possível enviar a mensagem",
+          variant: "destructive",
+        });
+        return false;
+      }
+    } else {
+      toast({
+        title: "Não Conectado",
+        description: "WebSocket não está conectado. Tentando reconectar...",
+        variant: "destructive",
+      });
+      connect();
+      return false;
+    }
+  }, [connect]);
+
+  // Ações (mantive todas as existentes)
+  const startTimer = useCallback((chamado: number, level: number, duration: number = 1200) => {
+    return sendMessage({ action: 'startTimer', chamado, level, duration });
+  }, [sendMessage]);
+
+  const updateObservacao = useCallback((chamado: number, level: number, observacao: string) => {
+    return sendMessage({ action: 'updateObservacao', chamado, level, observacao });
+  }, [sendMessage]);
+
+  const updateOperador = useCallback((chamado: number, operador: string) => {
+    return sendMessage({ action: 'updateOperador', chamado, operador });
+  }, [sendMessage]);
+
+  const updateAcionamento = useCallback((chamado: number, level: number, operador: string, pessoaAcionada: string, statusAcionamento: string) => {
+    return sendMessage({ action: 'updateAcionamento', chamado, level, operador, pessoaAcionada, statusAcionamento});
+  }, [sendMessage]);
+
+  const updateStatusFinal = useCallback((
+    chamado: number,
+    levelOrKeyOrStatus: number | string,
+    maybeStatus?: string
+  ) => {
+    // caso 1: numeric + status -> level number
+    if (typeof levelOrKeyOrStatus === 'number') {
+      const level = levelOrKeyOrStatus;
+      const status = maybeStatus!;
+      const levelStatusKey = `level${level}_status`;
+      return sendMessage({ action: 'updateStatusFinal', chamado, levelStatusKey, status });
+    }
+
+    // caso 2: string + status (treat second param as levelStatusKey)
+    if (typeof maybeStatus === 'string') {
+      const levelStatusKey = levelOrKeyOrStatus;
+      const status = maybeStatus;
+      return sendMessage({ action: 'updateStatusFinal', chamado, levelStatusKey, status });
+    }
+
+    // caso 3: apenas chamado + statusFinal (retrocompatível)
+    const statusFinal = levelOrKeyOrStatus;
+    return sendMessage({ action: 'updateStatusFinal', chamado, statusFinal });
+  }, [sendMessage]);
+
+  const getState = useCallback((chamado: number) => {
+    return sendMessage({ action: 'getState', chamado });
+  }, [sendMessage]);
+
+  // Cálculo de tempo restante (sem logs)
+  const getRemainingTime = useCallback((chamado: number, level: number): number => {
+    const timerState = timers.get(chamado);
+    if (!timerState) return 0;
+
+    const levelPrefix = `level${level}` as 'level1' | 'level2' | 'level3' | 'level4' | 'level5';
+    const timerStart = timerState[`${levelPrefix}_timerStart`];
+    const duration = timerState[`${levelPrefix}_duration`];
+    const status = timerState[`${levelPrefix}_status`];
+
+    if (!timerStart || !duration || status !== 'running') return 0;
+
+    try {
+      const startTime = new Date(timerStart).getTime();
+      const endTime = startTime + (duration * 1000);
+      const now = Date.now();
+      return Math.max(0, Math.floor((endTime - now) / 1000));
+    } catch {
+      return 0;
+    }
+  }, [timers]);
+
+  const formatTime = useCallback((seconds: number): string => {
+    const hours = Math.floor(seconds / 3600);
+    const minutes = Math.floor((seconds % 3600) / 60);
+    const secs = seconds % 60;
+
+    if (hours > 0) {
+      return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+    }
+    return `${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+  }, []);
+
+  const isTimerActive = useCallback((chamado: number, level: number): boolean => {
+    const timerState = timers.get(chamado);
+    if (!timerState) return false;
+
+    const levelPrefix = `level${level}` as 'level1' | 'level2' | 'level3' | 'level4' | 'level5';
+    return timerState[`${levelPrefix}_status`] === 'running';
+  }, [timers]);
+
+  // Conectar ao montar
+  useEffect(() => {
+    connect();
+    return () => disconnect();
+  }, [connect, disconnect]);
+
+  // Força re-render a cada segundo
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setTimers(prev => new Map(prev));
+    }, 1000);
+    return () => clearInterval(interval);
+  }, []);
+
+  useEffect(() => {
+    if (!isConnected) return;
+
+    try {
+      const currentKeys = Array.from(timers.keys());
+      const watchedKeys = Array.from(watchedChamadosRef.current);
+      const uniqueChamados = Array.from(new Set([...currentKeys, ...watchedKeys]));
+
+      if (uniqueChamados.length === 0) {
+        return;
+      }
+
+      console.log('🔁 Solicitando estado inicial para chamados:', uniqueChamados);
+      uniqueChamados.forEach(chamado => {
+        try {
+          getState(chamado);
+        } catch (err) {
+          console.error(`Erro ao solicitar getState para ${chamado}:`, err);
+        }
+      });
+    } catch (err) {
+      console.error('Erro no efeito de sincronização inicial:', err);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isConnected, getState]);
+
+  const addWatchedChamado = useCallback((chamado: number) => {
+    watchedChamadosRef.current.add(chamado);
+  }, []);
+
+  const removeWatchedChamado = useCallback((chamado: number) => {
+    watchedChamadosRef.current.delete(chamado);
+  }, []);
+
+  const setWatchedChamados = useCallback((chamados: number[]) => {
+    watchedChamadosRef.current = new Set(chamados);
+  }, []);
+
+  const getWatchedChamados = useCallback(() => {
+    return Array.from(watchedChamadosRef.current);
+  }, []);
+
+  return {
+    timers,
+    isConnected,
+    sendMessage,
+    startTimer,
+    updateObservacao,
+    updateOperador,
+    updateAcionamento,
+    updateStatusFinal,
+    getState,
+    getRemainingTime,
+    formatTime,
+    isTimerActive,
+    connect,
+    disconnect,
+    addWatchedChamado,
+    removeWatchedChamado,
+    setWatchedChamados,
+    getWatchedChamados
+  };
 };
