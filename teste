@@ -1,167 +1,213 @@
 import json
 import boto3
 import os
-import traceback
-from datetime import datetime
+import uuid
+from datetime import datetime, timezone
 from decimal import Decimal
 
-# Nome da tabela
-TABLE_NAME = os.environ.get("DYNAMODB_TABLE", "painelmonitoracao_obs")
+# ---------- Config ----------
+dynamodb = boto3.resource("dynamodb")
+table = dynamodb.Table(os.environ["CHAMADOS_TABLE"])  # Tabela principal (chamados)
+conn_table = dynamodb.Table(os.environ["CONNECTIONS_TABLE"])  # Tabela de conexões
+apigw = boto3.client(
+    "apigatewaymanagementapi",
+    endpoint_url=f"https://{os.environ['WS_API_ID']}.execute-api.{os.environ['AWS_REGION']}.amazonaws.com/{os.environ['WS_STAGE']}"
+)
 
-dynamodb = boto3.resource("dynamodb", region_name="us-east-1")
-table = dynamodb.Table(TABLE_NAME)
+# ---------- Helpers ----------
+class DecimalEncoder(json.JSONEncoder):
+    def default(self, o):
+        if isinstance(o, Decimal):
+            if o % 1 == 0:
+                return int(o)
+            return float(o)
+        return super(DecimalEncoder, self).default(o)
 
-# Cabeçalhos de CORS
-CORS_HEADERS = {
-    "Access-Control-Allow-Origin": "*",
-    "Access-Control-Allow-Methods": "OPTIONS,GET,POST",
-    "Access-Control-Allow-Headers": "Content-Type",
-    "Access-Control-Allow-Credentials": "true"
-}
+def log(trace, msg, **kwargs):
+    print(json.dumps({"trace": trace, "msg": msg, **kwargs}, cls=DecimalEncoder, default=str))
 
-# --- Função auxiliar para converter Decimal em int/float ---
-def convert_decimal(obj):
-    if isinstance(obj, list):
-        return [convert_decimal(i) for i in obj]
-    elif isinstance(obj, dict):
-        return {k: convert_decimal(v) for k, v in obj.items()}
-    elif isinstance(obj, Decimal):
-        return int(obj) if obj % 1 == 0 else float(obj)
-    return obj
-
-
-def lambda_handler(event, context):
+def send_to_connection(conn_id, data):
+    """Envia mensagem para uma conexão específica"""
     try:
-        print("Evento recebido:", json.dumps(event))
-        print("Usando tabela:", TABLE_NAME)
+        apigw.post_to_connection(
+            ConnectionId=conn_id,
+            Data=json.dumps(data, cls=DecimalEncoder).encode("utf-8")
+        )
+    except apigw.exceptions.GoneException:
+        # Conexão morta -> remover
+        conn_table.delete_item(Key={"connectionId": conn_id})
+        log("broadcast", "Conexão removida (GoneException)", connectionId=conn_id)
 
-        method = event.get("httpMethod", "")
+def broadcast(data):
+    """Envia mensagem para todos conectados"""
+    conns = conn_table.scan().get("Items", [])
+    for c in conns:
+        send_to_connection(c["connectionId"], data)
 
-        # --- Pré-flight do CORS ---
-        if method == "OPTIONS":
-            return {
-                "statusCode": 200,
-                "headers": CORS_HEADERS,
-                "body": json.dumps({"message": "OK"})
-            }
+def update_chamado(trace, chamado, update):
+    log(trace, "Atualizando chamado", chamado=chamado, update=update)
+    table.update_item(
+        Key={"chamado": chamado},
+        UpdateExpression="SET " + ", ".join(f"#{k} = :{k}" for k in update.keys()),
+        ExpressionAttributeNames={f"#{k}": k for k in update.keys()},
+        ExpressionAttributeValues={f":{k}": v for k, v in update.items()},
+    )
 
-        # --- GET: buscar registros ---
-        if method == "GET":
-            params = event.get("queryStringParameters") or {}
-            chamado = params.get("chamado") if params else None
+    # 🔑 Buscar o estado completo do DynamoDB
+    resp = table.get_item(Key={"chamado": chamado})
+    state = resp.get("Item", {})
+    log(trace, "Chamado atualizado (state completo)", state=state)
+    return state
 
-            if chamado is not None:
-                try:
-                    chamado_num = Decimal(str(chamado))
-                except Exception:
-                    return {
-                        "statusCode": 400,
-                        "headers": CORS_HEADERS,
-                        "body": json.dumps({"error": "Parâmetro 'chamado' inválido"})
-                    }
+# ---------- Handlers ----------
+def handle_connect(event, trace):
+    conn_id = event["requestContext"]["connectionId"]
+    conn_table.put_item(Item={"connectionId": conn_id, "connectedAt": datetime.now(timezone.utc).isoformat()})
+    log(trace, "Novo cliente conectado", connectionId=conn_id)
+    return {"statusCode": 200}
 
-                response = table.get_item(Key={"chamado": chamado_num})
-                item = response.get("Item")
-                item = convert_decimal(item) if item else {}
-                return {
-                    "statusCode": 200,
-                    "headers": CORS_HEADERS,
-                    "body": json.dumps(item)
-                }
-            else:
-                # Paginação segura para evitar retorno parcial
-                items = []
-                response = table.scan()
-                items.extend(response.get("Items", []))
-                while "LastEvaluatedKey" in response:
-                    response = table.scan(ExclusiveStartKey=response["LastEvaluatedKey"])
-                    items.extend(response.get("Items", []))
+def handle_disconnect(event, trace):
+    conn_id = event["requestContext"]["connectionId"]
+    conn_table.delete_item(Key={"connectionId": conn_id})
+    log(trace, "Cliente desconectado", connectionId=conn_id)
+    return {"statusCode": 200}
 
-                items = convert_decimal(items)
-                return {
-                    "statusCode": 200,
-                    "headers": CORS_HEADERS,
-                    "body": json.dumps(items)
-                }
+def handle_start_timer(event, trace, body):
+    chamado = int(body["chamado"])
+    level = int(body["level"])
+    duration = int(body.get("duration", 1200))  
+    now = datetime.now(timezone.utc).isoformat()
 
-        # --- POST: inserir novo registro ---
-        elif method == "POST":
-            body = event.get("body")
-            if not body:
-                return {
-                    "statusCode": 400,
-                    "headers": CORS_HEADERS,
-                    "body": json.dumps({"error": "Body da requisição vazio"})
-                }
+    update = {
+        f"level{level}_timerStart": now,
+        f"level{level}_duration": duration,
+        f"level{level}_status": "running"
+    }
+    state = update_chamado(trace, chamado, update)
+    broadcast({"event": "startTimer", "chamado": chamado, "level": level, "state": state})
+    return {"statusCode": 200, "body": json.dumps({"msg": "Timer iniciado"}, cls=DecimalEncoder)}
 
-            try:
-                body = json.loads(body)
-            except Exception:
-                return {
-                    "statusCode": 400,
-                    "headers": CORS_HEADERS,
-                    "body": json.dumps({"error": "Body não é um JSON válido"})
-                }
+def handle_update_observacao(event, trace, body):
+    """Atualiza a observação de um level de um chamado"""
+    chamado = int(body["chamado"])
+    level = int(body.get("level", 1))  
+    observacao = body["observacao"]
 
-            chamado = body.get("chamado")
-            observacao = body.get("observacao")
-            status = body.get("status")
-            operador = body.get("operador")
+    update = {f"level{level}_observacao": observacao}
+    state = update_chamado(trace, chamado, update)
 
-            if chamado is None or not observacao or not status or not operador:
-                return {
-                    "statusCode": 400,
-                    "headers": CORS_HEADERS,
-                    "body": json.dumps({
-                        "error": "Campos obrigatórios: chamado (number), observacao, status, operador"
-                    })
-                }
+    broadcast({"event": "updateObservacao", "chamado": chamado, "state": state})
+    return {"statusCode": 200, "body": json.dumps({"msg": f"Observação do level {level} atualizada"}, cls=DecimalEncoder)}
 
-            try:
-                chamado_num = Decimal(str(chamado))
-            except Exception:
-                return {
-                    "statusCode": 400,
-                    "headers": CORS_HEADERS,
-                    "body": json.dumps({"error": "Campo 'chamado' precisa ser número"})
-                }
+def handle_update_operador(event, trace, body):
+    chamado = int(body["chamado"])
+    operador = body["operador"]
+    update = {"operador": operador}
+    state = update_chamado(trace, chamado, update)
+    broadcast({"event": "updateOperador", "chamado": chamado, "state": state})
+    return {"statusCode": 200, "body": json.dumps({"msg": "Operador atualizado"}, cls=DecimalEncoder)}
 
-            item = {
-                "chamado": chamado_num,
-                "observacao": observacao,
-                "status": status,
-                "operador": operador,
-                "createdAt": datetime.utcnow().isoformat()
-            }
+def handle_update_status_final(event, trace, body):
+    chamado = int(body["chamado"])
+    status = body["status"]
+    level = body.get("level")  # opcional
+    now = datetime.now(timezone.utc).isoformat()
 
-            print("Salvando item:", item)
-            table.put_item(Item=item)
+    # Pega o estado atual do chamado
+    resp = table.get_item(Key={"chamado": chamado})
+    state_atual = resp.get("Item", {})
 
-            # Converte antes de devolver
-            item_return = convert_decimal(item)
+    update = {"statusFinal": status, "statusFinal_updatedAt": now}
 
-            return {
-                "statusCode": 200,
-                "headers": CORS_HEADERS,
-                "body": json.dumps({
-                    "message": "Registro inserido com sucesso",
-                    "item": item_return
-                })
-            }
+    if level:
+        update[f"level{level}_status"] = status
+        update[f"level{level}_updatedAt"] = now
+    else:
+        for i in range(1, 6):
+            if state_atual.get(f"level{i}_status") == "running":
+                update[f"level{i}_status"] = status
+                update[f"level{i}_updatedAt"] = now
+                break
 
-        # --- Outros métodos não suportados ---
+    state = update_chamado(trace, chamado, update)
+    broadcast({"event": "updateStatusFinal", "chamado": chamado, "state": state})
+    return {"statusCode": 200, "body": json.dumps({"msg": "Status final atualizado"}, cls=DecimalEncoder)}
+
+    
+def handle_update_acionamento(event, trace, body):
+    chamado = int(body["chamado"])
+    level = int(body.get("level", 1))
+    now = datetime.now(timezone.utc).isoformat()
+
+    observacao = body.get("observacao")
+    pessoa_acionada = body.get("pessoaAcionada")
+    status_acionamento = body.get("statusAcionamento")
+    operador = body.get("operador")
+
+    update = {f"level{level}_updatedAt": now}  # sempre marca o horário da alteração
+
+    if observacao is not None:
+        update[f"level{level}_observacao"] = observacao
+    if pessoa_acionada is not None:
+        update[f"level{level}_pessoaAcionada"] = pessoa_acionada
+    if status_acionamento is not None:
+        update[f"level{level}_statusAcionamento"] = status_acionamento
+    if operador is not None:
+        update[f"level{level}_operador"] = operador
+
+    state = update_chamado(trace, chamado, update)
+
+    broadcast({
+        "event": "updateAcionamento",
+        "chamado": chamado,
+        "level": level,
+        "state": state
+    })
+    return {"statusCode": 200, "body": json.dumps({"msg": f"Dados do acionamento do level {level} atualizados"}, cls=DecimalEncoder)}
+
+def handle_get_state(event, trace, body):
+    chamado = int(body["chamado"])
+    resp = table.get_item(Key={"chamado": chamado})
+    state = resp.get("Item", {})
+    log(trace, "Estado retornado", chamado=chamado, state=state)
+
+    # Enviar resposta padronizada só para o cliente que pediu
+    conn_id = event["requestContext"]["connectionId"]
+    payload = {"event": "getState", "chamado": chamado, "state": state}
+    send_to_connection(conn_id, payload)
+    return {"statusCode": 200, "body": json.dumps({"msg": "Estado enviado"}, cls=DecimalEncoder)}
+
+# ---------- Main ----------
+def lambda_handler(event, context):
+    trace = str(uuid.uuid4())[:8]
+    req_ctx = event.get("requestContext", {})
+    route = req_ctx.get("routeKey", "UNKNOWN")
+    conn_id = req_ctx.get("connectionId", "N/A")
+
+    log(trace, "invoke", routeKey=route, connectionId=conn_id, body=event.get("body"))
+
+    try:
+        if route == "$connect":
+            return handle_connect(event, trace)
+        elif route == "$disconnect":
+            return handle_disconnect(event, trace)
         else:
-            return {
-                "statusCode": 405,
-                "headers": CORS_HEADERS,
-                "body": json.dumps({"error": f"Método {method} não suportado"})
-            }
-
+            body = json.loads(event.get("body") or "{}")
+            if route == "startTimer":
+                return handle_start_timer(event, trace, body)
+            elif route == "updateObservacao":
+                return handle_update_observacao(event, trace, body)
+            elif route == "updateOperador":
+                return handle_update_operador(event, trace, body)
+            elif route == "updateStatusFinal":
+                return handle_update_status_final(event, trace, body)
+            elif route == "updateAcionamento":
+                return handle_update_acionamento(event, trace, body)
+            elif route == "getState":
+                return handle_get_state(event, trace, body)
+            else:
+                log(trace, "Rota inválida", route=route)
+                return {"statusCode": 400, "body": json.dumps({"error": "Invalid route"}, cls=DecimalEncoder)}
     except Exception as e:
-        print("Erro na lambda:", str(e))
-        print(traceback.format_exc())
-        return {
-            "statusCode": 500,
-            "headers": CORS_HEADERS,
-            "body": json.dumps({"error": str(e)})
-        }
+        log(trace, "Erro na execução", error=str(e))
+        return {"statusCode": 500, "body": json.dumps({"error": str(e)}, cls=DecimalEncoder)}
