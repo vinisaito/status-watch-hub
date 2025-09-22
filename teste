@@ -1,15 +1,7 @@
-(e5fb4ea1-633d-4d25-b558-cfa833d8ace9) API Key  authorized because method 'ANY /obs' does not require API Key. Request will not contribute to throttle or quota limits
-
-
-
-
-
-
-
-
 import json
 import boto3
 import os
+import traceback
 from datetime import datetime
 from decimal import Decimal
 
@@ -23,7 +15,8 @@ table = dynamodb.Table(TABLE_NAME)
 CORS_HEADERS = {
     "Access-Control-Allow-Origin": "*",
     "Access-Control-Allow-Methods": "OPTIONS,GET,POST",
-    "Access-Control-Allow-Headers": "Content-Type"
+    "Access-Control-Allow-Headers": "Content-Type",
+    "Access-Control-Allow-Credentials": "true"
 }
 
 # --- Função auxiliar para converter Decimal em int/float ---
@@ -33,9 +26,9 @@ def convert_decimal(obj):
     elif isinstance(obj, dict):
         return {k: convert_decimal(v) for k, v in obj.items()}
     elif isinstance(obj, Decimal):
-        # Se não tiver casas decimais, converte pra int, senão float
         return int(obj) if obj % 1 == 0 else float(obj)
     return obj
+
 
 def lambda_handler(event, context):
     try:
@@ -57,8 +50,17 @@ def lambda_handler(event, context):
             params = event.get("queryStringParameters") or {}
             chamado = params.get("chamado") if params else None
 
-            if chamado:
-                response = table.get_item(Key={"chamado": Decimal(str(chamado))})
+            if chamado is not None:
+                try:
+                    chamado_num = Decimal(str(chamado))
+                except Exception:
+                    return {
+                        "statusCode": 400,
+                        "headers": CORS_HEADERS,
+                        "body": json.dumps({"error": "Parâmetro 'chamado' inválido"})
+                    }
+
+                response = table.get_item(Key={"chamado": chamado_num})
                 item = response.get("Item")
                 item = convert_decimal(item) if item else {}
                 return {
@@ -67,8 +69,14 @@ def lambda_handler(event, context):
                     "body": json.dumps(item)
                 }
             else:
+                # Paginação segura para evitar retorno parcial
+                items = []
                 response = table.scan()
-                items = response.get("Items", [])
+                items.extend(response.get("Items", []))
+                while "LastEvaluatedKey" in response:
+                    response = table.scan(ExclusiveStartKey=response["LastEvaluatedKey"])
+                    items.extend(response.get("Items", []))
+
                 items = convert_decimal(items)
                 return {
                     "statusCode": 200,
@@ -86,7 +94,14 @@ def lambda_handler(event, context):
                     "body": json.dumps({"error": "Body da requisição vazio"})
                 }
 
-            body = json.loads(body)
+            try:
+                body = json.loads(body)
+            except Exception:
+                return {
+                    "statusCode": 400,
+                    "headers": CORS_HEADERS,
+                    "body": json.dumps({"error": "Body não é um JSON válido"})
+                }
 
             chamado = body.get("chamado")
             observacao = body.get("observacao")
@@ -102,8 +117,17 @@ def lambda_handler(event, context):
                     })
                 }
 
+            try:
+                chamado_num = Decimal(str(chamado))
+            except Exception:
+                return {
+                    "statusCode": 400,
+                    "headers": CORS_HEADERS,
+                    "body": json.dumps({"error": "Campo 'chamado' precisa ser número"})
+                }
+
             item = {
-                "chamado": Decimal(str(chamado)),
+                "chamado": chamado_num,
                 "observacao": observacao,
                 "status": status,
                 "operador": operador,
@@ -135,6 +159,7 @@ def lambda_handler(event, context):
 
     except Exception as e:
         print("Erro na lambda:", str(e))
+        print(traceback.format_exc())
         return {
             "statusCode": 500,
             "headers": CORS_HEADERS,
