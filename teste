@@ -328,7 +328,7 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
       }
 
       // Finalizar o chamado
-      updateStatusFinal(chamadoNum, 'finalizado');
+      updateStatusFinal(chamadoNum, 'finished');
 
       // Aguardar um momento para garantir que o status foi atualizado
       await new Promise(resolve => setTimeout(resolve, 500));
@@ -616,7 +616,7 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
                     const activeLevel = getCurrentActiveLevel(chamadoNum);
                     const timerState = timers.get(chamadoNum);
                     const remainingTime = activeLevel ? getRemainingTime(chamadoNum, activeLevel) : 0;
-                    const isFinalized = timerState?.statusFinal === 'finalizado';
+                    const isFinalized = timerState?.statusFinal === 'finished';
 
                     return (
                       <TableRow key={alert.id} className="border-border hover:bg-accent transition-colors">
@@ -939,6 +939,15 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
     </TooltipProvider>
   );
 };
+
+
+
+
+
+
+
+
+
 
 
 
@@ -1710,5 +1719,3 @@ export const ModernTimerModal: React.FC<ModernTimerModalProps> = ({
     </Dialog>
   );
 };
-
-
