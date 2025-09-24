@@ -10,131 +10,141 @@ from botocore.exceptions import ClientError, BotoCoreError
 dynamodb = boto3.resource("dynamodb")
 connections_table = dynamodb.Table(os.environ["CONNECTIONS_TABLE"])
 
-def lambda_handler(event, context):
-    start_total = time.time()
-    print("[INÍCIO] Execução da Lambda")
+def fetch_alerts():
+    """Consulta SQL Server e retorna lista de alertas"""
+    server = os.environ['DB_SERVER']
+    username = os.environ['DB_USER']
+    password = os.environ['DB_PASSWORD']
+    port = os.environ.get('DB_PORT', '1433')
+    database = 'mdb'
+
+    connection_string = (
+        f'DRIVER={{ODBC Driver 18 for SQL Server}};'
+        f'SERVER={server},{port};'
+        f'DATABASE={database};'
+        f'UID={username};'
+        f'PWD={password};'
+        f'Encrypt=no;TrustServerCertificate=yes;'
+        f'CHARSET=UTF8;'
+    )
+
+    conn = pyodbc.connect(connection_string, timeout=5)
+    cursor = conn.cursor()
+
+    query = """
+        SELECT [chamado]
+              ,[tipo_chamado]
+              ,[status_chamado]
+              ,[abertura_chamado]
+              ,[resumo_chamado]
+              ,[grupo_chamado]
+              ,[severidade_chamado]
+              ,[acionado]
+        FROM [mdb].[dbo].[view_ciops_acionamento]
+        WHERE TRY_CONVERT(DATETIME, abertura_chamado, 103) >= DATEADD(HOUR, -10, GETDATE());
+    """
+    cursor.execute(query)
+    rows = cursor.fetchall()
+    columns = [column[0] for column in cursor.description]
 
     results = []
+    for row in rows:
+        row_dict = dict(zip(columns, row))
+        if isinstance(row_dict.get("abertura_chamado"), datetime):
+            row_dict["abertura_chamado"] = row_dict["abertura_chamado"].strftime("%Y-%m-%dT%H:%M:%S")
+        results.append(row_dict)
+
+    cursor.close()
+    conn.close()
+    return results
+
+
+def send_to_all(apigw, data):
+    """Envia mensagem para todas as conexões registradas"""
+    connection_items = connections_table.scan().get("Items", [])
+    print(f"[WS] Enviando mensagem para {len(connection_items)} conexões")
+
     errors = []
-
-    try:
-        # ---------- Variáveis de ambiente ----------
-        server = os.environ['DB_SERVER']
-        username = os.environ['DB_USER']
-        password = os.environ['DB_PASSWORD']
-        port = os.environ.get('DB_PORT', '1433')
-        database = 'mdb'
-        api_endpoint = os.environ['WEBSOCKET_API_ENDPOINT'] 
-
-        # ---------- Conexão com o banco ----------
+    for item in connection_items:
+        connection_id = item.get("connectionId")
+        if not connection_id:
+            continue
         try:
-            connection_string = (
-                f'DRIVER={{ODBC Driver 18 for SQL Server}};'
-                f'SERVER={server},{port};'
-                f'DATABASE={database};'
-                f'UID={username};'
-                f'PWD={password};'
-                f'Encrypt=no;TrustServerCertificate=yes;'
-                f'CHARSET=UTF8;'
+            apigw.post_to_connection(
+                ConnectionId=connection_id,
+                Data=json.dumps(data, ensure_ascii=False).encode("utf-8")
             )
-            start_conn = time.time()
-            conn = pyodbc.connect(connection_string, timeout=5)
-            cursor = conn.cursor()
-            print(f"[DB] Conectado em {time.time() - start_conn:.2f}s")
-        except Exception as db_err:
-            raise RuntimeError(f"Erro ao conectar ao banco: {db_err}")
-
-        # ---------- Query ----------
-        query = """
-            SELECT [chamado]
-                  ,[tipo_chamado]
-                  ,[status_chamado]
-                  ,[abertura_chamado]
-                  ,[resumo_chamado]
-                  ,[grupo_chamado]
-                  ,[severidade_chamado]
-                  ,[acionado]
-            FROM [mdb].[dbo].[view_ciops_acionamento]
-            WHERE TRY_CONVERT(DATETIME, abertura_chamado, 103) >= DATEADD(HOUR, -10, GETDATE());
-        """
-        try:
-            start_query = time.time()
-            cursor.execute(query)
-            rows = cursor.fetchall()
-            print(f"[DB] Query executada em {time.time() - start_query:.2f}s")
-        except Exception as q_err:
-            raise RuntimeError(f"Erro ao executar query: {q_err}")
-
-        # ---------- Processamento ----------
-        try:
-            start_proc = time.time()
-            columns = [column[0] for column in cursor.description]
-            for row in rows:
-                row_dict = dict(zip(columns, row))
-                if isinstance(row_dict.get("abertura_chamado"), datetime):
-                    row_dict["abertura_chamado"] = row_dict["abertura_chamado"].strftime("%Y-%m-%dT%H:%M:%S")
-                results.append(row_dict)
-            print(f"[PROC] Processado em {time.time() - start_proc:.2f}s, total {len(results)} registros")
-        except Exception as proc_err:
-            raise RuntimeError(f"Erro ao processar resultados: {proc_err}")
-        finally:
-            try:
-                cursor.close()
-                conn.close()
-            except Exception as close_err:
-                print(f"[WARN] Falha ao fechar conexão DB: {close_err}")
-
-        # ---------- Envio WebSocket ----------
-        try:
-            apigw = boto3.client("apigatewaymanagementapi", endpoint_url=api_endpoint)
-            connection_items = connections_table.scan().get("Items", [])
-            print(f"[WS] Enviando mensagem para {len(connection_items)} conexões")
-
-            for item in connection_items:
-                connection_id = item.get("connectionId")
-                if not connection_id:
-                    continue
-                try:
-                    apigw.post_to_connection(
-                        ConnectionId=connection_id,
-                        Data=json.dumps(results, ensure_ascii=False).encode("utf-8")
-                    )
-                    print(f"[WS] Enviado para {connection_id}")
-                except ClientError as e:
-                    if e.response['Error']['Code'] == 'GoneException':
-                        print(f"[WS] Conexão expirada {connection_id}, removendo...")
-                        connections_table.delete_item(Key={"connectionId": connection_id})
-                    else:
-                        err_msg = f"Erro ao enviar para {connection_id}: {e}"
-                        print(f"[ERRO] {err_msg}")
-                        errors.append(err_msg)
-                except (BotoCoreError, Exception) as ws_err:
-                    err_msg = f"Erro inesperado ao enviar para {connection_id}: {ws_err}"
-                    print(f"[ERRO] {err_msg}")
-                    errors.append(err_msg)
-
-        except Exception as ws_outer_err:
-            err_msg = f"Falha geral no envio WebSocket: {ws_outer_err}"
+            print(f"[WS] Enviado para {connection_id}")
+        except ClientError as e:
+            if e.response['Error']['Code'] == 'GoneException':
+                print(f"[WS] Conexão expirada {connection_id}, removendo...")
+                connections_table.delete_item(Key={"connectionId": connection_id})
+            else:
+                err_msg = f"Erro ao enviar para {connection_id}: {e}"
+                print(f"[ERRO] {err_msg}")
+                errors.append(err_msg)
+        except (BotoCoreError, Exception) as ws_err:
+            err_msg = f"Erro inesperado ao enviar para {connection_id}: {ws_err}"
             print(f"[ERRO] {err_msg}")
             errors.append(err_msg)
+    return errors
 
-        tempo_total = time.time() - start_total
-        print(f"[TOTAL] Lambda finalizada em {tempo_total:.2f}s")
 
-        return {
-            "statusCode": 200 if not errors else 207,
-            "body": json.dumps({
-                "message": "Execução concluída",
-                "totalRegistros": len(results),
-                "falhasEnvio": len(errors),
-                "erros": errors,
-                "dados": results
-            }, ensure_ascii=False)
-        }
+def lambda_handler(event, context):
+    start_total = time.time()
+    route = event.get("requestContext", {}).get("routeKey", None)
+    connection_id = event.get("requestContext", {}).get("connectionId", None)
+    api_endpoint = os.environ['WEBSOCKET_API_ENDPOINT']
+
+    print(f"[INÍCIO] Lambda | rota={route} | connId={connection_id}")
+
+    try:
+        apigw = boto3.client("apigatewaymanagementapi", endpoint_url=api_endpoint)
+
+        # 🔹 Caso 1: chamada via WebSocket
+        if route:
+            if route == "getAlerts":
+                results = fetch_alerts()
+                apigw.post_to_connection(
+                    ConnectionId=connection_id,
+                    Data=json.dumps({"action": "getAlerts", "dados": results}, ensure_ascii=False).encode("utf-8")
+                )
+                print(f"[WS] Retornado {len(results)} registros para {connection_id}")
+                return {"statusCode": 200, "body": "OK"}
+
+            elif route == "$connect":
+                connections_table.put_item(Item={"connectionId": connection_id})
+                print(f"[CONNECT] Nova conexão registrada: {connection_id}")
+                return {"statusCode": 200, "body": "Conectado"}
+
+            elif route == "$disconnect":
+                connections_table.delete_item(Key={"connectionId": connection_id})
+                print(f"[DISCONNECT] Conexão removida: {connection_id}")
+                return {"statusCode": 200, "body": "Desconectado"}
+
+            else:
+                print(f"[WARN] Rota não tratada: {route}")
+                return {"statusCode": 200, "body": "Rota ignorada"}
+
+        # 🔹 Caso 2: chamada "manual" (ex: agendamento/evento -> broadcast)
+        else:
+            results = fetch_alerts()
+            errors = send_to_all(apigw, {"action": "broadcastAlerts", "dados": results})
+
+            tempo_total = time.time() - start_total
+            print(f"[TOTAL] Lambda finalizada em {tempo_total:.2f}s")
+
+            return {
+                "statusCode": 200 if not errors else 207,
+                "body": json.dumps({
+                    "message": "Execução concluída",
+                    "totalRegistros": len(results),
+                    "falhasEnvio": len(errors),
+                    "erros": errors,
+                    "dados": results
+                }, ensure_ascii=False)
+            }
 
     except Exception as e:
         print("[FATAL]", str(e))
-        return {
-            "statusCode": 500,
-            "body": json.dumps({"error": str(e)}, ensure_ascii=False)
-        }
+        return {"statusCode": 500, "body": json.dumps({"error": str(e)}, ensure_ascii=False)}
