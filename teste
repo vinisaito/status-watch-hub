@@ -1,5 +1,298 @@
-export { ActionTable } from './ActionTable';
-export { ActionTableHeader } from './ActionTableHeader';
-export { ActionTableBody } from './ActionTableBody';
-export { ActionTablePagination } from './ActionTablePagination';
-export type { AlertData } from '../../hooks/useActionTableLogic';
+import { useState, useEffect } from 'react';
+import {
+  Settings,
+  Sun,
+  Moon,
+  AlertTriangle,
+  FileText,
+  MessageSquare,
+  BookOpen
+} from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { SidebarProvider } from '@/components/ui/sidebar';
+import { toast } from '@/hooks/use-toast';
+import { MonitoringCards } from './MonitoringCards';
+import { ActionTable } from './ActionTable';
+import { CriticalIncidents } from './CriticalIncidents';
+import { RDMTracker } from './RDMTracker';
+import { ShiftNotes } from './ShiftNotes';
+import { WebhookConfig } from './WebhookConfig';
+import { InstructionsSection } from './InstructionsSection';
+import { Sheet, SheetContent } from "@/components/ui/sheet";
+import  MaintenancePage  from './MaintenancePage';
+import { useChatAcionados } from '@/hooks/use-chat-acionados';
+
+export interface AlertData {
+  id: string;
+  chamado: string;
+  tipo_chamado: string;
+  grupo_chamado: string;
+  status_chamado: string;
+  abertura_chamado: string;
+  resumo_chamado: string;
+  severidade_chamado: string;
+  acionado: string;
+  chat: boolean;
+}
+
+const Dashboard = () => {
+  const [isDarkMode, setIsDarkMode] = useState(true);
+  const [showWebhookConfig, setShowWebhookConfig] = useState(false);
+  const [alertData, setAlertData] = useState<AlertData[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [activeSection, setActiveSection] = useState<'incidents' | 'rdm' | 'notes' | 'instructions' | null>(null);
+  const [filter, setFilter] = useState<string | null>(null);
+  
+  const { isAcionado } = useChatAcionados();
+
+  const fetchAlertData = async () => {
+    setLoading(true);
+    try {
+      const response = await fetch('https://f6ffk8e9fe.execute-api.us-east-1.amazonaws.com/prod/dados');
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status_chamado: ${response.status}`);
+      }
+
+      const data = await response.json();
+      console.log("data from API:", data);
+
+      // Se a API já retorna array
+      const apiData = Array.isArray(data)
+        ? data
+        : data.body
+          ? JSON.parse(data.body)
+          : [];
+
+      if (!apiData || apiData.length === 0) {
+        throw new Error("Nenhum dado encontrado");
+      }
+
+      const transformedData: AlertData[] = apiData.map((item: any, index: number) => ({
+        id: `alert-${index}`,
+        tipo_chamado: item.tipo_chamado || 'N/A',
+        chamado: item.chamado || 'N/A',
+        grupo_chamado: item.grupo_chamado || 'N/A',
+        status_chamado: item.status_chamado || 'N/A',
+        abertura_chamado: item.dat_abertura_chamado || item.abertura_chamado || item.data_abertura || '',
+        resumo_chamado: item.resumo_chamado || 'Título não disponível',
+        severidade_chamado: item.severidade_chamado || 'N/A',
+        acionado: item.acionado || 'N/A',
+        chat: false,
+      }));
+
+      setAlertData(transformedData);
+
+      const unacknowledged = transformedData.filter(alert => !alert.acionado);
+      if (unacknowledged.length > 0) {
+        playAlertSound();
+      }
+    } catch (error) {
+      console.error('Error fetching data:', error);
+      toast({
+        title: "Erro ao buscar dados",
+        description: "Não foi possível conectar com a API",
+        variant: "destructive",
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const playAlertSound = () => {
+    const audio = new Audio('data:audio/wav;base64,UklGRnoGAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQoGAACBhYqFbF1fdJivrJBhNjVgodDbq2EcBj+a2/LDciUFLIHO8tiJNwgZaLvt559NEAxQp+PwtmMcBjiR1/LMeSwFJHfH8N2QQAoUXrTp66hVFApGn+Dqu2sgBDR+w/PCaWEbEBOa5rWgdyoEKAA=');
+    audio.play().catch(() => {
+      console.log('Alert sound could not be played');
+    });
+  };
+
+  const toggleTheme = () => {
+    setIsDarkMode(!isDarkMode);
+    if (isDarkMode) {
+      document.documentElement.classList.remove('dark');
+      document.documentElement.classList.add('light');
+    } else {
+      document.documentElement.classList.remove('light');
+      document.documentElement.classList.add('dark');
+    }
+  };
+
+  const updateAlertAcknowledgment = (alertId: string, acknowledged: boolean) => {
+    setAlertData(prev =>
+      prev.map(alert =>
+        alert.id === alertId
+          ? { ...alert, chat: acknowledged }
+          : alert
+      )
+    );
+  };
+
+  useEffect(() => {
+    fetchAlertData();
+    const interval = setInterval(fetchAlertData, 600000);
+    return () => clearInterval(interval);
+  }, []);
+
+  useEffect(() => {
+    document.documentElement.classList.add('dark');
+  }, []);
+
+  const sidebarItems = [
+    { title: "Incidentes Críticos", icon: AlertTriangle, key: 'incidents' as const },
+    { title: "Acompanhamento RDMs", icon: FileText, key: 'rdm' as const },
+    { title: "Recados do Turno", icon: MessageSquare, key: 'notes' as const },
+    { title: "Instruções Operacionais", icon: BookOpen, key: 'instructions' as const },
+  ];
+
+  const filteredData = filter
+    ? alertData.filter(alert => {
+      if (filter === 'SEV4_INCIDENT') {
+        return alert.tipo_chamado.toLowerCase().includes('incidente')
+          && alert.severidade_chamado.includes('4')
+          && !isAcionado(alert.chamado);
+      }
+      if (filter === 'SEV4_INCIDENT_TOTAL') {
+        return alert.tipo_chamado.toLowerCase().includes('incidente')
+          && alert.severidade_chamado.includes('4');
+      }
+      if (filter === 'SEV4_ALERT') {
+        return alert.tipo_chamado.toLowerCase().includes('alerta')
+          && alert.severidade_chamado.includes('4')
+          && alert.acionado !== 'OK'
+          && !isAcionado(alert.chamado);
+      }
+      if (filter === 'SEV4_ALERT_TOTAL') {
+        return alert.tipo_chamado.toLowerCase().includes('alerta')
+          && alert.severidade_chamado.includes('4');
+      }
+      if (filter === 'SEV3_INCIDENT') {
+        return alert.tipo_chamado.toLowerCase().includes('incidente')
+          && alert.severidade_chamado.includes('3')
+          && !isAcionado(alert.chamado);
+      }
+      if (filter === 'SEV3_INCIDENT_TOTAL') {
+        return alert.tipo_chamado.toLowerCase().includes('incidente')
+          && alert.severidade_chamado.includes('3');
+      }
+      return true;
+    })
+    : alertData;
+
+  return (
+    <div className="min-h-screen flex bg-background text-foreground">
+      {/* Conteúdo principal */}
+      <div className="flex-1 flex flex-col">
+        {/* Header */}
+        <div className="bg-dashboard-bg border-b border-border p-6 text-center">
+          <h1
+            className="text-3xl font-bold mb-2"
+            style={{
+              color: isDarkMode ? '#d2d3d8ff' : '#4a90e2',
+            }}
+          >
+            PAINEL CIOPS - MONITORAÇÃO
+          </h1>
+        </div>
+
+        {/* Main */}
+        <div className="flex-1 bg-dashboard-bg">
+          <div className="container mx-auto p-6 max-w-7xl">
+            <div className="space-y-8">
+              {/* Cards */}
+              <div className="text-center">
+                <MonitoringCards
+                  alertData={alertData}
+                  onFilterSelect={(filterKey) => setFilter(prev => prev === filterKey ? null : filterKey)}
+                />
+              </div>
+
+              {/* Table */}
+              <ActionTable
+                alertData={filteredData}
+                onUpdateAcknowledgment={updateAlertAcknowledgment}
+                loading={loading}
+              />
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Sidebar Enhanced */}
+      <div className="w-20 bg-gradient-to-b from-sidebar-background to-sidebar-background/95 border-l border-sidebar-border/50 backdrop-blur-sm flex flex-col justify-between sticky top-0 h-screen shadow-lg" style={{ background: 'var(--sidebar-gradient)', boxShadow: 'var(--sidebar-glow)' }}>
+        {/* Parte superior - Menu items */}
+        <div className="flex flex-col gap-3 p-3 flex-1">
+          {sidebarItems.map((item) => (
+            <Button
+              key={item.key}
+              variant="ghost"
+              size="icon"
+              onClick={() => setActiveSection(activeSection === item.key ? null : item.key)}
+              className={`w-14 h-14 rounded-xl transition-all duration-300 relative group ${activeSection === item.key
+                ? 'bg-gradient-to-br from-sidebar-primary to-sidebar-primary/90 text-sidebar-primary-foreground shadow-lg scale-105'
+                : 'text-sidebar-foreground hover:bg-sidebar-accent/80 hover:text-sidebar-accent-foreground hover:scale-105'
+                }`}
+              style={activeSection === item.key ? { boxShadow: 'var(--sidebar-active-glow)' } : { transition: 'all 0.3s ease' }}
+              title={item.title}
+            >
+              <item.icon className="h-6 w-6 transition-transform duration-300 group-hover:scale-110" />
+              {/* Active indicator */}
+              {activeSection === item.key && (
+                <div className="absolute -right-1 top-1/2 transform -translate-y-1/2 w-1 h-8 bg-sidebar-primary-foreground rounded-full opacity-80"></div>
+              )}
+            </Button>
+          ))}
+        </div>
+
+        {/* Parte inferior - Settings */}
+        <div className="flex flex-col gap-3 p-3 border-t border-sidebar-border/30">
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={() => setShowWebhookConfig(true)}
+            className="w-14 h-14 rounded-xl text-sidebar-foreground hover:bg-sidebar-accent/80 hover:text-sidebar-accent-foreground transition-all duration-300 hover:scale-105 group"
+            title="Configuração de Webhooks"
+            style={{ transition: 'all 0.3s ease' }}
+          >
+            <Settings className="h-5 w-5 transition-transform duration-300 group-hover:rotate-90" />
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={toggleTheme}
+            className="w-14 h-14 rounded-xl text-sidebar-foreground hover:bg-sidebar-accent/80 hover:text-sidebar-accent-foreground transition-all duration-300 hover:scale-105 group"
+            title="Trocar Tema"
+            style={{ transition: 'all 0.3s ease' }}
+          >
+            <div className="transition-transform duration-500 group-hover:rotate-180">
+              {isDarkMode ? <Sun className="h-5 w-5" /> : <Moon className="h-5 w-5" />}
+            </div>
+          </Button>
+        </div>
+      </div>
+
+      {/* Drawer */}
+      <Sheet open={!!activeSection} onOpenChange={() => setActiveSection(null)}>
+        <SheetContent
+          side="right"
+          className="w-full"
+          style={{ width: '50vw', maxWidth: '1000px' }}
+        >
+          <div className="mt-4">
+            {activeSection === 'incidents' && <CriticalIncidents />}
+            {activeSection === 'rdm' && <RDMTracker />}
+            {activeSection === 'notes' && <ShiftNotes />}
+            {activeSection === 'instructions' && <InstructionsSection />}
+          </div>
+        </SheetContent>
+      </Sheet>
+
+      {/* Webhook Config Modal */}
+      <WebhookConfig
+        open={showWebhookConfig}
+        onOpenChange={setShowWebhookConfig}
+      />
+    </div>
+  );
+};
+
+export default Dashboard;
