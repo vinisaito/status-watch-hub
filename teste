@@ -235,8 +235,16 @@ export const useWebsocketTimers = () => {
     return sendMessage({ action: 'updateOperador', chamado, operador });
   }, [sendMessage]);
 
-  const updateAcionamento = useCallback((chamado: number, level: number, operador: string, pessoaAcionada: string, statusAcionamento: string) => {
-    return sendMessage({ action: 'updateAcionamento', chamado, level, operador, pessoaAcionada, statusAcionamento});
+  const updateAcionamento = useCallback((chamado: number, level: number, data: any) => {
+    const { operador = '', pessoaAcionada = '', status = '' } = data || {};
+    return sendMessage({ 
+      action: 'updateAcionamento', 
+      chamado, 
+      level, 
+      operador, 
+      pessoaAcionada, 
+      statusAcionamento: status
+    });
   }, [sendMessage]);
 
   const updateStatusFinal = useCallback((
