@@ -1,1 +1,12 @@
-{"error": "An error occurred (AccessDeniedException) when calling the PostToConnection operation: User: arn:aws:sts::368696837445:assumed-role/painel-monitoracao-dados-role-1fbwpo13/painel-monitoracao-dados is not authorized to perform: execute-api:ManageConnections on resource: arn:aws:execute-api:us-east-1:********7445:wpo4vov2k8/prod/POST/@connections/{connectionId}"}
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": [
+        "execute-api:ManageConnections"
+      ],
+      "Resource": "arn:aws:execute-api:us-east-1:368696837445:wpo4vov2k8/prod/POST/@connections/*"
+    }
+  ]
+}
