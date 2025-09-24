@@ -59,12 +59,8 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
   const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
 
   // Estados dos modais
-  const [observacaoDialogOpen, setObservacaoDialogOpen] = useState(false);
   const [timerManagementOpen, setTimerManagementOpen] = useState(false);
-  const [selectedChamadoForEdit, setSelectedChamadoForEdit] = useState<string>('');
   const [selectedChamadoForTimer, setSelectedChamadoForTimer] = useState<string>('');
-  const [observacaoText, setObservacaoText] = useState('');
-  const [operadorText, setOperadorText] = useState('');
 
   // WebSocket
   const {
@@ -93,8 +89,18 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
     chamadosNum.forEach(chamado => getState(chamado));
   }, [alertData, setWatchedChamados, getState]);
 
-  // Estados locais para observações
-  const [localObservacoes, setLocalObservacoes] = useState<Map<string, { observacao: string; operador: string }>>(new Map());
+  // Função para obter a cor do timer baseada no tempo restante
+  const getTimerColor = useCallback((remainingTime: number) => {
+    if (remainingTime > 600) { // > 10 minutos
+      return 'text-timer-safe';
+    } else if (remainingTime > 300) { // 5-10 minutos
+      return 'text-timer-warning';
+    } else if (remainingTime > 120) { // 2-5 minutos
+      return 'text-timer-danger';
+    } else { // < 2 minutos
+      return 'text-timer-critical animate-pulse';
+    }
+  }, []);
 
   // Funções utilitárias
   const formatDate = useCallback((dateString: string) => {
@@ -343,47 +349,6 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
     }
   }, [updateObservacao, updateStatusFinal, getState, getCurrentActiveLevel]);
 
-  // Handlers para observação
-  const handleOpenObservacao = useCallback((chamado: string) => {
-    setSelectedChamadoForEdit(chamado);
-    const existing = localObservacoes.get(chamado);
-    setObservacaoText(existing?.observacao || '');
-    setOperadorText(existing?.operador || '');
-    setObservacaoDialogOpen(true);
-  }, [localObservacoes]);
-
-  const handleSaveObservacao = useCallback(() => {
-    if (!selectedChamadoForEdit) return;
-
-    const chamadoNum = parseInt(selectedChamadoForEdit);
-
-    if (observacaoText.trim()) {
-      updateObservacao(chamadoNum, 1, observacaoText.trim());
-    }
-
-    if (operadorText.trim()) {
-      updateOperador(chamadoNum, operadorText.trim());
-    }
-
-    setLocalObservacoes(prev => {
-      const newMap = new Map(prev);
-      newMap.set(selectedChamadoForEdit, {
-        observacao: observacaoText.trim(),
-        operador: operadorText.trim()
-      });
-      return newMap;
-    });
-
-    setObservacaoDialogOpen(false);
-    setObservacaoText('');
-    setOperadorText('');
-
-    toast({
-      title: "✅ Observação Salva",
-      description: `Observação do chamado ${selectedChamadoForEdit} foi salva`,
-    });
-  }, [selectedChamadoForEdit, observacaoText, operadorText, updateObservacao, updateOperador]);
-
   // Handlers para ordenação
   const handleSort = useCallback((field: SortField) => {
     if (sortField === field) {
@@ -480,11 +445,6 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
     <TooltipProvider>
       <Card className="bg-card border-border shadow-elegant">
         <CardHeader>
-          {/* Status da Conexão WebSocket */}
-          <div className="flex items-center justify-between mb-4">
-            
-          </div>
-
           {/* Campo de Pesquisa */}
           <div className="relative mb-4">
             <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
@@ -591,32 +551,31 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
                     <span className="text-xs font-medium">Temporizador</span>
                   </TableHead>
                   <TableHead className="text-muted-foreground w-[60px] text-center">Chat</TableHead>
-                  <TableHead className="text-muted-foreground w-[80px] text-center">Observação</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {loading ? (
                   <TableRow>
-                    <TableCell colSpan={10} className="text-center py-8">
+                    <TableCell colSpan={9} className="text-center py-8">
                       <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary mb-4"></div>
                       <p>Carregando dados...</p>
                     </TableCell>
                   </TableRow>
                 ) : sortedAndPaginatedData.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={10} className="text-center py-8 text-muted-foreground">
+                    <TableCell colSpan={9} className="text-center py-8 text-muted-foreground">
                       {searchTerm ? 'Nenhum resultado encontrado' : 'Nenhum dado disponível'}
                     </TableCell>
                   </TableRow>
                 ) : (
                   sortedAndPaginatedData.map((alert) => {
                     const isChat = alert.acionado === 'true' || alert.chat;
-                    const observacao = localObservacoes.get(alert.chamado);
                     const chamadoNum = parseInt(alert.chamado);
                     const activeLevel = getCurrentActiveLevel(chamadoNum);
                     const timerState = timers.get(chamadoNum);
                     const remainingTime = activeLevel ? getRemainingTime(chamadoNum, activeLevel) : 0;
                     const isFinalized = timerState?.statusFinal === 'finalizado';
+                    const timerColorClass = getTimerColor(remainingTime);
 
                     return (
                       <TableRow key={alert.id} className="border-border hover:bg-accent transition-colors">
@@ -682,7 +641,7 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
                                     {LEVEL_NAMES[activeLevel as keyof typeof LEVEL_NAMES]}
                                   </Badge>
                                 </div>
-                                <div className="text-lg font-mono font-black text-timer-active tracking-wide">
+                                <div className={`text-xl font-mono font-black tracking-wide transition-all duration-300 ${timerColorClass}`}>
                                   {formatTime(remainingTime)}
                                 </div>
                                 <Button
@@ -743,27 +702,6 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
                             </TooltipTrigger>
                             <TooltipContent>
                               <p>{isChat ? 'Já acionado' : 'Acionar grupo'}</p>
-                            </TooltipContent>
-                          </Tooltip>
-                        </TableCell>
-                        <TableCell>
-                          <Tooltip>
-                            <TooltipTrigger asChild>
-                              <Button
-                                variant={observacao ? "success" : "outline"}
-                                size="sm"
-                                onClick={() => handleOpenObservacao(alert.chamado)}
-                                className="h-8 w-8 p-0"
-                              >
-                                {observacao ? (
-                                  <CheckCircle className="h-4 w-4" />
-                                ) : (
-                                  <Edit3 className="h-4 w-4" />
-                                )}
-                              </Button>
-                            </TooltipTrigger>
-                            <TooltipContent>
-                              <p>{observacao ? 'Observação salva' : 'Adicionar observação'}</p>
                             </TooltipContent>
                           </Tooltip>
                         </TableCell>
@@ -873,67 +811,6 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
               historicoAcionamentos={getHistoricoAcionamentos(parseInt(selectedChamadoForTimer))}
             />
           )}
-
-          {/* Modal de Observação */}
-          <Dialog open={observacaoDialogOpen} onOpenChange={setObservacaoDialogOpen}>
-            <DialogContent className="sm:max-w-lg border-border bg-card shadow-modal">
-              <DialogHeader className="text-left">
-                <DialogTitle className="text-xl bg-gradient-to-r from-primary to-primary/70 bg-clip-text text-transparent">
-                  📝 Observação - Chamado {selectedChamadoForEdit}
-                </DialogTitle>
-                <DialogDescription className="text-muted-foreground">
-                  Registre observações importantes e defina o operador responsável pelo chamado
-                </DialogDescription>
-              </DialogHeader>
-              <div className="space-y-6 pt-2">
-                <div className="space-y-2">
-                  <Label htmlFor="operador" className="text-sm font-semibold text-foreground">
-                    👤 Operador Responsável
-                  </Label>
-                  <Input
-                    id="operador"
-                    value={operadorText}
-                    onChange={(e) => setOperadorText(e.target.value)}
-                    placeholder="Ex: João Silva"
-                    className="border-border focus:border-primary transition-colors"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="observacao" className="text-sm font-semibold text-foreground">
-                    📄 Observações
-                  </Label>
-                  <Textarea
-                    id="observacao"
-                    value={observacaoText}
-                    onChange={(e) => setObservacaoText(e.target.value)}
-                    placeholder="Descreva o status atual, ações tomadas, próximos passos..."
-                    rows={5}
-                    className="border-border focus:border-primary transition-colors resize-none"
-                  />
-                  <div className="text-xs text-muted-foreground">
-                    {observacaoText.length}/500 caracteres
-                  </div>
-                </div>
-                <div className="flex justify-end gap-3 pt-4 border-t border-border">
-                  <Button
-                    variant="outline"
-                    onClick={() => setObservacaoDialogOpen(false)}
-                    className="px-6"
-                  >
-                    Cancelar
-                  </Button>
-                  <Button
-                    variant="timer"
-                    onClick={handleSaveObservacao}
-                    className="px-6"
-                    disabled={!operadorText.trim() && !observacaoText.trim()}
-                  >
-                    💾 Salvar Observação
-                  </Button>
-                </div>
-              </div>
-            </DialogContent>
-          </Dialog>
         </CardContent>
       </Card>
     </TooltipProvider>
