@@ -92,13 +92,15 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
   // Função para obter a cor do timer baseada no tempo restante
   const getTimerColor = useCallback((remainingTime: number) => {
     if (remainingTime > 600) { // > 10 minutos
-      return 'text-timer-safe';
+      return 'text-timer-safe font-bold';
     } else if (remainingTime > 300) { // 5-10 minutos
-      return 'text-timer-warning';
+      return 'text-timer-warning font-bold animate-timer-glow';
     } else if (remainingTime > 120) { // 2-5 minutos
-      return 'text-timer-danger';
-    } else { // < 2 minutos
-      return 'text-timer-critical animate-pulse';
+      return 'text-timer-danger font-black animate-timer-pulse-danger';
+    } else if (remainingTime > 0) { // < 2 minutos
+      return 'text-timer-critical font-black animate-timer-pulse-critical';
+    } else { // Timer expirado
+      return 'text-timer-critical font-black animate-timer-pulse-critical opacity-75';
     }
   }, []);
 
@@ -641,7 +643,7 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
                                     {LEVEL_NAMES[activeLevel as keyof typeof LEVEL_NAMES]}
                                   </Badge>
                                 </div>
-                                <div className={`text-xl font-mono font-black tracking-wide transition-all duration-300 ${timerColorClass}`}>
+                                <div className={`text-xl font-mono tracking-wide transition-all duration-300 ${timerColorClass}`}>
                                   {formatTime(remainingTime)}
                                 </div>
                                 <Button
