@@ -1,116 +1,594 @@
-# ActionTable Refatorado
+import { useState, useMemo, useCallback, useEffect } from 'react';
+import { toast } from '@/hooks/use-toast';
 
-## Visão Geral
+/**
+ * ====================================================================================
+ * INTERFACES E TIPOS
+ * ====================================================================================
+ */
 
-O componente `ActionTable` foi dividido em partes menores e mais organizadas, seguindo os princípios de separação de responsabilidades e manutenibilidade.
+interface AlertData {
+  id: string;
+  chamado: string;
+  tipo_chamado: string;
+  grupo_chamado: string;
+  status_chamado: string;
+  abertura_chamado: string;
+  resumo_chamado: string;
+  severidade_chamado: string;
+  acionado: string;
+  chat: boolean;
+}
 
-## Estrutura da Refatoração
+type SortField = keyof AlertData;
+type SortDirection = 'asc' | 'desc' | null;
 
-### 1. Hook Customizado
-**`useActionTableLogic.tsx`**
-- Centraliza toda a lógica de negócio
-- Gerencia estados (paginação, filtros, ordenação)
-- Contém handlers de acionamento e timer
-- Processa dados (filtragem, ordenação, paginação)
-- Mock do WebSocket (substituir pela implementação real)
+interface UseActionTableLogicProps {
+  alertData: AlertData[];
+  onUpdateAcknowledgment: (alertId: string, acknowledged: boolean) => void;
+}
 
-### 2. Componentes Separados
+/**
+ * ====================================================================================
+ * CONSTANTES E CONFIGURAÇÕES
+ * ====================================================================================
+ */
 
-#### `ActionTableHeader.tsx`
-- Campo de pesquisa/filtro
-- Contador de resultados
-- Interface limpa e focada
+// Informações dos níveis de escalação do sistema de timer
+const LEVEL_NAMES = {
+  1: "Primeiro Acionamento",
+  2: "1ª Escalação",
+  3: "2ª Escalação",
+  4: "3ª Escalação",
+  5: "4ª Escalação"
+};
 
-#### `ActionTableBody.tsx` 
-- Cabeçalhos da tabela com ordenação
-- Linhas de dados
-- Estados de loading e vazio
-- Lógica de renderização de timers
+// Duração padrão dos timers (20 minutos em segundos)
+const TIMER_DURATION = 1200;
 
-#### `ActionTablePagination.tsx`
-- Controles de navegação
-- Seletor de itens por página
-- Contador de registros
-- Lógica condicional (só mostra se necessário)
+/**
+ * ====================================================================================
+ * HOOK CUSTOMIZADO PARA LÓGICA DO ACTION TABLE
+ * ====================================================================================
+ */
 
-#### `ActionTable.tsx` (Principal)
-- Orquestra todos os componentes
-- Interface limpa e clara
-- Responsabilidade única: coordenação
-
-## Benefícios da Refatoração
-
-### ✅ Manutenibilidade
-- Cada componente tem uma responsabilidade específica
-- Código mais fácil de entender e modificar
-- Testes unitários mais simples
-
-### ✅ Reutilização
-- Componentes podem ser reutilizados em outros contextos
-- Hook pode ser usado em outras tabelas similares
-
-### ✅ Performance
-- Possibilita otimizações específicas por componente
-- Menor re-renderização desnecessária
-
-### ✅ Design System
-- Cores dos timers integradas ao sistema de design
-- Tokens semânticos para consistência
-- Suporte a tema claro/escuro
-
-## Estrutura de Arquivos
-
-```
-src/components/ActionTable/
-├── ActionTable.tsx          # Componente principal
-├── ActionTableHeader.tsx    # Filtros e pesquisa
-├── ActionTableBody.tsx      # Corpo da tabela
-├── ActionTablePagination.tsx # Controles de paginação
-├── ModernTimerModal.tsx     # Modal (a ser criado)
-└── README.md               # Esta documentação
-
-src/hooks/
-└── useActionTableLogic.tsx  # Hook com toda a lógica
-```
-
-## Como Usar
-
-```tsx
-import { ActionTable } from '@/components/ActionTable/ActionTable';
-
-function MyComponent() {
-  const alertData = [/* seus dados */];
+export const useActionTableLogic = ({ alertData, onUpdateAcknowledgment }: UseActionTableLogicProps) => {
   
-  const handleAcknowledgment = (alertId: string, acknowledged: boolean) => {
-    // sua lógica
+  /**
+   * -----------------------------------------------------------------------------------
+   * ESTADOS DO COMPONENTE
+   * -----------------------------------------------------------------------------------
+   */
+
+  // Estados de paginação e filtros
+  const [currentPage, setCurrentPage] = useState(1);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [itemsPerPage, setItemsPerPage] = useState<number>(5);
+
+  // Estados de ordenação
+  const [sortField, setSortField] = useState<SortField>('chamado');
+  const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
+
+  // Estados dos modais
+  const [timerManagementOpen, setTimerManagementOpen] = useState(false);
+  const [selectedChamadoForTimer, setSelectedChamadoForTimer] = useState<string>('');
+
+  /**
+   * -----------------------------------------------------------------------------------
+   * MOCK DO WEBSOCKET PARA GERENCIAMENTO DE TIMERS
+   * -----------------------------------------------------------------------------------
+   */
+
+  // Mock simples do WebSocket - substitua pela implementação real quando disponível
+  const mockWebsocketTimers = {
+    timers: new Map(),
+    isConnected: false,
+    startTimer: (chamado: number, level: number, duration: number) => false,
+    updateObservacao: (chamado: number, level: number, observacao: string) => {},
+    updateAcionamento: (chamado: number, level: number, pessoa: string, status: string) => {},
+    updateStatusFinal: (chamado: number, status: string) => {},
+    getRemainingTime: (chamado: number, level: number) => 0,
+    formatTime: (seconds: number) => '00:00',
+    getState: (chamado: number) => {},
+    setWatchedChamados: (chamados: number[]) => {}
   };
 
-  return (
-    <ActionTable
-      alertData={alertData}
-      onUpdateAcknowledgment={handleAcknowledgment}
-      loading={false}
-    />
-  );
-}
-```
+  const {
+    timers,
+    isConnected,
+    startTimer,
+    updateObservacao,
+    updateAcionamento,
+    updateStatusFinal,
+    getRemainingTime,
+    formatTime,
+    getState,
+    setWatchedChamados
+  } = mockWebsocketTimers;
 
-## Próximos Passos
+  /**
+   * -----------------------------------------------------------------------------------
+   * EFEITO PARA REGISTRAR CHAMADOS NO WEBSOCKET
+   * -----------------------------------------------------------------------------------
+   */
 
-1. **Implementar WebSocket real** - Substituir o mock no hook
-2. **Criar ModernTimerModal** - Modal de gerenciamento de timers
-3. **Testes unitários** - Criar testes para cada componente
-4. **Otimizações** - Memo, callback otimizações conforme necessário
+  // Registra os chamados que queremos monitorar no WebSocket quando os dados mudam
+  useEffect(() => {
+    if (!alertData || alertData.length === 0) return;
 
-## Funcionalidades Mantidas
+    const chamadosNum = alertData.map(a => parseInt(a.chamado));
+    setWatchedChamados(chamadosNum);
 
-- ✅ Pesquisa e filtro
-- ✅ Ordenação por colunas
-- ✅ Paginação completa
-- ✅ Estados de timer
-- ✅ Acionamento de alertas
-- ✅ Design responsivo
-- ✅ Tooltips informativos
-- ✅ Sistema de cores por severidade
+    // Força a busca do estado atual de cada chamado
+    chamadosNum.forEach(chamado => getState(chamado));
+  }, [alertData, setWatchedChamados, getState]);
 
-A funcionalidade permanece **exatamente igual**, apenas com melhor organização do código.
+  /**
+   * -----------------------------------------------------------------------------------
+   * FUNÇÕES UTILITÁRIAS
+   * -----------------------------------------------------------------------------------
+   */
+
+  /**
+   * Obtém a cor do timer baseada no tempo restante
+   */
+  const getTimerColor = useCallback((remainingTime: number) => {
+    if (remainingTime > 600) {        // > 10 minutos
+      return 'text-timer-safe';
+    } else if (remainingTime > 300) { // 5-10 minutos  
+      return 'text-timer-warning';
+    } else if (remainingTime > 120) { // 2-5 minutos
+      return 'text-timer-danger';
+    } else {                          // < 2 minutos
+      return 'text-timer-critical animate-pulse';
+    }
+  }, []);
+
+  /**
+   * Formata uma string de data para o padrão brasileiro
+   */
+  const formatDate = useCallback((dateString: string) => {
+    if (!dateString || dateString === '' || dateString === 'null' || dateString === 'undefined') {
+      return '-';
+    }
+
+    try {
+      let date: Date;
+      const cleanString = String(dateString).trim();
+
+      // Trata diferentes formatos de timestamp
+      if (/^\d{13}$/.test(cleanString)) {
+        // Timestamp em millisegundos
+        date = new Date(parseInt(cleanString));
+      } else if (/^\d{10}$/.test(cleanString)) {
+        // Timestamp em segundos
+        date = new Date(parseInt(cleanString) * 1000);
+      } else if (/^\d{2}\/\d{2}\/\d{4}/.test(cleanString)) {
+        // Formato brasileiro DD/MM/YYYY
+        const parts = cleanString.split(' ');
+        const datePart = parts[0];
+        const timePart = parts[1] || '00:00:00';
+        const [day, month, year] = datePart.split('/');
+        const [hour, minute, second] = timePart.split(':');
+
+        date = new Date(
+          parseInt(year),
+          parseInt(month) - 1,
+          parseInt(day),
+          parseInt(hour || '0'),
+          parseInt(minute || '0'),
+          parseInt(second || '0')
+        );
+      } else {
+        // Tenta parsing padrão
+        date = new Date(cleanString);
+      }
+
+      // Validações básicas
+      if (isNaN(date.getTime())) return cleanString;
+
+      const year = date.getFullYear();
+      if (year < 1900 || year > 2100) return cleanString;
+
+      return date.toLocaleString('pt-BR', {
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+      });
+    } catch (error) {
+      return String(dateString);
+    }
+  }, []);
+
+  /**
+   * Obtém a cor da badge baseada na severidade
+   */
+  const getSeverityColor = useCallback((severity: string) => {
+    return severity.includes('4')
+      ? 'bg-destructive text-destructive-foreground'
+      : 'bg-yellow-500 text-yellow-950';
+  }, []);
+
+  /**
+   * Obtém o nível ativo atual do timer para um chamado
+   */
+  const getCurrentActiveLevel = useCallback((chamado: number) => {
+    const timerState = timers.get(chamado);
+    if (!timerState) return null;
+
+    // Verifica levels de 1 a 5 para encontrar o ativo
+    for (let level = 1; level <= 5; level++) {
+      const statusKey = `level${level}_status` as keyof typeof timerState;
+      if (timerState[statusKey] === 'running') {
+        return level;
+      }
+    }
+    return null;
+  }, [timers]);
+
+  /**
+   * Monta o histórico de acionamentos do chamado
+   */
+  const getHistoricoAcionamentos = useCallback((chamadoNum: number) => {
+    const timerState = timers.get(chamadoNum);
+    if (!timerState) return [];
+
+    const historico: {
+      operador: string;
+      pessoaAcionada: string;
+      status: string;
+      observacao: string;
+      dataHora: string;
+      updatedAt: string;
+      nivel: number;
+    }[] = [];
+
+    // Percorre todos os níveis e coleta informações do histórico
+    for (let nivel = 1; nivel <= 5; nivel++) {
+      const operador = timerState[`level${nivel}_operador`] || '';
+      const pessoaAcionada = timerState[`level${nivel}_pessoaAcionada`] || '';
+      const status = timerState[`level${nivel}_statusAcionamento`] || '';
+      const observacao = timerState[`level${nivel}_observacao`] || '';
+      const dataHora = timerState[`level${nivel}_dataHora`] || '';
+      const updatedAt = timerState[`level${nivel}_updatedAt`] || '';
+
+      if (operador || pessoaAcionada || status || observacao || dataHora) {
+        historico.push({
+          operador,
+          pessoaAcionada,
+          status,
+          observacao,
+          dataHora,
+          updatedAt: formatDate(updatedAt),
+          nivel,
+        });
+      }
+    }
+    return historico;
+  }, [timers, formatDate]);
+
+  /**
+   * -----------------------------------------------------------------------------------
+   * HANDLERS DE ACIONAMENTO
+   * -----------------------------------------------------------------------------------
+   */
+
+  /**
+   * Processa o acionamento de um alerta
+   */
+  const handleAcknowledgment = useCallback(async (alert: AlertData) => {
+    try {
+      toast({
+        title: "Alerta acionado",
+        description: `Chamado ${alert.chamado} foi acionado com sucesso`,
+      });
+
+      onUpdateAcknowledgment(alert.id, true);
+    } catch (error: any) {
+      toast({
+        title: "Erro ao acionar alerta",
+        description: error.message || "Não foi possível concluir o acionamento",
+        variant: "destructive",
+      });
+    }
+  }, [onUpdateAcknowledgment]);
+
+  /**
+   * -----------------------------------------------------------------------------------
+   * HANDLERS DE TIMER
+   * -----------------------------------------------------------------------------------
+   */
+
+  /**
+   * Inicia o timer para o primeiro acionamento
+   */
+  const handleStartTimer = useCallback((chamado: string) => {
+    const chamadoNum = parseInt(chamado);
+
+    console.log(`Iniciando Primeiro Acionamento para chamado ${chamado}`);
+
+    const success = startTimer(chamadoNum, 1, TIMER_DURATION);
+
+    if (success) {
+      toast({
+        title: "🚀 Primeiro Acionamento Iniciado",
+        description: `Timer de 20 minutos iniciado para chamado ${chamado}`,
+      });
+
+      // Aguarda e força atualização do estado
+      setTimeout(() => {
+        getState(chamadoNum);
+      }, 1000);
+    }
+  }, [startTimer, getState]);
+
+  /**
+   * Abre o modal de gerenciamento de timer
+   */
+  const handleOpenTimerManagement = useCallback((chamado: string) => {
+    setSelectedChamadoForTimer(chamado);
+    setTimerManagementOpen(true);
+  }, []);
+
+  /**
+   * -----------------------------------------------------------------------------------
+   * HANDLERS DE GERENCIAMENTO DE ETAPAS
+   * -----------------------------------------------------------------------------------
+   */
+
+  /**
+   * Avança para o próximo nível do timer
+   */
+  const handleNextLevel = useCallback(async (chamado: string, nextLevel: number, observacao: string) => {
+    try {
+      const chamadoNum = parseInt(chamado);
+
+      // Salva observação do nível atual antes de avançar
+      const currentLevel = getCurrentActiveLevel(chamadoNum);
+      if (currentLevel && observacao.trim()) {
+        updateObservacao(chamadoNum, currentLevel, observacao.trim());
+      }
+
+      // Inicia o próximo nível
+      const success = startTimer(chamadoNum, nextLevel, TIMER_DURATION);
+
+      if (success) {
+        // Aguarda para garantir que o timer foi iniciado
+        await new Promise(resolve => setTimeout(resolve, 500));
+
+        // Atualiza estado
+        getState(chamadoNum);
+        return true;
+      }
+
+      return false;
+    } catch (error) {
+      console.error('Erro em handleNextLevel:', error);
+      throw error;
+    }
+  }, [startTimer, updateObservacao, getState, getCurrentActiveLevel]);
+
+  /**
+   * Volta para o nível anterior do timer
+   */
+  const handlePreviousLevel = useCallback(async (chamado: string, previousLevel: number, observacao: string) => {
+    try {
+      const chamadoNum = parseInt(chamado);
+
+      // Salva observação do nível atual
+      const currentLevel = getCurrentActiveLevel(chamadoNum);
+      if (currentLevel && observacao.trim()) {
+        updateObservacao(chamadoNum, currentLevel, observacao.trim());
+      }
+
+      // Inicia o nível anterior
+      const success = startTimer(chamadoNum, previousLevel, TIMER_DURATION);
+
+      if (success) {
+        // Aguarda para garantir que o timer foi iniciado
+        await new Promise(resolve => setTimeout(resolve, 500));
+
+        // Atualiza estado
+        getState(chamadoNum);
+        return true;
+      }
+
+      return false;
+    } catch (error) {
+      console.error('Erro em handlePreviousLevel:', error);
+      throw error;
+    }
+  }, [startTimer, updateObservacao, getState, getCurrentActiveLevel]);
+
+  /**
+   * Finaliza o chamado
+   */
+  const handleFinalize = useCallback(async (chamado: string, observacao: string) => {
+    try {
+      const chamadoNum = parseInt(chamado);
+
+      // Salva observação final
+      const currentLevel = getCurrentActiveLevel(chamadoNum);
+      if (currentLevel && observacao.trim()) {
+        updateObservacao(chamadoNum, currentLevel, observacao.trim());
+      }
+
+      // Finaliza o chamado
+      updateStatusFinal(chamadoNum, 'finalizado');
+
+      // Aguarda para garantir que o status foi atualizado
+      await new Promise(resolve => setTimeout(resolve, 500));
+
+      // Atualiza estado
+      getState(chamadoNum);
+      return true;
+    } catch (error) {
+      console.error('Erro em handleFinalize:', error);
+      throw error;
+    }
+  }, [updateObservacao, updateStatusFinal, getState, getCurrentActiveLevel]);
+
+  /**
+   * -----------------------------------------------------------------------------------
+   * HANDLERS DE ORDENAÇÃO
+   * -----------------------------------------------------------------------------------
+   */
+
+  /**
+   * Gerencia a ordenação das colunas da tabela
+   */
+  const handleSort = useCallback((field: SortField) => {
+    if (sortField === field) {
+      // Cicla entre asc -> desc -> null (volta ao padrão)
+      if (sortDirection === 'asc') {
+        setSortDirection('desc');
+      } else if (sortDirection === 'desc') {
+        setSortDirection(null);
+        setSortField('chamado');
+      } else {
+        setSortDirection('asc');
+      }
+    } else {
+      setSortField(field);
+      setSortDirection('asc');
+    }
+  }, [sortField, sortDirection]);
+
+  /**
+   * -----------------------------------------------------------------------------------
+   * PROCESSAMENTO DE DADOS (FILTRO, ORDENAÇÃO E PAGINAÇÃO)
+   * -----------------------------------------------------------------------------------
+   */
+
+  // Filtragem dos dados baseada no termo de busca
+  const filteredData = useMemo(() => {
+    if (!searchTerm.trim()) return alertData;
+
+    const searchLower = searchTerm.toLowerCase().trim();
+    return alertData.filter(alert =>
+      Object.values(alert).some(value =>
+        String(value).toLowerCase().includes(searchLower)
+      )
+    );
+  }, [alertData, searchTerm]);
+
+  // Ordenação e paginação dos dados filtrados
+  const { sortedAndPaginatedData, totalPages } = useMemo(() => {
+    let sortedData = [...filteredData];
+
+    if (sortField && sortDirection) {
+      sortedData.sort((a, b) => {
+        let aValue: any = a[sortField];
+        let bValue: any = b[sortField];
+
+        // Tratamento especial para campos específicos
+        if (sortField === 'chamado') {
+          aValue = parseInt(a.chamado) || 0;
+          bValue = parseInt(b.chamado) || 0;
+        } else if (sortField === 'abertura_chamado') {
+          aValue = new Date(a.abertura_chamado).getTime() || 0;
+          bValue = new Date(b.abertura_chamado).getTime() || 0;
+        } else {
+          aValue = String(aValue).toLowerCase();
+          bValue = String(bValue).toLowerCase();
+        }
+
+        if (aValue < bValue) return sortDirection === 'asc' ? -1 : 1;
+        if (aValue > bValue) return sortDirection === 'asc' ? 1 : -1;
+        return 0;
+      });
+    } else {
+      // Ordenação padrão por chamado (decrescente)
+      sortedData.sort((a, b) => {
+        const chamadoA = parseInt(a.chamado) || 0;
+        const chamadoB = parseInt(b.chamado) || 0;
+        return chamadoB - chamadoA;
+      });
+    }
+
+    // Paginação
+    const startIndex = (currentPage - 1) * itemsPerPage;
+    const endIndex = startIndex + itemsPerPage;
+    const paginatedData = sortedData.slice(startIndex, endIndex);
+    const totalPages = Math.ceil(sortedData.length / itemsPerPage);
+
+    return { sortedAndPaginatedData: paginatedData, totalPages };
+  }, [filteredData, currentPage, itemsPerPage, sortField, sortDirection]);
+
+  /**
+   * -----------------------------------------------------------------------------------
+   * HANDLERS DE PAGINAÇÃO
+   * -----------------------------------------------------------------------------------
+   */
+
+  /**
+   * Altera o número de itens por página
+   */
+  const handleItemsPerPageChange = useCallback((value: string) => {
+    const num = parseInt(value, 10);
+    setItemsPerPage(num);
+    setCurrentPage(1); // Volta para primeira página
+  }, []);
+
+  /**
+   * Altera a página atual
+   */
+  const handlePageChange = useCallback((page: number) => {
+    setCurrentPage(page);
+  }, []);
+
+  return {
+    // Estados
+    currentPage,
+    searchTerm,
+    setSearchTerm,
+    itemsPerPage,
+    sortField,
+    sortDirection,
+    timerManagementOpen,
+    setTimerManagementOpen,
+    selectedChamadoForTimer,
+    setSelectedChamadoForTimer,
+    
+    // WebSocket
+    timers,
+    isConnected,
+    getRemainingTime,
+    formatTime,
+    updateObservacao,
+    updateAcionamento,
+    updateStatusFinal,
+    
+    // Dados processados
+    filteredData,
+    sortedAndPaginatedData,
+    totalPages,
+    
+    // Funções utilitárias
+    getTimerColor,
+    formatDate,
+    getSeverityColor,
+    getCurrentActiveLevel,
+    getHistoricoAcionamentos,
+    
+    // Handlers
+    handleAcknowledgment,
+    handleStartTimer,
+    handleOpenTimerManagement,
+    handleNextLevel,
+    handlePreviousLevel,
+    handleFinalize,
+    handleSort,
+    handleItemsPerPageChange,
+    handlePageChange,
+    
+    // Constantes
+    LEVEL_NAMES
+  };
+};
+
+// Export do tipo AlertData para reutilização
+export type { AlertData, SortField };
