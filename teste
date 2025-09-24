@@ -6,10 +6,13 @@ import boto3
 from datetime import datetime
 from botocore.exceptions import ClientError, BotoCoreError
 
+# DynamoDB (armazenamento das conexões)
+dynamodb = boto3.resource("dynamodb")
+connections_table = dynamodb.Table(os.environ["CONNECTIONS_TABLE"])
+
 def lambda_handler(event, context):
     start_total = time.time()
     print("[INÍCIO] Execução da Lambda")
-    print("Evento recebido:", json.dumps(event))
 
     results = []
     errors = []
@@ -21,19 +24,7 @@ def lambda_handler(event, context):
         password = os.environ['DB_PASSWORD']
         port = os.environ.get('DB_PORT', '1433')
         database = 'mdb'
-        api_endpoint = os.environ['WEBSOCKET_API_ENDPOINT']  # ex: https://xxxxx.execute-api.us-east-1.amazonaws.com/prod
-
-        # ---------- Dados do evento ----------
-        connection_id = event["requestContext"]["connectionId"]
-        route_key = event["requestContext"]["routeKey"]
-
-        print(f"[WS] routeKey={route_key}, connectionId={connection_id}")
-
-        if route_key != "getAlerts":
-            return {
-                "statusCode": 400,
-                "body": json.dumps({"error": f"Rota {route_key} não suportada"})
-            }
+        api_endpoint = os.environ['WEBSOCKET_API_ENDPOINT'] 
 
         # ---------- Conexão com o banco ----------
         try:
@@ -70,7 +61,7 @@ def lambda_handler(event, context):
             start_query = time.time()
             cursor.execute(query)
             rows = cursor.fetchall()
-            print(f"[DB] Query executada em {time.time() - start_query:.2f}s, total {len(rows)} linhas")
+            print(f"[DB] Query executada em {time.time() - start_query:.2f}s")
         except Exception as q_err:
             raise RuntimeError(f"Erro ao executar query: {q_err}")
 
@@ -93,20 +84,37 @@ def lambda_handler(event, context):
             except Exception as close_err:
                 print(f"[WARN] Falha ao fechar conexão DB: {close_err}")
 
-        # ---------- Resposta via WebSocket ----------
+        # ---------- Envio WebSocket ----------
         try:
             apigw = boto3.client("apigatewaymanagementapi", endpoint_url=api_endpoint)
-            apigw.post_to_connection(
-                ConnectionId=connection_id,
-                Data=json.dumps(results, ensure_ascii=False).encode("utf-8")
-            )
-            print(f"[WS] Enviado {len(results)} registros para {connection_id}")
-        except ClientError as e:
-            err_msg = f"Erro AWS ao enviar para {connection_id}: {e}"
-            print(f"[ERRO] {err_msg}")
-            errors.append(err_msg)
-        except (BotoCoreError, Exception) as ws_err:
-            err_msg = f"Erro inesperado ao enviar para {connection_id}: {ws_err}"
+            connection_items = connections_table.scan().get("Items", [])
+            print(f"[WS] Enviando mensagem para {len(connection_items)} conexões")
+
+            for item in connection_items:
+                connection_id = item.get("connectionId")
+                if not connection_id:
+                    continue
+                try:
+                    apigw.post_to_connection(
+                        ConnectionId=connection_id,
+                        Data=json.dumps(results, ensure_ascii=False).encode("utf-8")
+                    )
+                    print(f"[WS] Enviado para {connection_id}")
+                except ClientError as e:
+                    if e.response['Error']['Code'] == 'GoneException':
+                        print(f"[WS] Conexão expirada {connection_id}, removendo...")
+                        connections_table.delete_item(Key={"connectionId": connection_id})
+                    else:
+                        err_msg = f"Erro ao enviar para {connection_id}: {e}"
+                        print(f"[ERRO] {err_msg}")
+                        errors.append(err_msg)
+                except (BotoCoreError, Exception) as ws_err:
+                    err_msg = f"Erro inesperado ao enviar para {connection_id}: {ws_err}"
+                    print(f"[ERRO] {err_msg}")
+                    errors.append(err_msg)
+
+        except Exception as ws_outer_err:
+            err_msg = f"Falha geral no envio WebSocket: {ws_outer_err}"
             print(f"[ERRO] {err_msg}")
             errors.append(err_msg)
 
@@ -119,7 +127,8 @@ def lambda_handler(event, context):
                 "message": "Execução concluída",
                 "totalRegistros": len(results),
                 "falhasEnvio": len(errors),
-                "erros": errors
+                "erros": errors,
+                "dados": results
             }, ensure_ascii=False)
         }
 
