@@ -818,16 +818,3 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
     </TooltipProvider>
   );
 };
-
-
-
-
-
-
-
-
-
-
-
-remainingTime
-remainingTime
