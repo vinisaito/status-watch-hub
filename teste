@@ -201,24 +201,24 @@ interface CompactCardProps {
 function CompactCard({ title, count, totalCount, icon: Icon, type, isActive, onClick }: CompactCardProps) {
   const typeStyles = {
     'total': {
-      bg: 'bg-primary/10',
-      border: 'border-primary/30',
-      text: 'text-primary',
-      hover: 'hover:bg-primary/20 hover:border-primary/50',
+      bg: 'bg-total/10',
+      border: 'border-total/30',
+      text: 'text-total',
+      hover: 'hover:bg-total/20 hover:border-total/50',
       animation: '',
     },
     'pendente-chat': {
-      bg: 'bg-warning/10',
-      border: 'border-warning/30',
-      text: 'text-warning',
-      hover: 'hover:bg-warning/20 hover:border-warning/50',
+      bg: 'bg-pendente-chat/10',
+      border: 'border-pendente-chat/30',
+      text: 'text-pendente-chat',
+      hover: 'hover:bg-pendente-chat/20 hover:border-pendente-chat/50',
       animation: count > 0 ? 'animate-pulse' : '',
     },
     'confirmados': {
-      bg: 'bg-success/10',
-      border: 'border-success/30',
-      text: 'text-success',
-      hover: 'hover:bg-success/20 hover:border-success/50',
+      bg: 'bg-confirmados/10',
+      border: 'border-confirmados/30',
+      text: 'text-confirmados',
+      hover: 'hover:bg-confirmados/20 hover:border-confirmados/50',
       animation: '',
     },
     'tempo-expirado': {
@@ -310,9 +310,9 @@ interface CompactSubCardProps {
 
 function CompactSubCard({ label, count, type, isActive, onClick }: CompactSubCardProps) {
   const typeStyles = {
-    'total': 'text-primary border-primary/20 hover:border-primary/40',
-    'pendente-chat': 'text-warning border-warning/20 hover:border-warning/40',
-    'confirmados': 'text-success border-success/20 hover:border-success/40',
+    'total': 'text-total border-total/20 hover:border-total/40',
+    'pendente-chat': 'text-pendente-chat border-pendente-chat/20 hover:border-pendente-chat/40',
+    'confirmados': 'text-confirmados border-confirmados/20 hover:border-confirmados/40',
     'tempo-expirado': 'text-critical border-critical/20 hover:border-critical/40',
     'dez-minutos': 'text-warning border-warning/20 hover:border-warning/40',
     'cinco-minutos': 'text-caution border-caution/20 hover:border-caution/40',
