@@ -5,6 +5,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Trash2, Plus, MessageSquare, Clock, User, RefreshCw } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { cn } from '@/lib/utils';
@@ -127,12 +128,25 @@ const ShiftNoteForm = ({
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div className="space-y-2">
             <Label htmlFor="author-name">Seu Nome</Label>
+            <Select value={authorName} onValueChange={setAuthorName}>
+              <SelectTrigger className="bg-background/80 border-border/50">
+                <SelectValue placeholder="Selecione ou digite seu nome" />
+              </SelectTrigger>
+              <SelectContent className="bg-background border-border shadow-lg">
+                <SelectItem value="João Silva">João Silva</SelectItem>
+                <SelectItem value="Maria Santos">Maria Santos</SelectItem>
+                <SelectItem value="Pedro Oliveira">Pedro Oliveira</SelectItem>
+                <SelectItem value="Ana Costa">Ana Costa</SelectItem>
+                <SelectItem value="Carlos Lima">Carlos Lima</SelectItem>
+                <SelectItem value="Fernanda Souza">Fernanda Souza</SelectItem>
+              </SelectContent>
+            </Select>
+            {/* Input alternativo para nomes não listados */}
             <Input
-              id="author-name"
               value={authorName}
               onChange={(e) => setAuthorName(e.target.value)}
-              placeholder="Digite seu nome"
-              className="bg-background/80 border-border/50"
+              placeholder="Ou digite um nome personalizado"
+              className="bg-background/80 border-border/50 text-sm"
             />
           </div>
           <div className="space-y-2 md:col-span-1">
