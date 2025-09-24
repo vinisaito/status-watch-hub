@@ -29,7 +29,6 @@ export interface AlertData {
   abertura_chamado: string;
   resumo_chamado: string;
   severidade_chamado: string;
-  acionado: string;
   chat: boolean;
 }
 
@@ -83,13 +82,13 @@ const Dashboard = () => {
           abertura_chamado: item.dat_abertura_chamado || item.abertura_chamado || item.data_abertura || '',
           resumo_chamado: item.resumo_chamado || 'Título não disponível',
           severidade_chamado: item.severidade_chamado || 'N/A',
-          acionado: item.acionado || 'N/A',
           chat: false,
         }));
 
         setAlertData(transformedData);
 
-        const unacknowledged = transformedData.filter(alert => !alert.acionado);
+        // Verificar se há alertas não acionados usando o hook isAcionado
+        const unacknowledged = transformedData.filter(alert => !isAcionado(alert.chamado));
         if (unacknowledged.length > 0) playAlertSound();
       } catch (error) {
         console.error('Erro ao processar dados do WebSocket:', error);
@@ -188,7 +187,6 @@ const Dashboard = () => {
       if (filter === 'SEV4_ALERT') {
         return alert.tipo_chamado.toLowerCase().includes('alerta')
           && alert.severidade_chamado.includes('4')
-          && alert.acionado !== 'OK'
           && !isAcionado(alert.chamado);
       }
       if (filter === 'SEV4_ALERT_TOTAL') {
