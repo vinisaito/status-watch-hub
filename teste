@@ -18,7 +18,6 @@ import { ShiftNotes } from './ShiftNotes';
 import { WebhookConfig } from './WebhookConfig';
 import { InstructionsSection } from './InstructionsSection';
 import { Sheet, SheetContent } from "@/components/ui/sheet";
-import MaintenancePage from './MaintenancePage';
 import { useChatAcionados } from '@/hooks/use-chat-acionados';
 
 export interface AlertData {
@@ -42,7 +41,7 @@ const Dashboard = () => {
   const [activeSection, setActiveSection] = useState<'incidents' | 'rdm' | 'notes' | 'instructions' | null>(null);
   const [filter, setFilter] = useState<string | null>(null);
   const [websocket, setWebsocket] = useState<WebSocket | null>(null);
-  
+
   const { isAcionado } = useChatAcionados();
 
   const connectWebSocket = () => {
@@ -57,53 +56,41 @@ const Dashboard = () => {
         title: "Conexão estabelecida",
         description: "WebSocket conectado com sucesso",
       });
+
+      // Solicita os alertas via rota getAlerts
+      ws.send(JSON.stringify({ action: 'getAlerts' }));
     };
     
     ws.onmessage = (event) => {
       try {
-        console.log('Mensagem recebida do WebSocket:', event.data);
-
         const data = JSON.parse(event.data);
-        console.log("Dados parseados:", data);
+        console.log("Dados recebidos via WebSocket:", data);
 
-        // Garante que sempre teremos um array
         const apiData = Array.isArray(data)
           ? data
           : data.body
             ? JSON.parse(data.body)
             : data.dados || [];
 
-        console.log("Array final de dados:", apiData);
+        if (!apiData || apiData.length === 0) return;
 
-        if (!apiData || apiData.length === 0) {
-          console.log("Nenhum dado encontrado no WebSocket");
-          return;
-        }
+        const transformedData: AlertData[] = apiData.map((item: any, index: number) => ({
+          id: `alert-${index}`,
+          tipo_chamado: item.tipo_chamado || 'N/A',
+          chamado: item.chamado || 'N/A',
+          grupo_chamado: item.grupo_chamado || 'N/A',
+          status_chamado: item.status_chamado || 'N/A',
+          abertura_chamado: item.dat_abertura_chamado || item.abertura_chamado || item.data_abertura || '',
+          resumo_chamado: item.resumo_chamado || 'Título não disponível',
+          severidade_chamado: item.severidade_chamado || 'N/A',
+          acionado: item.acionado || 'N/A',
+          chat: false,
+        }));
 
-        const transformedData: AlertData[] = apiData.map((item: any, index: number) => {
-          console.log('Item recebido para transformação:', item);
-          return {
-            id: `alert-${index}`,
-            tipo_chamado: item.tipo_chamado || item.TipoChamado || 'N/A',
-            chamado: item.chamado || item.Chamado || 'N/A',
-            grupo_chamado: item.grupo_chamado || 'N/A',
-            status_chamado: item.status_chamado || 'N/A',
-            abertura_chamado: item.dat_abertura_chamado || item.abertura_chamado || item.data_abertura || '',
-            resumo_chamado: item.resumo_chamado || 'Título não disponível',
-            severidade_chamado: item.severidade_chamado || item.Severidade || 'N/A',
-            acionado: item.acionado || 'N/A',
-            chat: false,
-          };
-        });
-
-        // Atualiza estado direto, ignorando filtros temporariamente
         setAlertData(transformedData);
 
-        // Toca alerta se houver algum não acionado
         const unacknowledged = transformedData.filter(alert => !alert.acionado);
-        if (unacknowledged.length > 0) {
-          playAlertSound();
-        }
+        if (unacknowledged.length > 0) playAlertSound();
       } catch (error) {
         console.error('Erro ao processar dados do WebSocket:', error);
         toast({
@@ -134,11 +121,9 @@ const Dashboard = () => {
           description: "Tentando reconectar em 5 segundos...",
           variant: "destructive",
         });
-        
+
         setTimeout(() => {
-          if (!websocket || websocket.readyState === WebSocket.CLOSED) {
-            connectWebSocket();
-          }
+          if (!websocket || websocket.readyState === WebSocket.CLOSED) connectWebSocket();
         }, 5000);
       }
     };
@@ -149,9 +134,7 @@ const Dashboard = () => {
 
   const playAlertSound = () => {
     const audio = new Audio('data:audio/wav;base64,UklGRnoGAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQoGAACBhYqFbF1fdJivrJBhNjVgodDbq2EcBj+a2/LDciUFLIHO8tiJNwgZaLvt559NEAxQp+PwtmMcBjiR1/LMeSwFJHfH8N2QQAoUXrTp66hVFApGn+Dqu2sgBDR+w/PCaWEbEBOa5rWgdyoEKAA=');
-    audio.play().catch(() => {
-      console.log('Alert sound could not be played');
-    });
+    audio.play().catch(() => console.log('Alert sound could not be played'));
   };
 
   const toggleTheme = () => {
@@ -168,9 +151,7 @@ const Dashboard = () => {
   const updateAlertAcknowledgment = (alertId: string, acknowledged: boolean) => {
     setAlertData(prev =>
       prev.map(alert =>
-        alert.id === alertId
-          ? { ...alert, chat: acknowledged }
-          : alert
+        alert.id === alertId ? { ...alert, chat: acknowledged } : alert
       )
     );
   };
@@ -193,8 +174,39 @@ const Dashboard = () => {
     { title: "Instruções Operacionais", icon: BookOpen, key: 'instructions' as const },
   ];
 
-  // DEBUG: ignorando filtros temporariamente
-  const filteredData = alertData;
+  const filteredData = filter
+    ? alertData.filter(alert => {
+      if (filter === 'SEV4_INCIDENT') {
+        return alert.tipo_chamado.toLowerCase().includes('incidente')
+          && alert.severidade_chamado.includes('4')
+          && !isAcionado(alert.chamado);
+      }
+      if (filter === 'SEV4_INCIDENT_TOTAL') {
+        return alert.tipo_chamado.toLowerCase().includes('incidente')
+          && alert.severidade_chamado.includes('4');
+      }
+      if (filter === 'SEV4_ALERT') {
+        return alert.tipo_chamado.toLowerCase().includes('alerta')
+          && alert.severidade_chamado.includes('4')
+          && alert.acionado !== 'OK'
+          && !isAcionado(alert.chamado);
+      }
+      if (filter === 'SEV4_ALERT_TOTAL') {
+        return alert.tipo_chamado.toLowerCase().includes('alerta')
+          && alert.severidade_chamado.includes('4');
+      }
+      if (filter === 'SEV3_INCIDENT') {
+        return alert.tipo_chamado.toLowerCase().includes('incidente')
+          && alert.severidade_chamado.includes('3')
+          && !isAcionado(alert.chamado);
+      }
+      if (filter === 'SEV3_INCIDENT_TOTAL') {
+        return alert.tipo_chamado.toLowerCase().includes('incidente')
+          && alert.severidade_chamado.includes('3');
+      }
+      return true;
+    })
+    : alertData;
 
   return (
     <div className="min-h-screen flex bg-background text-foreground">
@@ -204,19 +216,9 @@ const Dashboard = () => {
             PAINEL CIOPS - MONITORAÇÃO
           </h1>
           <div className="text-sm">
-            <span className={`inline-flex items-center gap-1 ${
-              websocket?.readyState === WebSocket.OPEN ? 'text-green-500' :
-              websocket?.readyState === WebSocket.CONNECTING ? 'text-yellow-500' :
-              'text-red-500'
-            }`}>
-              <div className={`w-2 h-2 rounded-full ${
-                websocket?.readyState === WebSocket.OPEN ? 'bg-green-500' :
-                websocket?.readyState === WebSocket.CONNECTING ? 'bg-yellow-500' :
-                'bg-red-500'
-              }`}></div>
-              {websocket?.readyState === WebSocket.OPEN ? 'WebSocket Conectado' :
-               websocket?.readyState === WebSocket.CONNECTING ? 'Conectando...' :
-               'WebSocket Desconectado'}
+            <span className={`inline-flex items-center gap-1 ${websocket?.readyState === WebSocket.OPEN ? 'text-green-500' : websocket?.readyState === WebSocket.CONNECTING ? 'text-yellow-500' : 'text-red-500'}`}>
+              <div className={`w-2 h-2 rounded-full ${websocket?.readyState === WebSocket.OPEN ? 'bg-green-500' : websocket?.readyState === WebSocket.CONNECTING ? 'bg-yellow-500' : 'bg-red-500'}`}></div>
+              {websocket?.readyState === WebSocket.OPEN ? 'WebSocket Conectado' : websocket?.readyState === WebSocket.CONNECTING ? 'Conectando...' : 'WebSocket Desconectado'}
             </span>
           </div>
         </div>
@@ -242,8 +244,61 @@ const Dashboard = () => {
         </div>
       </div>
 
-      {/* Sidebar e Sheet permanecem iguais */}
-      {/* ... */}
+      <div className="w-20 bg-gradient-to-b from-sidebar-background to-sidebar-background/95 border-l border-sidebar-border/50 backdrop-blur-sm flex flex-col justify-between sticky top-0 h-screen shadow-lg">
+        <div className="flex flex-col gap-3 p-3 flex-1">
+          {sidebarItems.map((item) => (
+            <Button
+              key={item.key}
+              variant="ghost"
+              size="icon"
+              onClick={() => setActiveSection(activeSection === item.key ? null : item.key)}
+              className={`w-14 h-14 rounded-xl transition-all duration-300 relative group ${activeSection === item.key ? 'bg-gradient-to-br from-sidebar-primary to-sidebar-primary/90 text-sidebar-primary-foreground shadow-lg scale-105' : 'text-sidebar-foreground hover:bg-sidebar-accent/80 hover:text-sidebar-accent-foreground hover:scale-105'}`}
+              title={item.title}
+            >
+              <item.icon className="h-6 w-6 transition-transform duration-300 group-hover:scale-110" />
+              {activeSection === item.key && (
+                <div className="absolute -right-1 top-1/2 transform -translate-y-1/2 w-1 h-8 bg-sidebar-primary-foreground rounded-full opacity-80"></div>
+              )}
+            </Button>
+          ))}
+        </div>
+
+        <div className="flex flex-col gap-3 p-3 border-t border-sidebar-border/30">
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={() => setShowWebhookConfig(true)}
+            className="w-14 h-14 rounded-xl text-sidebar-foreground hover:bg-sidebar-accent/80 hover:text-sidebar-accent-foreground transition-all duration-300 hover:scale-105 group"
+            title="Configuração de Webhooks"
+          >
+            <Settings className="h-5 w-5 transition-transform duration-300 group-hover:rotate-90" />
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={toggleTheme}
+            className="w-14 h-14 rounded-xl text-sidebar-foreground hover:bg-sidebar-accent/80 hover:text-sidebar-accent-foreground transition-all duration-300 hover:scale-105 group"
+            title="Trocar Tema"
+          >
+            <div className="transition-transform duration-500 group-hover:rotate-180">
+              {isDarkMode ? <Sun className="h-5 w-5" /> : <Moon className="h-5 w-5" />}
+            </div>
+          </Button>
+        </div>
+      </div>
+
+      <Sheet open={!!activeSection} onOpenChange={() => setActiveSection(null)}>
+        <SheetContent side="right" className="w-full" style={{ width: '50vw', maxWidth: '1000px' }}>
+          <div className="mt-4">
+            {activeSection === 'incidents' && <CriticalIncidents />}
+            {activeSection === 'rdm' && <RDMTracker />}
+            {activeSection === 'notes' && <ShiftNotes />}
+            {activeSection === 'instructions' && <InstructionsSection />}
+          </div>
+        </SheetContent>
+      </Sheet>
+
+      <WebhookConfig open={showWebhookConfig} onOpenChange={setShowWebhookConfig} />
     </div>
   );
 };
