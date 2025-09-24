@@ -1,274 +1,412 @@
-import { useState } from 'react';
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
-import { Badge } from '@/components/ui/badge';
+import React, { useState, useEffect, useCallback, memo } from 'react';
 import { Button } from '@/components/ui/button';
-import { Separator } from '@/components/ui/separator';
+import { Textarea } from '@/components/ui/textarea';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Card } from '@/components/ui/card';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { 
-  Calendar, 
-  Clock, 
-  User, 
-  AlertTriangle, 
-  Tag, 
-  FileText,
-  Users,
-  X
-} from 'lucide-react';
+import { Trash2, Plus, MessageSquare, Clock, User, RefreshCw, AlertTriangle } from 'lucide-react';
+import { useToast } from '@/hooks/use-toast';
+import { cn } from '@/lib/utils';
 
-interface AlertData {
+interface ShiftNote {
   id: string;
-  chamado: string;
-  tipo_chamado: string;
-  grupo_chamado: string;
-  status_chamado: string;
-  abertura_chamado: string;
-  resumo_chamado: string;
-  severidade_chamado: string;
-  acionado: string;
-  chat: boolean;
+  author: string;
+  message: string;
+  timestamp: string;
+  priority: 'normal' | 'important';
 }
 
-interface ChamadoDetailsModalProps {
-  isOpen: boolean;
-  onClose: () => void;
-  alertData: AlertData | null;
-}
+const formatTimestamp = (timestamp: string) => {
+  try {
+    const date = new Date(timestamp);
+    return date.toLocaleString('pt-BR', {
+      day: '2-digit',
+      month: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+  } catch {
+    return timestamp || '';
+  }
+};
 
-export const ChamadoDetailsModal = ({ isOpen, onClose, alertData }: ChamadoDetailsModalProps) => {
-  if (!alertData) return null;
+const ShiftNoteItem = memo(({ note, onRemoveNote }: { note: ShiftNote; onRemoveNote: (id: string) => void }) => {
+  return (
+    <Card className={cn(
+      "relative p-4 bg-gradient-card border-border/20 shadow-card backdrop-blur-sm transition-all duration-300 hover:shadow-glow hover:scale-[1.02] group",
+      note.priority === 'important' && "bg-gradient-important border-important/30 shadow-elegant"
+    )}>
+      <div className="flex items-start justify-between gap-4">
+        <div className="flex-1 space-y-3">
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+              <div className="p-1 rounded-full bg-primary/10">
+                <User className="h-3 w-3 text-primary" />
+              </div>
+              <span className="font-medium text-foreground">{note.author}</span>
+            </div>
+            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+              <div className="p-1 rounded-full bg-primary/10">
+                <Clock className="h-3 w-3 text-primary" />
+              </div>
+              <span>{formatTimestamp(note.timestamp)}</span>
+            </div>
+            {note.priority === 'important' && (
+              <div className="flex items-center gap-1 px-2 py-1 bg-important/20 border border-important/30 rounded-full">
+                <AlertTriangle className="h-3 w-3 text-important" />
+                <span className="text-xs font-semibold text-important-foreground">IMPORTANTE</span>
+              </div>
+            )}
+          </div>
+          <p className="text-foreground/90 whitespace-pre-wrap break-words leading-relaxed">{note.message}</p>
+        </div>
+        <Button
+          variant="ghost"
+          size="icon"
+          onClick={() => onRemoveNote(note.id)}
+          className="opacity-0 group-hover:opacity-100 transition-opacity duration-200 text-destructive hover:text-destructive hover:bg-destructive/10 shrink-0"
+          aria-label="Remover recado"
+        >
+          <Trash2 className="h-4 w-4" />
+        </Button>
+      </div>
+    </Card>
+  );
+});
 
-  const formatDate = (dateString: string) => {
-    if (!dateString || dateString === '' || dateString === 'null' || dateString === 'undefined') {
-      return '-';
-    }
-
-    try {
-      let date: Date;
-      const cleanString = String(dateString).trim();
-
-      if (/^\d{13}$/.test(cleanString)) {
-        date = new Date(parseInt(cleanString));
-      } else if (/^\d{10}$/.test(cleanString)) {
-        date = new Date(parseInt(cleanString) * 1000);
-      } else if (/^\d{2}\/\d{2}\/\d{4}/.test(cleanString)) {
-        const parts = cleanString.split(' ');
-        const datePart = parts[0];
-        const timePart = parts[1] || '00:00:00';
-        const [day, month, year] = datePart.split('/');
-        const [hour, minute, second] = timePart.split(':');
-
-        date = new Date(
-          parseInt(year),
-          parseInt(month) - 1,
-          parseInt(day),
-          parseInt(hour || '0'),
-          parseInt(minute || '0'),
-          parseInt(second || '0')
-        );
-      } else {
-        date = new Date(cleanString);
-      }
-
-      if (isNaN(date.getTime())) return cleanString;
-
-      const year = date.getFullYear();
-      if (year < 1900 || year > 2100) return cleanString;
-
-      return date.toLocaleString('pt-BR', {
-        day: '2-digit',
-        month: '2-digit',
-        year: 'numeric',
-        hour: '2-digit',
-        minute: '2-digit',
-        second: '2-digit',
-      });
-    } catch (error) {
-      return String(dateString);
-    }
-  };
-
-  const getSeverityColor = (severity: string) => {
-    return severity.includes('4')
-      ? 'bg-destructive text-destructive-foreground'
-      : 'bg-yellow-500 text-yellow-950';
-  };
-
-  const isChat = alertData.acionado === 'true' || alertData.chat;
+const ShiftNoteList = ({ notes, onRemoveNote }: { notes: ShiftNote[]; onRemoveNote: (id: string) => void }) => {
+  if (!notes || notes.length === 0) {
+    return (
+      <div className="flex flex-col items-center justify-center py-12 text-center">
+        <MessageSquare className="h-16 w-16 text-muted-foreground/50 mb-4" />
+        <p className="text-lg text-muted-foreground">Nenhum recado no turno atual</p>
+        <p className="text-sm text-muted-foreground/70">Adicione o primeiro recado acima</p>
+      </div>
+    );
+  }
 
   return (
-    <Dialog open={isOpen} onOpenChange={onClose}>
-      <DialogContent className="max-w-4xl max-h-[80vh] bg-card border-border">
-        <DialogHeader className="flex flex-row items-center justify-between space-y-0 pb-4">
-          <DialogTitle className="text-xl font-bold flex items-center gap-2">
-            <FileText className="h-5 w-5 text-primary" />
-            Detalhes do Chamado #{alertData.chamado}
-          </DialogTitle>
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={onClose}
-            className="h-8 w-8 p-0"
-          >
-            <X className="h-4 w-4" />
-          </Button>
-        </DialogHeader>
+    <ScrollArea className="h-[500px] w-full rounded-lg border border-border/20 bg-gradient-card/50 backdrop-blur-sm p-4">
+      <div className="space-y-4">
+        {notes.map((note) => (
+          <ShiftNoteItem key={note.id} note={note} onRemoveNote={onRemoveNote} />
+        ))}
+      </div>
+    </ScrollArea>
+  );
+};
 
-        <ScrollArea className="max-h-[calc(80vh-120px)]">
-          <div className="space-y-6">
-            {/* Status e Severidade */}
-            <div className="flex flex-wrap gap-4 items-center">
-              <Badge 
-                variant={isChat ? "default" : "secondary"}
-                className={`${isChat ? 'bg-green-600 text-white' : ''} text-sm px-3 py-1`}
-              >
-                {isChat ? '✅ Acionado' : '⏳ Pendente'}
-              </Badge>
-              <Badge className={`${getSeverityColor(alertData.severidade_chamado)} text-sm px-3 py-1`}>
-                <AlertTriangle className="h-3 w-3 mr-1" />
-                Severidade {alertData.severidade_chamado}
-              </Badge>
-              <Badge variant="outline" className="text-sm px-3 py-1">
-                {alertData.status_chamado}
-              </Badge>
-            </div>
+const ShiftNoteForm = ({
+  authorName,
+  setAuthorName,
+  newNote,
+  setNewNote,
+  isImportant,
+  setIsImportant,
+  onAddNote,
+}: {
+  authorName: string;
+  setAuthorName: (val: string) => void;
+  newNote: string;
+  setNewNote: (val: string) => void;
+  isImportant: boolean;
+  setIsImportant: (val: boolean) => void;
+  onAddNote: () => void;
+}) => {
+  return (
+    <Card className="bg-gradient-card border-border/20 shadow-card backdrop-blur-sm p-6">
+      <div className="space-y-6">
+        <div className="flex items-center gap-3 mb-6">
+          <div className="p-2 rounded-lg bg-gradient-primary shadow-elegant">
+            <MessageSquare className="h-6 w-6 text-primary-foreground" />
+          </div>
+          <div>
+            <h2 className="text-2xl font-bold bg-gradient-primary bg-clip-text text-transparent">
+              Recados do Turno
+            </h2>
+            <p className="text-sm text-muted-foreground">Deixe recados importantes para o próximo turno</p>
+          </div>
+        </div>
 
-            <Separator />
-
-            {/* Informações Principais */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              {/* Coluna Esquerda */}
-              <div className="space-y-4">
-                <div className="space-y-3">
-                  <h3 className="text-lg font-semibold text-foreground flex items-center gap-2">
-                    <Tag className="h-4 w-4" />
-                    Informações Básicas
-                  </h3>
-                  
-                  <div className="space-y-3">
-                    <div className="flex flex-col space-y-1">
-                      <span className="text-sm font-medium text-muted-foreground">Número do Chamado</span>
-                      <span className="text-base font-mono bg-muted px-3 py-2 rounded-md">
-                        #{alertData.chamado}
-                      </span>
-                    </div>
-
-                    <div className="flex flex-col space-y-1">
-                      <span className="text-sm font-medium text-muted-foreground flex items-center gap-1">
-                        <Users className="h-3 w-3" />
-                        Grupo Responsável
-                      </span>
-                      <span className="text-base bg-muted px-3 py-2 rounded-md">
-                        {alertData.grupo_chamado}
-                      </span>
-                    </div>
-
-                    <div className="flex flex-col space-y-1">
-                      <span className="text-sm font-medium text-muted-foreground">Classificação</span>
-                      <span className="text-base bg-muted px-3 py-2 rounded-md">
-                        {alertData.tipo_chamado}
-                      </span>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              {/* Coluna Direita */}
-              <div className="space-y-4">
-                <div className="space-y-3">
-                  <h3 className="text-lg font-semibold text-foreground flex items-center gap-2">
-                    <Clock className="h-4 w-4" />
-                    Temporização
-                  </h3>
-                  
-                  <div className="space-y-3">
-                    <div className="flex flex-col space-y-1">
-                      <span className="text-sm font-medium text-muted-foreground flex items-center gap-1">
-                        <Calendar className="h-3 w-3" />
-                        Data de Abertura
-                      </span>
-                      <span className="text-base font-mono bg-muted px-3 py-2 rounded-md">
-                        {formatDate(alertData.abertura_chamado)}
-                      </span>
-                    </div>
-
-                    <div className="flex flex-col space-y-1">
-                      <span className="text-sm font-medium text-muted-foreground">Status Atual</span>
-                      <span className="text-base bg-muted px-3 py-2 rounded-md">
-                        {alertData.status_chamado}
-                      </span>
-                    </div>
-
-                    <div className="flex flex-col space-y-1">
-                      <span className="text-sm font-medium text-muted-foreground">Severidade</span>
-                      <div className="flex items-center gap-2">
-                        <Badge className={`${getSeverityColor(alertData.severidade_chamado)}`}>
-                          {alertData.severidade_chamado}
-                        </Badge>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <Separator />
-
-            {/* Resumo/Título do Chamado */}
-            <div className="space-y-3">
-              <h3 className="text-lg font-semibold text-foreground flex items-center gap-2">
-                <FileText className="h-4 w-4" />
-                Resumo do Chamado
-              </h3>
-              <div className="bg-muted p-4 rounded-lg">
-                <p className="text-base leading-relaxed">{alertData.resumo_chamado}</p>
-              </div>
-            </div>
-
-            <Separator />
-
-            {/* Informações Técnicas */}
-            <div className="space-y-3">
-              <h3 className="text-lg font-semibold text-foreground">Informações Técnicas</h3>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <span className="text-sm font-medium text-muted-foreground">ID do Alerta</span>
-                  <span className="text-sm font-mono bg-muted px-2 py-1 rounded block">
-                    {alertData.id}
-                  </span>
-                </div>
-                <div className="space-y-2">
-                  <span className="text-sm font-medium text-muted-foreground">Status de Acionamento</span>
-                  <span className="text-sm bg-muted px-2 py-1 rounded block">
-                    {alertData.acionado}
-                  </span>
-                </div>
-              </div>
+        <div className="space-y-4">
+          <div className="space-y-2">
+            <Label htmlFor="author-name" className="text-sm font-medium text-foreground">
+              Seu Nome
+            </Label>
+            <Input
+              id="author-name"
+              value={authorName}
+              onChange={(e) => setAuthorName(e.target.value)}
+              placeholder="Digite seu nome"
+              className="bg-background/50 border-border/30 focus:border-primary/50 focus:ring-primary/20 transition-all duration-200"
+            />
+          </div>
+          
+          <div className="space-y-2">
+            <div className="flex items-center gap-3 p-3 rounded-lg bg-background/30 border border-border/20">
+              <input
+                type="checkbox"
+                id="important-checkbox"
+                checked={isImportant}
+                onChange={(e) => setIsImportant(e.target.checked)}
+                className="h-4 w-4 rounded border-border/30 text-primary focus:ring-primary/20 focus:ring-offset-0"
+              />
+              <Label htmlFor="important-checkbox" className="text-sm font-medium cursor-pointer flex items-center gap-2">
+                <AlertTriangle className="h-4 w-4 text-important" />
+                Marcar como importante
+              </Label>
             </div>
           </div>
-        </ScrollArea>
-
-        {/* Footer com ações */}
-        <div className="flex justify-end gap-3 pt-4 border-t border-border">
-          <Button variant="outline" onClick={onClose}>
-            Fechar
-          </Button>
-          <Button 
-            variant="default"
-            onClick={() => {
-              // Aqui você pode adicionar ações específicas se necessário
-              console.log('Ação no chamado:', alertData.chamado);
-            }}
-          >
-            <User className="h-4 w-4 mr-2" />
-            Assumir Chamado
-          </Button>
         </div>
-      </DialogContent>
-    </Dialog>
+
+        <div className="space-y-2">
+          <Label htmlFor="note-message" className="text-sm font-medium text-foreground">
+            Mensagem do Recado
+          </Label>
+          <Textarea
+            id="note-message"
+            value={newNote}
+            onChange={(e) => setNewNote(e.target.value)}
+            placeholder="Digite o recado para o próximo turno..."
+            className="bg-background/50 border-border/30 focus:border-primary/50 focus:ring-primary/20 transition-all duration-200 min-h-[120px] resize-none"
+          />
+        </div>
+
+        <Button 
+          onClick={onAddNote} 
+          className="w-full bg-gradient-primary hover:shadow-glow hover:scale-[1.02] transition-all duration-200 font-medium"
+          size="lg"
+        >
+          <Plus className="h-5 w-5 mr-2" />
+          Adicionar Recado
+        </Button>
+      </div>
+    </Card>
+  );
+};
+
+const API_URL = 'https://f6ffk8e9fe.execute-api.us-east-1.amazonaws.com/prod/recadosturno';
+
+async function postShiftNote(nome: string, recado: string, importante: boolean) {
+  const response = await fetch(API_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ nome, recado, importante }),
+  });
+  if (!response.ok) {
+    const errorData = await response.text();
+    console.error('POST error:', response.status, errorData);
+    throw new Error(JSON.parse(errorData || '{}').error || 'Erro ao salvar recado');
+  }
+  return response.json();
+}
+
+async function deleteShiftNote(key: string) {
+  const response = await fetch(API_URL, {
+    method: 'DELETE',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ key }),
+  });
+  if (!response.ok) {
+    const errorData = await response.text();
+    console.error('DELETE error:', response.status, errorData);
+    throw new Error(JSON.parse(errorData || '{}').error || 'Erro ao remover recado');
+  }
+  return response.json();
+}
+
+async function getShiftNotes(): Promise<ShiftNote[]> {
+  const response = await fetch(API_URL, { method: 'GET' });
+
+  if (!response.ok) {
+    const txt = await response.text();
+    console.error('GET error:', response.status, txt);
+    throw new Error(txt || 'Erro ao carregar recados');
+  }
+
+  const text = await response.text();
+  let parsed: any = null;
+  if (!text) {
+    parsed = null;
+  } else {
+    try {
+      parsed = JSON.parse(text);
+    } catch (err) {
+      console.error('Erro ao parsear JSON do GET:', err, 'texto:', text);
+      throw new Error('Resposta inválida do servidor');
+    }
+  }
+
+  let rawNotes: any[] = [];
+  if (parsed == null) {
+    rawNotes = [];
+  } else if (Array.isArray(parsed)) {
+    rawNotes = parsed;
+  } else if (parsed.notes && Array.isArray(parsed.notes)) {
+    rawNotes = parsed.notes;
+  } else if (parsed.recados && Array.isArray(parsed.recados)) {
+    rawNotes = parsed.recados;
+  } else if (parsed && (parsed.nome || parsed.recado || parsed.key)) {
+    rawNotes = [parsed];
+  } else {
+    console.warn('Formato inesperado do payload GET:', parsed);
+    rawNotes = [];
+  }
+
+  return rawNotes.map((item: any, idx: number) => ({
+    id: item.key || item.id || item.Key || `note-${idx}`,
+    author: item.nome || item.author || '',
+    message: item.recado || item.message || '',
+    timestamp: item.timestamp || item.ts || new Date().toISOString(),
+    priority: item.importante ? 'important' : 'normal',
+  }));
+}
+
+export const ShiftNotes = () => {
+  const { toast } = useToast();
+  const [notes, setNotes] = useState<ShiftNote[]>([]);
+  const [newNote, setNewNote] = useState('');
+  const [authorName, setAuthorName] = useState('');
+  const [isImportant, setIsImportant] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const loadNotes = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const fetchedNotes = await getShiftNotes();
+      setNotes(fetchedNotes);
+    } catch (err: any) {
+      console.error('Erro ao carregar recados:', err);
+      setError(err.message || 'Erro ao carregar recados');
+      toast({
+        title: 'Erro',
+        description: err.message || 'Não foi possível carregar os recados.',
+        variant: 'destructive',
+      });
+    } finally {
+      setLoading(false);
+    }
+  }, [toast]);
+
+  useEffect(() => {
+    loadNotes();
+
+    const savedAuthor = localStorage.getItem('shiftNotesAuthor');
+    if (savedAuthor) setAuthorName(savedAuthor);
+  }, [loadNotes]);
+
+  useEffect(() => {
+    if (authorName) {
+      localStorage.setItem('shiftNotesAuthor', authorName);
+    }
+  }, [authorName]);
+
+  const addNote = useCallback(async () => {
+    if (!newNote.trim() || !authorName.trim()) {
+      toast({
+        title: 'Campos obrigatórios',
+        description: 'Preencha seu nome e a mensagem do recado.',
+        variant: 'destructive',
+      });
+      return;
+    }
+    try {
+      const data = await postShiftNote(authorName.trim(), newNote.trim(), isImportant);
+      const note: ShiftNote = {
+        id: data.key,
+        author: authorName.trim(),
+        message: newNote.trim(),
+        timestamp: data.timestamp,
+        priority: isImportant ? 'important' : 'normal',
+      };
+      setNotes((prev) => [note, ...prev]);
+      setNewNote('');
+      setIsImportant(false);
+      toast({ 
+        title: 'Recado adicionado!', 
+        description: 'O recado foi salvo com sucesso.' 
+      });
+    } catch (error: any) {
+      toast({
+        title: 'Erro',
+        description: error.message || 'Não foi possível salvar o recado.',
+        variant: 'destructive',
+      });
+    }
+  }, [newNote, authorName, isImportant, toast]);
+
+  const removeNote = useCallback(async (noteId: string) => {
+    try {
+      await deleteShiftNote(noteId);
+      setNotes((prev) => prev.filter((note) => note.id !== noteId));
+      toast({ 
+        title: 'Recado removido', 
+        description: 'O recado foi removido com sucesso.',
+        variant: 'destructive' 
+      });
+    } catch (error: any) {
+      toast({
+        title: 'Erro',
+        description: error.message || 'Não foi possível remover o recado.',
+        variant: 'destructive',
+      });
+    }
+  }, [toast]);
+
+  return (
+    <div className="min-h-screen bg-background p-4 md:p-8">
+      <div className="max-w-4xl mx-auto space-y-8">
+        <ShiftNoteForm
+          authorName={authorName}
+          setAuthorName={setAuthorName}
+          newNote={newNote}
+          setNewNote={setNewNote}
+          isImportant={isImportant}
+          setIsImportant={setIsImportant}
+          onAddNote={addNote}
+        />
+
+        <div className="space-y-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <h3 className="text-xl font-semibold text-foreground">Recados Ativos</h3>
+              <p className="text-sm text-muted-foreground">
+                {notes.length} recado{notes.length !== 1 ? 's' : ''} no sistema
+              </p>
+            </div>
+            <Button 
+              onClick={loadNotes} 
+              variant="outline"
+              className="border-border/30 hover:bg-primary/10 hover:border-primary/30 transition-all duration-200"
+              disabled={loading}
+            >
+              <RefreshCw className={cn("h-4 w-4 mr-2", loading && "animate-spin")} />
+              Atualizar
+            </Button>
+          </div>
+
+          {loading ? (
+            <Card className="bg-gradient-card/50 backdrop-blur-sm border-border/20 p-8">
+              <div className="flex items-center justify-center space-x-3 text-muted-foreground">
+                <RefreshCw className="h-5 w-5 animate-spin" />
+                <span>Carregando recados...</span>
+              </div>
+            </Card>
+          ) : error ? (
+            <Card className="bg-gradient-card/50 backdrop-blur-sm border-destructive/20 p-8">
+              <div className="text-center text-destructive">
+                <AlertTriangle className="h-8 w-8 mx-auto mb-2" />
+                <p>Ocorreu um erro ao carregar os recados.</p>
+              </div>
+            </Card>
+          ) : (
+            <ShiftNoteList notes={notes} onRemoveNote={removeNote} />
+          )}
+        </div>
+      </div>
+    </div>
   );
 };
