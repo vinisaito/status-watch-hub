@@ -1,46 +1,115 @@
-import { Search } from 'lucide-react';
-import { Input } from '@/components/ui/input';
+import { ChevronLeft, ChevronRight } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { Label } from '@/components/ui/label';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 
-interface ActionTableHeaderProps {
-  searchTerm: string;
-  setSearchTerm: (term: string) => void;
+interface ActionTablePaginationProps {
+  loading: boolean;
+  currentPage: number;
+  totalPages: number;
+  itemsPerPage: number;
   filteredCount: number;
   totalCount: number;
+  searchTerm: string;
+  handlePageChange: (page: number) => void;
+  handleItemsPerPageChange: (value: string) => void;
 }
 
-export const ActionTableHeader = ({ 
-  searchTerm, 
-  setSearchTerm, 
-  filteredCount, 
-  totalCount 
-}: ActionTableHeaderProps) => {
+export const ActionTablePagination = ({
+  loading,
+  currentPage,
+  totalPages,
+  itemsPerPage,
+  filteredCount,
+  totalCount,
+  searchTerm,
+  handlePageChange,
+  handleItemsPerPageChange
+}: ActionTablePaginationProps) => {
+  
+  // Não renderizar paginação se estiver carregando ou não houver dados
+  if (loading || filteredCount === 0 || totalPages <= 1) {
+    return null;
+  }
+
   return (
-    <div>
-      {/* Campo de Pesquisa */}
-      <div className="relative mb-4">
-        <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-        <Input
-          placeholder="Pesquisar por chamado, tipo, grupo, status, título..."
-          value={searchTerm}
-          onChange={(e) => setSearchTerm(e.target.value)}
-          className="pl-10"
-        />
+    <div className="flex flex-col sm:flex-row items-center justify-between mt-4 pt-4 border-t border-border gap-4">
+      {/* Contador de registros */}
+      <div className="text-sm text-muted-foreground text-center sm:text-left">
+        Mostrando {((currentPage - 1) * itemsPerPage) + 1} a {Math.min(currentPage * itemsPerPage, filteredCount)} de {filteredCount} registros
+        {searchTerm && filteredCount !== totalCount && ` (filtrados de ${totalCount})`}
       </div>
 
-      {/* Contador de resultados */}
-      {searchTerm && (
-        <div className="text-sm text-muted-foreground">
-          {filteredCount === 0 ? (
-            <span>Nenhum resultado encontrado para "{searchTerm}"</span>
-          ) : (
-            <span>
-              {filteredCount} resultado{filteredCount !== 1 ? 's' : ''}
-              {filteredCount !== totalCount && ` de ${totalCount} `}
-              para "{searchTerm}"
-            </span>
-          )}
+      {/* Seletor de itens por página */}
+      <div className="flex items-center gap-2">
+        <Label htmlFor="itemsPerPage" className="text-sm font-medium whitespace-nowrap">
+          Por Página:
+        </Label>
+        <Select value={itemsPerPage.toString()} onValueChange={handleItemsPerPageChange}>
+          <SelectTrigger className="w-20">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="5">5</SelectItem>
+            <SelectItem value="10">10</SelectItem>
+            <SelectItem value="15">15</SelectItem>
+            <SelectItem value="20">20</SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
+
+      {/* Controles de navegação */}
+      <div className="flex items-center gap-2">
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => handlePageChange(currentPage - 1)}
+          disabled={currentPage === 1}
+          className="h-8 px-3"
+        >
+          <ChevronLeft className="h-4 w-4 mr-1" />
+          Anterior
+        </Button>
+
+        {/* Botões numerados de páginas */}
+        <div className="flex items-center gap-1">
+          {[...Array(Math.min(totalPages, 5))].map((_, index) => {
+            let page;
+            if (totalPages <= 5) {
+              page = index + 1;
+            } else if (currentPage <= 3) {
+              page = index + 1;
+            } else if (currentPage >= totalPages - 2) {
+              page = totalPages - 4 + index;
+            } else {
+              page = currentPage - 2 + index;
+            }
+
+            return (
+              <Button
+                key={page}
+                variant={currentPage === page ? "default" : "outline"}
+                size="sm"
+                onClick={() => handlePageChange(page)}
+                className="h-8 w-8 p-0"
+              >
+                {page}
+              </Button>
+            );
+          })}
         </div>
-      )}
+
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => handlePageChange(currentPage + 1)}
+          disabled={currentPage === totalPages}
+          className="h-8 px-3"
+        >
+          Próximo
+          <ChevronRight className="h-4 w-4 ml-1" />
+        </Button>
+      </div>
     </div>
   );
 };
