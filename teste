@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback } from 'react';
+import { useState, useMemo, useCallback, useEffect, useRef } from 'react';
 import { Check, AlertTriangle, Timer, Play, Pause, CheckCircle, Edit3, Search, ChevronLeft, ChevronRight, ArrowUpDown, ArrowUp, ArrowDown, Settings } from 'lucide-react';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
@@ -11,7 +11,6 @@ import { toast } from '@/hooks/use-toast';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { Textarea } from '@/components/ui/textarea';
-import { useEffect } from 'react';
 
 // WebSocket hook
 import { useWebsocketTimers } from "@/hooks/useWebsocketTimers";
@@ -36,6 +35,7 @@ interface ActionTableProps {
   alertData: AlertData[];
   onUpdateAcknowledgment: (alertId: string, acknowledged: boolean) => void;
   loading: boolean;
+  websocket?: WebSocket | null;
 }
 
 type SortField = keyof AlertData;
@@ -50,7 +50,7 @@ const LEVEL_NAMES = {
   5: "4ª Escalação"
 };
 
-export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: ActionTableProps) => {
+export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading, websocket }: ActionTableProps) => {
   // Estados principais
   const [currentPage, setCurrentPage] = useState(1);
   const [searchTerm, setSearchTerm] = useState('');
@@ -62,7 +62,10 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
   const [timerManagementOpen, setTimerManagementOpen] = useState(false);
   const [selectedChamadoForTimer, setSelectedChamadoForTimer] = useState<string>('');
 
-  // WebSocket
+  // Estado do WebSocket interno para timers
+  const [timerWebsocket, setTimerWebsocket] = useState<WebSocket | null>(null);
+
+  // WebSocket para timers
   const {
     timers,
     isConnected,
@@ -78,6 +81,41 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
     setWatchedChamados
   } = useWebsocketTimers();
 
+  // Conectar ao WebSocket de timers
+  useEffect(() => {
+    if (!timerWebsocket || timerWebsocket.readyState === WebSocket.CLOSED) {
+      const ws = new WebSocket('wss://wpo4vov2k8.execute-api.us-east-1.amazonaws.com/prod/');
+      
+      ws.onopen = () => {
+        console.log('Timer WebSocket conectado');
+        setTimerWebsocket(ws);
+      };
+      
+      ws.onclose = () => {
+        console.log('Timer WebSocket desconectado, reconectando...');
+        // Reconectar após 3 segundos
+        setTimeout(() => {
+          if (!timerWebsocket || timerWebsocket.readyState === WebSocket.CLOSED) {
+            const newWs = new WebSocket('wss://wpo4vov2k8.execute-api.us-east-1.amazonaws.com/prod/');
+            setTimerWebsocket(newWs);
+          }
+        }, 3000);
+      };
+      
+      ws.onerror = (error) => {
+        console.error('Erro no Timer WebSocket:', error);
+      };
+      
+      setTimerWebsocket(ws);
+    }
+    
+    return () => {
+      if (timerWebsocket) {
+        timerWebsocket.close(1000, 'Component unmounting');
+      }
+    };
+  }, []);
+
   // Primeiro registrar os chamados que queremos monitorar
   useEffect(() => {
     if (!alertData || alertData.length === 0) return;
@@ -92,13 +130,13 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
   // Função para obter a cor do timer baseada no tempo restante
   const getTimerColor = useCallback((remainingTime: number) => {
     if (remainingTime > 600) { // > 10 minutos
-      return 'text-timer-safe';
+      return 'text-green-600';
     } else if (remainingTime > 300) { // 5-10 minutos
-      return 'text-timer-warning';
+      return 'text-yellow-600';
     } else if (remainingTime > 120) { // 2-5 minutos
-      return 'text-timer-danger';
+      return 'text-orange-600';
     } else { // < 2 minutos
-      return 'text-timer-critical animate-pulse';
+      return 'text-red-600 animate-pulse';
     }
   }, []);
 
@@ -209,11 +247,21 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
       }
     }
     return historico;
-  }, [timers]);
+  }, [timers, formatDate]);
 
   // Handlers para acionamento
   const handleAcknowledgment = useCallback(async (alert: AlertData) => {
     try {
+      // Enviar via WebSocket se disponível
+      if (websocket && websocket.readyState === WebSocket.OPEN) {
+        const message = {
+          action: 'acknowledge',
+          chamado: alert.chamado,
+          timestamp: new Date().toISOString()
+        };
+        websocket.send(JSON.stringify(message));
+      }
+
       toast({
         title: "Alerta acionado",
         description: `Chamado ${alert.chamado} foi acionado com sucesso`,
@@ -227,7 +275,7 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
         variant: "destructive",
       });
     }
-  }, [onUpdateAcknowledgment]);
+  }, [onUpdateAcknowledgment, websocket]);
 
   // Handlers para timer
   const handleStartTimer = useCallback((chamado: string) => {
@@ -336,6 +384,17 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
       // Finalizar o chamado
       updateStatusFinal(chamadoNum, 'finalizado');
 
+      // Enviar via WebSocket se disponível
+      if (websocket && websocket.readyState === WebSocket.OPEN) {
+        const message = {
+          action: 'finalize',
+          chamado: chamado,
+          observacao: observacao,
+          timestamp: new Date().toISOString()
+        };
+        websocket.send(JSON.stringify(message));
+      }
+
       // Aguardar um momento para garantir que o status foi atualizado
       await new Promise(resolve => setTimeout(resolve, 500));
 
@@ -347,7 +406,7 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
       console.error('Erro em handleFinalize:', error);
       throw error;
     }
-  }, [updateObservacao, updateStatusFinal, getState, getCurrentActiveLevel]);
+  }, [updateObservacao, updateStatusFinal, getState, getCurrentActiveLevel, websocket]);
 
   // Handlers para ordenação
   const handleSort = useCallback((field: SortField) => {
@@ -443,8 +502,29 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
 
   return (
     <TooltipProvider>
-      <Card className="bg-card border-border shadow-elegant">
+      <Card className="bg-card border-border shadow-lg">
         <CardHeader>
+          {/* Status das conexões */}
+          <div className="flex items-center gap-4 mb-4 text-sm">
+            <div className={`flex items-center gap-2 ${
+              websocket?.readyState === WebSocket.OPEN ? 'text-green-600' : 'text-red-600'
+            }`}>
+              <div className={`w-2 h-2 rounded-full ${
+                websocket?.readyState === WebSocket.OPEN ? 'bg-green-500' : 'bg-red-500'
+              }`}></div>
+              WebSocket Principal: {websocket?.readyState === WebSocket.OPEN ? 'Conectado' : 'Desconectado'}
+            </div>
+            
+            <div className={`flex items-center gap-2 ${
+              isConnected ? 'text-green-600' : 'text-red-600'
+            }`}>
+              <div className={`w-2 h-2 rounded-full ${
+                isConnected ? 'bg-green-500' : 'bg-red-500'
+              }`}></div>
+              Timers: {isConnected ? 'Conectado' : 'Desconectado'}
+            </div>
+          </div>
+
           {/* Campo de Pesquisa */}
           <div className="relative mb-4">
             <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
@@ -636,8 +716,8 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
                             ) : activeLevel && timerState ? (
                               <div className="space-y-1 text-center">
                                 <div className="flex items-center gap-1 justify-center">
-                                  <Timer className="h-3 w-3 text-timer-active animate-pulse" />
-                                  <Badge className="bg-timer-active text-white text-xs font-semibold px-2 py-1 whitespace-nowrap">
+                                  <Timer className="h-3 w-3 text-blue-600 animate-pulse" />
+                                  <Badge className="bg-blue-600 text-white text-xs font-semibold px-2 py-1 whitespace-nowrap">
                                     {LEVEL_NAMES[activeLevel as keyof typeof LEVEL_NAMES]}
                                   </Badge>
                                 </div>
@@ -645,7 +725,7 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
                                   {formatTime(remainingTime)}
                                 </div>
                                 <Button
-                                  variant="timer"
+                                  variant="outline"
                                   size="sm"
                                   onClick={() => handleOpenTimerManagement(alert.chamado)}
                                   className="h-6 px-2 text-xs font-semibold"
@@ -667,10 +747,10 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
                             ) : (
                               <div className="flex flex-col items-center gap-2">
                                 <Button
-                                  variant="timer"
+                                  variant="default"
                                   size="sm"
                                   onClick={() => handleStartTimer(alert.chamado)}
-                                  className="h-7 px-3 text-xs font-semibold whitespace-nowrap"
+                                  className="h-7 px-3 text-xs font-semibold whitespace-nowrap bg-blue-600 hover:bg-blue-700"
                                   disabled={!isConnected}
                                 >
                                   <Play className="h-3 w-3 mr-1" />
@@ -687,11 +767,11 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
                           <Tooltip>
                             <TooltipTrigger asChild>
                               <Button
-                                variant={isChat ? "success" : "outline"}
+                                variant={isChat ? "default" : "outline"}
                                 size="sm"
                                 onClick={() => !isChat && handleAcknowledgment(alert)}
                                 disabled={isChat}
-                                className="h-8 w-8 p-0"
+                                className={`h-8 w-8 p-0 ${isChat ? 'bg-green-600 hover:bg-green-700' : ''}`}
                               >
                                 {isChat ? (
                                   <Check className="h-4 w-4" />
@@ -808,6 +888,7 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
               updateStatusFinal={updateStatusFinal}
               onNextLevel={handleNextLevel}
               onPreviousLevel={handlePreviousLevel}
+              onFinalize={handleFinalize}
               historicoAcionamentos={getHistoricoAcionamentos(parseInt(selectedChamadoForTimer))}
             />
           )}
