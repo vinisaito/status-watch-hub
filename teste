@@ -1,5 +1,40 @@
-Dashboard.tsx:95 
- Erro ao processar dados do WebSocket: SyntaxError: Unexpected token 'O', "OK" is not valid JSON
-    at JSON.parse (<anonymous>)
-    at ws.onmessage (Dashboard.tsx:66:27)
-ws.onmessage	@	Dashboard.tsx:95
+ws.onmessage = (event) => {
+  let apiData: any[] = [];
+
+  try {
+    // tenta parsear JSON
+    const data = JSON.parse(event.data);
+
+    // Se os dados já vêm como array
+    apiData = Array.isArray(data)
+      ? data
+      : data.body
+        ? JSON.parse(data.body)
+        : data.dados || [];
+
+    if (!apiData || apiData.length === 0) return;
+  } catch (error) {
+    // Se não for JSON, ignora ou trata mensagens como "OK"
+    console.log("Mensagem não-JSON recebida via WebSocket:", event.data);
+    return; // ignora
+  }
+
+  // transforma e seta os alertas normalmente
+  const transformedData: AlertData[] = apiData.map((item: any, index: number) => ({
+    id: `alert-${index}`,
+    tipo_chamado: item.tipo_chamado || 'N/A',
+    chamado: item.chamado || 'N/A',
+    grupo_chamado: item.grupo_chamado || 'N/A',
+    status_chamado: item.status_chamado || 'N/A',
+    abertura_chamado: item.dat_abertura_chamado || item.abertura_chamado || item.data_abertura || '',
+    resumo_chamado: item.resumo_chamado || 'Título não disponível',
+    severidade_chamado: item.severidade_chamado || 'N/A',
+    acionado: item.acionado || 'N/A',
+    chat: false,
+  }));
+
+  setAlertData(transformedData);
+
+  const unacknowledged = transformedData.filter(alert => !alert.acionado);
+  if (unacknowledged.length > 0) playAlertSound();
+};
