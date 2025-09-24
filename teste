@@ -164,11 +164,10 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
     const timerState = timers.get(chamado);
     if (!timerState) return null;
 
-    // Verificar levels de 1 a 5 para encontrar o ativo (usando a estrutura correta)
+    // Verificar levels de 1 a 5 para encontrar o ativo
     for (let level = 1; level <= 5; level++) {
-      const levelPrefix = `level${level}` as 'level1' | 'level2' | 'level3' | 'level4' | 'level5';
-      const status = timerState[`${levelPrefix}_status`];
-      if (status === 'running') {
+      const statusKey = `level${level}_status` as keyof typeof timerState;
+      if (timerState[statusKey] === 'running') {
         return level;
       }
     }
@@ -817,3 +816,16 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
     </TooltipProvider>
   );
 };
+
+
+
+
+
+
+
+
+
+
+
+remainingTime
+remainingTime
