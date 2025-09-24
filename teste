@@ -1,7 +1,7 @@
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { useState } from 'react';
 import { useChatAcionados } from '@/hooks/use-chat-acionados';
-import { AlertTriangle, AlertCircle, Clock, Timer, UserCheck } from 'lucide-react';
+import { AlertTriangle, AlertCircle, Clock, Timer, UserCheck, BarChart3, MessageCircle, CheckCircle2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 interface AlertData {
@@ -51,6 +51,17 @@ export const MonitoringCards = ({ alertData, onFilterSelect }: MonitoringCardsPr
     return slaMinutes - diffMinutes;
   };
 
+  // Métricas básicas
+  const total = alertData.length;
+  
+  const pendenteEnvioChat = alertData.filter(alert => 
+    !alert.chat && !isAcionado(alert.chamado)
+  ).length;
+
+  const confirmados = alertData.filter(alert => 
+    alert.chat || isAcionado(alert.chamado)
+  ).length;
+
   // Métricas baseadas em tempo
   const tempoExpirado = alertData.filter(alert => {
     const timeRemaining = getTimeRemaining(alert.abertura_chamado);
@@ -76,7 +87,43 @@ export const MonitoringCards = ({ alertData, onFilterSelect }: MonitoringCardsPr
   ).length;
 
   return (
-    <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-5 gap-4 w-full max-w-none">
+    <div className="grid grid-cols-1 md:grid-cols-4 lg:grid-cols-8 gap-4 w-full max-w-none">
+      {/* Total */}
+      <CompactCard
+        title="Total"
+        count={total}
+        totalCount={alertData.length}
+        icon={BarChart3}
+        type="total"
+        filterKey="TOTAL"
+        isActive={activeFilter === 'TOTAL'}
+        onClick={() => handleCardClick('TOTAL')}
+      />
+
+      {/* Pendente Envio Chat */}
+      <CompactCard
+        title="Pendente Envio Chat"
+        count={pendenteEnvioChat}
+        totalCount={alertData.length}
+        icon={MessageCircle}
+        type="pendente-chat"
+        filterKey="PENDENTE_ENVIO_CHAT"
+        isActive={activeFilter === 'PENDENTE_ENVIO_CHAT'}
+        onClick={() => handleCardClick('PENDENTE_ENVIO_CHAT')}
+      />
+
+      {/* Confirmados */}
+      <CompactCard
+        title="Confirmados"
+        count={confirmados}
+        totalCount={alertData.length}
+        icon={CheckCircle2}
+        type="confirmados"
+        filterKey="CONFIRMADOS"
+        isActive={activeFilter === 'CONFIRMADOS'}
+        onClick={() => handleCardClick('CONFIRMADOS')}
+      />
+
       {/* Tempo Expirado */}
       <CompactCard
         title="Tempo Expirado"
@@ -153,6 +200,27 @@ interface CompactCardProps {
 
 function CompactCard({ title, count, totalCount, icon: Icon, type, isActive, onClick }: CompactCardProps) {
   const typeStyles = {
+    'total': {
+      bg: 'bg-primary/10',
+      border: 'border-primary/30',
+      text: 'text-primary',
+      hover: 'hover:bg-primary/20 hover:border-primary/50',
+      animation: '',
+    },
+    'pendente-chat': {
+      bg: 'bg-warning/10',
+      border: 'border-warning/30',
+      text: 'text-warning',
+      hover: 'hover:bg-warning/20 hover:border-warning/50',
+      animation: count > 0 ? 'animate-pulse' : '',
+    },
+    'confirmados': {
+      bg: 'bg-success/10',
+      border: 'border-success/30',
+      text: 'text-success',
+      hover: 'hover:bg-success/20 hover:border-success/50',
+      animation: '',
+    },
     'tempo-expirado': {
       bg: 'bg-critical/10',
       border: 'border-critical/30',
@@ -242,6 +310,9 @@ interface CompactSubCardProps {
 
 function CompactSubCard({ label, count, type, isActive, onClick }: CompactSubCardProps) {
   const typeStyles = {
+    'total': 'text-primary border-primary/20 hover:border-primary/40',
+    'pendente-chat': 'text-warning border-warning/20 hover:border-warning/40',
+    'confirmados': 'text-success border-success/20 hover:border-success/40',
     'tempo-expirado': 'text-critical border-critical/20 hover:border-critical/40',
     'dez-minutos': 'text-warning border-warning/20 hover:border-warning/40',
     'cinco-minutos': 'text-caution border-caution/20 hover:border-caution/40',
