@@ -1,7 +1,7 @@
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { useState } from 'react';
 import { useChatAcionados } from '@/hooks/use-chat-acionados';
-import { AlertTriangle, AlertCircle, Clock } from 'lucide-react';
+import { AlertTriangle, AlertCircle, Clock, Timer, UserCheck } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 interface AlertData {
@@ -39,112 +39,103 @@ export const MonitoringCards = ({ alertData, onFilterSelect }: MonitoringCardsPr
     }
   };
 
-  // Métricas com filtro de chatAcionado
-  const sev4Incidents = alertData.filter(alert =>
-    alert.tipo_chamado.toLowerCase().includes('incidente') &&
-    alert.severidade_chamado.includes('4') &&
-    !isAcionado(alert.chamado)
+  // Função para calcular tempo restante em minutos
+  const getTimeRemaining = (openingTime: string) => {
+    const now = new Date();
+    const opening = new Date(openingTime);
+    const diffMs = now.getTime() - opening.getTime();
+    const diffMinutes = Math.floor(diffMs / (1000 * 60));
+    
+    // Assumindo SLA de 60 minutos para alertas críticos
+    const slaMinutes = 60;
+    return slaMinutes - diffMinutes;
+  };
+
+  // Métricas baseadas em tempo
+  const tempoExpirado = alertData.filter(alert => {
+    const timeRemaining = getTimeRemaining(alert.abertura_chamado);
+    return timeRemaining <= 0 && !isAcionado(alert.chamado);
+  }).length;
+
+  const dezMinutosRestantes = alertData.filter(alert => {
+    const timeRemaining = getTimeRemaining(alert.abertura_chamado);
+    return timeRemaining > 0 && timeRemaining <= 10 && !isAcionado(alert.chamado);
+  }).length;
+
+  const cincoMinutosRestantes = alertData.filter(alert => {
+    const timeRemaining = getTimeRemaining(alert.abertura_chamado);
+    return timeRemaining > 0 && timeRemaining <= 5 && !isAcionado(alert.chamado);
+  }).length;
+
+  const comOperador = alertData.filter(alert => 
+    alert.acionado === 'OK' || isAcionado(alert.chamado)
   ).length;
 
-  const totalSev4Incidents = alertData.filter(alert =>
-    alert.tipo_chamado.toLowerCase().includes('incidente') &&
-    alert.severidade_chamado.includes('4') &&
-    alert.severidade_chamado.includes('5')
-  ).length;
-
-  const sev4Alerts = alertData.filter(alert =>
-    alert.tipo_chamado.toLowerCase().includes('alerta') &&
-    alert.severidade_chamado.includes('4') &&
-    alert.acionado !== 'OK' &&
-    !isAcionado(alert.chamado)
-  ).length;
-
-  const totalSev4Alerts = alertData.filter(alert =>
-    alert.tipo_chamado.toLowerCase().includes('alerta') &&
-    alert.severidade_chamado.includes('4')
-  ).length;
-
-  const sev3Incidents = alertData.filter(alert =>
-    alert.tipo_chamado.toLowerCase().includes('incidente') &&
-    alert.severidade_chamado.includes('3') &&
-    !isAcionado(alert.chamado)
-  ).length;
-
-  const totalSev3Incidents = alertData.filter(alert =>
-    alert.tipo_chamado.toLowerCase().includes('incidente') &&
-    alert.severidade_chamado.includes('3')
+  const cenariosCrise = alertData.filter(alert =>
+    alert.severidade_chamado.includes('5') && !isAcionado(alert.chamado)
   ).length;
 
   return (
-    <div className="grid grid-cols-1 md:grid-cols-3 gap-6 w-full max-w-none">
-      {/* SEV4 Incidents - Estilo Compacto */}
-      <div className="space-y-4">
-        <CompactCard
-          title="Incidentes SEV4/SEV5"
-          count={sev4Incidents}
-          totalCount={totalSev4Incidents}
-          icon={AlertTriangle}
-          type="sev4-incident"
-          filterKey="SEV4_INCIDENT"
-          isActive={activeFilter === 'SEV4_INCIDENT'}
-          onClick={() => handleCardClick('SEV4_INCIDENT')}
-        />
-        
-        <CompactSubCard
-          label="Total"
-          count={totalSev4Incidents}
-          type="sev4-incident"
-          filterKey="SEV4_INCIDENT_TOTAL"
-          isActive={activeFilter === 'SEV4_INCIDENT_TOTAL'}
-          onClick={() => handleCardClick('SEV4_INCIDENT_TOTAL')}
-        />
-      </div>
+    <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-5 gap-4 w-full max-w-none">
+      {/* Tempo Expirado */}
+      <CompactCard
+        title="Tempo Expirado"
+        count={tempoExpirado}
+        totalCount={alertData.length}
+        icon={AlertTriangle}
+        type="tempo-expirado"
+        filterKey="TEMPO_EXPIRADO"
+        isActive={activeFilter === 'TEMPO_EXPIRADO'}
+        onClick={() => handleCardClick('TEMPO_EXPIRADO')}
+      />
 
-      {/* SEV4 Alerts - Estilo Compacto */}
-      <div className="space-y-4">
-        <CompactCard
-          title="Alertas SEV4"
-          count={sev4Alerts}
-          totalCount={totalSev4Alerts}
-          icon={AlertCircle}
-          type="sev4-alert"
-          filterKey="SEV4_ALERT"
-          isActive={activeFilter === 'SEV4_ALERT'}
-          onClick={() => handleCardClick('SEV4_ALERT')}
-        />
-        
-        <CompactSubCard
-          label="Total"
-          count={totalSev4Alerts}
-          type="sev4-alert"
-          filterKey="SEV4_ALERT_TOTAL"
-          isActive={activeFilter === 'SEV4_ALERT_TOTAL'}
-          onClick={() => handleCardClick('SEV4_ALERT_TOTAL')}
-        />
-      </div>
+      {/* 10 Minutos Restantes */}
+      <CompactCard
+        title="10min Restantes"
+        count={dezMinutosRestantes}
+        totalCount={alertData.length}
+        icon={Clock}
+        type="dez-minutos"
+        filterKey="DEZ_MINUTOS"
+        isActive={activeFilter === 'DEZ_MINUTOS'}
+        onClick={() => handleCardClick('DEZ_MINUTOS')}
+      />
 
-      {/* SEV3 Incidents - Estilo Compacto */}
-      <div className="space-y-4">
-        <CompactCard
-          title="Incidentes SEV3"
-          count={sev3Incidents}
-          totalCount={totalSev3Incidents}
-          icon={Clock}
-          type="sev3-incident"
-          filterKey="SEV3_INCIDENT"
-          isActive={activeFilter === 'SEV3_INCIDENT'}
-          onClick={() => handleCardClick('SEV3_INCIDENT')}
-        />
-        
-        <CompactSubCard
-          label="Total"
-          count={totalSev3Incidents}
-          type="sev3-incident"
-          filterKey="SEV3_INCIDENT_TOTAL"
-          isActive={activeFilter === 'SEV3_INCIDENT_TOTAL'}
-          onClick={() => handleCardClick('SEV3_INCIDENT_TOTAL')}
-        />
-      </div>
+      {/* 5 Minutos Restantes */}
+      <CompactCard
+        title="5min Restantes"
+        count={cincoMinutosRestantes}
+        totalCount={alertData.length}
+        icon={Timer}
+        type="cinco-minutos"
+        filterKey="CINCO_MINUTOS"
+        isActive={activeFilter === 'CINCO_MINUTOS'}
+        onClick={() => handleCardClick('CINCO_MINUTOS')}
+      />
+
+      {/* Com Operador */}
+      <CompactCard
+        title="Com Operador"
+        count={comOperador}
+        totalCount={alertData.length}
+        icon={UserCheck}
+        type="com-operador"
+        filterKey="COM_OPERADOR"
+        isActive={activeFilter === 'COM_OPERADOR'}
+        onClick={() => handleCardClick('COM_OPERADOR')}
+      />
+
+      {/* Cenários de Crise */}
+      <CompactCard
+        title="Cenários de Crise"
+        count={cenariosCrise}
+        totalCount={alertData.length}
+        icon={AlertCircle}
+        type="cenarios-crise"
+        filterKey="CENARIOS_CRISE"
+        isActive={activeFilter === 'CENARIOS_CRISE'}
+        onClick={() => handleCardClick('CENARIOS_CRISE')}
+      />
     </div>
   );
 };
@@ -162,26 +153,40 @@ interface CompactCardProps {
 
 function CompactCard({ title, count, totalCount, icon: Icon, type, isActive, onClick }: CompactCardProps) {
   const typeStyles = {
-    'sev4-incident': {
-      bg: 'bg-sev4-incident/10',
-      border: 'border-sev4-incident/30',
-      text: 'text-sev4-incident',
-      hover: 'hover:bg-sev4-incident/20 hover:border-sev4-incident/50',
+    'tempo-expirado': {
+      bg: 'bg-critical/10',
+      border: 'border-critical/30',
+      text: 'text-critical',
+      hover: 'hover:bg-critical/20 hover:border-critical/50',
       animation: count > 0 ? 'animate-pulse-critical' : '',
     },
-    'sev4-alert': {
-      bg: 'bg-sev4-alert/10',
-      border: 'border-sev4-alert/30', 
-      text: 'text-sev4-alert',
-      hover: 'hover:bg-sev4-alert/20 hover:border-sev4-alert/50',
+    'dez-minutos': {
+      bg: 'bg-warning/10',
+      border: 'border-warning/30', 
+      text: 'text-warning',
+      hover: 'hover:bg-warning/20 hover:border-warning/50',
+      animation: count > 0 ? 'animate-pulse' : '',
+    },
+    'cinco-minutos': {
+      bg: 'bg-caution/10',
+      border: 'border-caution/30',
+      text: 'text-caution',
+      hover: 'hover:bg-caution/20 hover:border-caution/50',
+      animation: count > 0 ? 'animate-pulse' : '',
+    },
+    'com-operador': {
+      bg: 'bg-success/10',
+      border: 'border-success/30',
+      text: 'text-success',
+      hover: 'hover:bg-success/20 hover:border-success/50',
       animation: '',
     },
-    'sev3-incident': {
-      bg: 'bg-sev3-incident/10',
-      border: 'border-sev3-incident/30',
-      text: 'text-sev3-incident',
-      hover: 'hover:bg-sev3-incident/20 hover:border-sev3-incident/50',
-      animation: '',
+    'cenarios-crise': {
+      bg: 'bg-crisis/10',
+      border: 'border-crisis/30',
+      text: 'text-crisis',
+      hover: 'hover:bg-crisis/20 hover:border-crisis/50',
+      animation: count > 0 ? 'animate-glow-crisis' : '',
     },
   };
 
@@ -237,9 +242,11 @@ interface CompactSubCardProps {
 
 function CompactSubCard({ label, count, type, isActive, onClick }: CompactSubCardProps) {
   const typeStyles = {
-    'sev4-incident': 'text-sev4-incident border-sev4-incident/20 hover:border-sev4-incident/40',
-    'sev4-alert': 'text-sev4-alert border-sev4-alert/20 hover:border-sev4-alert/40',
-    'sev3-incident': 'text-sev3-incident border-sev3-incident/20 hover:border-sev3-incident/40',
+    'tempo-expirado': 'text-critical border-critical/20 hover:border-critical/40',
+    'dez-minutos': 'text-warning border-warning/20 hover:border-warning/40',
+    'cinco-minutos': 'text-caution border-caution/20 hover:border-caution/40',
+    'com-operador': 'text-success border-success/20 hover:border-success/40',
+    'cenarios-crise': 'text-crisis border-crisis/20 hover:border-crisis/40',
   };
 
   return (
