@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import {
   Settings,
   Sun,
@@ -19,7 +19,7 @@ import { ShiftNotes } from './ShiftNotes';
 import { WebhookConfig } from './WebhookConfig';
 import { InstructionsSection } from './InstructionsSection';
 import { Sheet, SheetContent } from "@/components/ui/sheet";
-import  MaintenancePage  from './MaintenancePage';
+import MaintenancePage from './MaintenancePage';
 import { useChatAcionados } from '@/hooks/use-chat-acionados';
 
 export interface AlertData {
@@ -42,63 +42,11 @@ const Dashboard = () => {
   const [loading, setLoading] = useState(false);
   const [activeSection, setActiveSection] = useState<'incidents' | 'rdm' | 'notes' | 'instructions' | null>(null);
   const [filter, setFilter] = useState<string | null>(null);
-  
+
+  const wsRef = useRef<WebSocket | null>(null);
   const { isAcionado } = useChatAcionados();
 
-  const fetchAlertData = async () => {
-    setLoading(true);
-    try {
-      const response = await fetch('https://f6ffk8e9fe.execute-api.us-east-1.amazonaws.com/prod/dados');
-
-      if (!response.ok) {
-        throw new Error(`HTTP error! status_chamado: ${response.status}`);
-      }
-
-      const data = await response.json();
-      console.log("data from API:", data);
-
-      // Se a API já retorna array
-      const apiData = Array.isArray(data)
-        ? data
-        : data.body
-          ? JSON.parse(data.body)
-          : [];
-
-      if (!apiData || apiData.length === 0) {
-        throw new Error("Nenhum dado encontrado");
-      }
-
-      const transformedData: AlertData[] = apiData.map((item: any, index: number) => ({
-        id: `alert-${index}`,
-        tipo_chamado: item.tipo_chamado || 'N/A',
-        chamado: item.chamado || 'N/A',
-        grupo_chamado: item.grupo_chamado || 'N/A',
-        status_chamado: item.status_chamado || 'N/A',
-        abertura_chamado: item.dat_abertura_chamado || item.abertura_chamado || item.data_abertura || '',
-        resumo_chamado: item.resumo_chamado || 'Título não disponível',
-        severidade_chamado: item.severidade_chamado || 'N/A',
-        acionado: item.acionado || 'N/A',
-        chat: false,
-      }));
-
-      setAlertData(transformedData);
-
-      const unacknowledged = transformedData.filter(alert => !alert.acionado);
-      if (unacknowledged.length > 0) {
-        playAlertSound();
-      }
-    } catch (error) {
-      console.error('Error fetching data:', error);
-      toast({
-        title: "Erro ao buscar dados",
-        description: "Não foi possível conectar com a API",
-        variant: "destructive",
-      });
-    } finally {
-      setLoading(false);
-    }
-  };
-
+  // Função para tocar som de alerta
   const playAlertSound = () => {
     const audio = new Audio('data:audio/wav;base64,UklGRnoGAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQoGAACBhYqFbF1fdJivrJBhNjVgodDbq2EcBj+a2/LDciUFLIHO8tiJNwgZaLvt559NEAxQp+PwtmMcBjiR1/LMeSwFJHfH8N2QQAoUXrTp66hVFApGn+Dqu2sgBDR+w/PCaWEbEBOa5rWgdyoEKAA=');
     audio.play().catch(() => {
@@ -106,6 +54,18 @@ const Dashboard = () => {
     });
   };
 
+  // Atualiza o estado quando alerta é reconhecido
+  const updateAlertAcknowledgment = (alertId: string, acknowledged: boolean) => {
+    setAlertData(prev =>
+      prev.map(alert =>
+        alert.id === alertId
+          ? { ...alert, chat: acknowledged }
+          : alert
+      )
+    );
+  };
+
+  // Alterna tema dark/light
   const toggleTheme = () => {
     setIsDarkMode(!isDarkMode);
     if (isDarkMode) {
@@ -117,22 +77,73 @@ const Dashboard = () => {
     }
   };
 
-  const updateAlertAcknowledgment = (alertId: string, acknowledged: boolean) => {
-    setAlertData(prev =>
-      prev.map(alert =>
-        alert.id === alertId
-          ? { ...alert, chat: acknowledged }
-          : alert
-      )
-    );
-  };
-
+  // Conecta ao WebSocket ao montar o componente
   useEffect(() => {
-    fetchAlertData();
-    const interval = setInterval(fetchAlertData, 600000);
-    return () => clearInterval(interval);
+    setLoading(true);
+    const wsUrl = 'wss://f6ffk8e9fe.execute-api.us-east-1.amazonaws.com/prod';
+    const ws = new WebSocket(wsUrl);
+    wsRef.current = ws;
+
+    ws.onopen = () => {
+      console.log('Conectado ao WebSocket');
+      setLoading(false);
+    };
+
+    ws.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data);
+
+        const apiData = Array.isArray(data)
+          ? data
+          : data.body
+            ? JSON.parse(data.body)
+            : [];
+
+        if (!apiData || apiData.length === 0) return;
+
+        const transformedData: AlertData[] = apiData.map((item: any, index: number) => ({
+          id: `alert-${index}`,
+          tipo_chamado: item.tipo_chamado || 'N/A',
+          chamado: item.chamado || 'N/A',
+          grupo_chamado: item.grupo_chamado || 'N/A',
+          status_chamado: item.status_chamado || 'N/A',
+          abertura_chamado: item.dat_abertura_chamado || item.abertura_chamado || item.data_abertura || '',
+          resumo_chamado: item.resumo_chamado || 'Título não disponível',
+          severidade_chamado: item.severidade_chamado || 'N/A',
+          acionado: item.acionado || 'N/A',
+          chat: false,
+        }));
+
+        setAlertData(transformedData);
+
+        const unacknowledged = transformedData.filter(alert => !alert.acionado);
+        if (unacknowledged.length > 0) {
+          playAlertSound();
+        }
+      } catch (err) {
+        console.error('Erro processando mensagem WebSocket:', err);
+      }
+    };
+
+    ws.onerror = (err) => {
+      console.error('WebSocket error:', err);
+      toast({
+        title: "Erro WebSocket",
+        description: "Não foi possível receber dados em tempo real",
+        variant: "destructive",
+      });
+    };
+
+    ws.onclose = () => {
+      console.log('WebSocket fechado');
+    };
+
+    return () => {
+      ws.close();
+    };
   }, []);
 
+  // Inicializa tema dark
   useEffect(() => {
     document.documentElement.classList.add('dark');
   }, []);
@@ -217,9 +228,8 @@ const Dashboard = () => {
         </div>
       </div>
 
-      {/* Sidebar Enhanced */}
+      {/* Sidebar */}
       <div className="w-20 bg-gradient-to-b from-sidebar-background to-sidebar-background/95 border-l border-sidebar-border/50 backdrop-blur-sm flex flex-col justify-between sticky top-0 h-screen shadow-lg" style={{ background: 'var(--sidebar-gradient)', boxShadow: 'var(--sidebar-glow)' }}>
-        {/* Parte superior - Menu items */}
         <div className="flex flex-col gap-3 p-3 flex-1">
           {sidebarItems.map((item) => (
             <Button
@@ -235,7 +245,6 @@ const Dashboard = () => {
               title={item.title}
             >
               <item.icon className="h-6 w-6 transition-transform duration-300 group-hover:scale-110" />
-              {/* Active indicator */}
               {activeSection === item.key && (
                 <div className="absolute -right-1 top-1/2 transform -translate-y-1/2 w-1 h-8 bg-sidebar-primary-foreground rounded-full opacity-80"></div>
               )}
@@ -243,7 +252,6 @@ const Dashboard = () => {
           ))}
         </div>
 
-        {/* Parte inferior - Settings */}
         <div className="flex flex-col gap-3 p-3 border-t border-sidebar-border/30">
           <Button
             variant="ghost"
@@ -251,7 +259,6 @@ const Dashboard = () => {
             onClick={() => setShowWebhookConfig(true)}
             className="w-14 h-14 rounded-xl text-sidebar-foreground hover:bg-sidebar-accent/80 hover:text-sidebar-accent-foreground transition-all duration-300 hover:scale-105 group"
             title="Configuração de Webhooks"
-            style={{ transition: 'all 0.3s ease' }}
           >
             <Settings className="h-5 w-5 transition-transform duration-300 group-hover:rotate-90" />
           </Button>
@@ -261,7 +268,6 @@ const Dashboard = () => {
             onClick={toggleTheme}
             className="w-14 h-14 rounded-xl text-sidebar-foreground hover:bg-sidebar-accent/80 hover:text-sidebar-accent-foreground transition-all duration-300 hover:scale-105 group"
             title="Trocar Tema"
-            style={{ transition: 'all 0.3s ease' }}
           >
             <div className="transition-transform duration-500 group-hover:rotate-180">
               {isDarkMode ? <Sun className="h-5 w-5" /> : <Moon className="h-5 w-5" />}
