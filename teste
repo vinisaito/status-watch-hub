@@ -1,6 +1,8 @@
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { useState } from 'react';
 import { useChatAcionados } from '@/hooks/use-chat-acionados';
+import { AlertTriangle, AlertCircle, Clock } from 'lucide-react';
+import { cn } from '@/lib/utils';
 
 interface AlertData {
   id: string;
@@ -17,7 +19,7 @@ interface AlertData {
 
 interface MonitoringCardsProps {
   alertData: AlertData[];
-  onFilterSelect: (filter: string | null) => void; // Agora aceita limpar filtro
+  onFilterSelect: (filter: string | null) => void;
 }
 
 export const MonitoringCards = ({ alertData, onFilterSelect }: MonitoringCardsProps) => {
@@ -41,7 +43,7 @@ export const MonitoringCards = ({ alertData, onFilterSelect }: MonitoringCardsPr
   const sev4Incidents = alertData.filter(alert =>
     alert.tipo_chamado.toLowerCase().includes('incidente') &&
     alert.severidade_chamado.includes('4') &&
-    !isAcionado(alert.chamado) // Exclui chamados já acionados via chat
+    !isAcionado(alert.chamado)
   ).length;
 
   const totalSev4Incidents = alertData.filter(alert =>
@@ -54,7 +56,7 @@ export const MonitoringCards = ({ alertData, onFilterSelect }: MonitoringCardsPr
     alert.tipo_chamado.toLowerCase().includes('alerta') &&
     alert.severidade_chamado.includes('4') &&
     alert.acionado !== 'OK' &&
-    !isAcionado(alert.chamado) // Exclui chamados já acionados via chat
+    !isAcionado(alert.chamado)
   ).length;
 
   const totalSev4Alerts = alertData.filter(alert =>
@@ -65,7 +67,7 @@ export const MonitoringCards = ({ alertData, onFilterSelect }: MonitoringCardsPr
   const sev3Incidents = alertData.filter(alert =>
     alert.tipo_chamado.toLowerCase().includes('incidente') &&
     alert.severidade_chamado.includes('3') &&
-    !isAcionado(alert.chamado) // Exclui chamados já acionados via chat
+    !isAcionado(alert.chamado)
   ).length;
 
   const totalSev3Incidents = alertData.filter(alert =>
@@ -75,110 +77,186 @@ export const MonitoringCards = ({ alertData, onFilterSelect }: MonitoringCardsPr
 
   return (
     <div className="grid grid-cols-1 md:grid-cols-3 gap-6 w-full max-w-none">
-      {/* SEV4 Incidents */}
+      {/* SEV4 Incidents - Estilo Compacto */}
       <div className="space-y-4">
-        <Card
-          className={`bg-panel-bg border-sev4-incident/20 hover:border-sev4-incident/40 transition-colors cursor-pointer 
-            ${activeFilter === 'SEV4_INCIDENT' ? 'ring-2 ring-sev4-incident' : ''}`}
+        <CompactCard
+          title="Incidentes SEV4/SEV5"
+          count={sev4Incidents}
+          totalCount={totalSev4Incidents}
+          icon={AlertTriangle}
+          type="sev4-incident"
+          filterKey="SEV4_INCIDENT"
+          isActive={activeFilter === 'SEV4_INCIDENT'}
           onClick={() => handleCardClick('SEV4_INCIDENT')}
-        >
-          <CardHeader className="pb-3">
-            <CardTitle className="text-sev4-incident text-sm font-medium uppercase tracking-wide">
-              Incidentes SEV4/SEV5
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-4xl font-bold text-sev4-incident mb-2">
-              {sev4Incidents}
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card
-          className={`bg-panel-bg/50 border-sev4-incident/10 cursor-pointer hover:border-sev4-incident/40 transition-colors 
-            ${activeFilter === 'SEV4_INCIDENT_TOTAL' ? 'ring-2 ring-sev4-incident' : ''}`}
+        />
+        
+        <CompactSubCard
+          label="Total"
+          count={totalSev4Incidents}
+          type="sev4-incident"
+          filterKey="SEV4_INCIDENT_TOTAL"
+          isActive={activeFilter === 'SEV4_INCIDENT_TOTAL'}
           onClick={() => handleCardClick('SEV4_INCIDENT_TOTAL')}
-        >
-          <CardContent className="pt-4">
-            <div className="flex items-center justify-between">
-              <span className="text-sm text-muted-foreground">Total</span>
-              <span className="text-lg font-semibold text-sev4-incident">
-                {totalSev4Incidents}
-              </span>
-            </div>
-          </CardContent>
-        </Card>
+        />
       </div>
 
-      {/* SEV4 Alerts */}
+      {/* SEV4 Alerts - Estilo Compacto */}
       <div className="space-y-4">
-        <Card
-          className={`bg-panel-bg border-sev4-alert/20 hover:border-sev4-alert/40 transition-colors cursor-pointer 
-            ${activeFilter === 'SEV4_ALERT' ? 'ring-2 ring-sev4-alert' : ''}`}
+        <CompactCard
+          title="Alertas SEV4"
+          count={sev4Alerts}
+          totalCount={totalSev4Alerts}
+          icon={AlertCircle}
+          type="sev4-alert"
+          filterKey="SEV4_ALERT"
+          isActive={activeFilter === 'SEV4_ALERT'}
           onClick={() => handleCardClick('SEV4_ALERT')}
-        >
-          <CardHeader className="pb-3">
-            <CardTitle className="text-sev4-alert text-sm font-medium uppercase tracking-wide">
-              Alertas SEV4
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-4xl font-bold text-sev4-alert mb-2">
-              {sev4Alerts}
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card
-          className={`bg-panel-bg/50 border-sev4-alert/10 cursor-pointer hover:border-sev4-alert/40 transition-colors 
-            ${activeFilter === 'SEV4_ALERT_TOTAL' ? 'ring-2 ring-sev4-alert' : ''}`}
+        />
+        
+        <CompactSubCard
+          label="Total"
+          count={totalSev4Alerts}
+          type="sev4-alert"
+          filterKey="SEV4_ALERT_TOTAL"
+          isActive={activeFilter === 'SEV4_ALERT_TOTAL'}
           onClick={() => handleCardClick('SEV4_ALERT_TOTAL')}
-        >
-          <CardContent className="pt-4">
-            <div className="flex items-center justify-between">
-              <span className="text-sm text-muted-foreground">Total</span>
-              <span className="text-lg font-semibold text-sev4-alert">
-                {totalSev4Alerts}
-              </span>
-            </div>
-          </CardContent>
-        </Card>
+        />
       </div>
 
-      {/* SEV3 Incidents */}
+      {/* SEV3 Incidents - Estilo Compacto */}
       <div className="space-y-4">
-        <Card
-          className={`bg-panel-bg border-sev3-incident/20 hover:border-sev3-incident/40 transition-colors cursor-pointer 
-            ${activeFilter === 'SEV3_INCIDENT' ? 'ring-2 ring-sev3-incident' : ''}`}
+        <CompactCard
+          title="Incidentes SEV3"
+          count={sev3Incidents}
+          totalCount={totalSev3Incidents}
+          icon={Clock}
+          type="sev3-incident"
+          filterKey="SEV3_INCIDENT"
+          isActive={activeFilter === 'SEV3_INCIDENT'}
           onClick={() => handleCardClick('SEV3_INCIDENT')}
-        >
-          <CardHeader className="pb-3">
-            <CardTitle className="text-sev3-incident text-sm font-medium uppercase tracking-wide">
-              Incidentes SEV3
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-4xl font-bold text-sev3-incident mb-2">
-              {sev3Incidents}
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card
-          className={`bg-panel-bg/50 border-sev3-incident/10 cursor-pointer hover:border-sev3-incident/40 transition-colors 
-            ${activeFilter === 'SEV3_INCIDENT_TOTAL' ? 'ring-2 ring-sev3-incident' : ''}`}
+        />
+        
+        <CompactSubCard
+          label="Total"
+          count={totalSev3Incidents}
+          type="sev3-incident"
+          filterKey="SEV3_INCIDENT_TOTAL"
+          isActive={activeFilter === 'SEV3_INCIDENT_TOTAL'}
           onClick={() => handleCardClick('SEV3_INCIDENT_TOTAL')}
-        >
-          <CardContent className="pt-4">
-            <div className="flex items-center justify-between">
-              <span className="text-sm text-muted-foreground">Total</span>
-              <span className="text-lg font-semibold text-sev3-incident">
-                {totalSev3Incidents}
-              </span>
-            </div>
-          </CardContent>
-        </Card>
+        />
       </div>
     </div>
   );
 };
+
+interface CompactCardProps {
+  title: string;
+  count: number;
+  totalCount: number;
+  icon: React.ComponentType<any>;
+  type: string;
+  filterKey: string;
+  isActive: boolean;
+  onClick: () => void;
+}
+
+function CompactCard({ title, count, totalCount, icon: Icon, type, isActive, onClick }: CompactCardProps) {
+  const typeStyles = {
+    'sev4-incident': {
+      bg: 'bg-sev4-incident/10',
+      border: 'border-sev4-incident/30',
+      text: 'text-sev4-incident',
+      hover: 'hover:bg-sev4-incident/20 hover:border-sev4-incident/50',
+      animation: count > 0 ? 'animate-pulse-critical' : '',
+    },
+    'sev4-alert': {
+      bg: 'bg-sev4-alert/10',
+      border: 'border-sev4-alert/30', 
+      text: 'text-sev4-alert',
+      hover: 'hover:bg-sev4-alert/20 hover:border-sev4-alert/50',
+      animation: '',
+    },
+    'sev3-incident': {
+      bg: 'bg-sev3-incident/10',
+      border: 'border-sev3-incident/30',
+      text: 'text-sev3-incident',
+      hover: 'hover:bg-sev3-incident/20 hover:border-sev3-incident/50',
+      animation: '',
+    },
+  };
+
+  const style = typeStyles[type as keyof typeof typeStyles];
+
+  return (
+    <div
+      onClick={onClick}
+      className={cn(
+        "p-6 rounded-lg border-2 cursor-pointer transition-all duration-300 hover:scale-105",
+        style.bg,
+        style.border,
+        style.hover,
+        style.animation,
+        isActive && "ring-2 ring-primary/50 ring-offset-2 ring-offset-background"
+      )}
+    >
+      <div className="flex flex-col items-center text-center space-y-3">
+        <div className={cn("p-2 rounded-lg bg-black/20", style.text)}>
+          <Icon size={20} />
+        </div>
+        
+        <div className={cn("text-3xl font-bold", style.text)}>
+          {count}
+        </div>
+        
+        <div className="space-y-1">
+          <div className={cn("text-xs font-medium uppercase tracking-wide", style.text)}>
+            {title}
+          </div>
+          <div className="text-xs text-muted-foreground">
+            {count === 0 ? "Nenhum pendente" : `${count} de ${totalCount}`}
+          </div>
+        </div>
+      </div>
+      
+      {/* Active indicator */}
+      {isActive && (
+        <div className="absolute top-2 right-2 w-2 h-2 bg-primary rounded-full animate-pulse" />
+      )}
+    </div>
+  );
+}
+
+interface CompactSubCardProps {
+  label: string;
+  count: number;
+  type: string;
+  filterKey: string;
+  isActive: boolean;
+  onClick: () => void;
+}
+
+function CompactSubCard({ label, count, type, isActive, onClick }: CompactSubCardProps) {
+  const typeStyles = {
+    'sev4-incident': 'text-sev4-incident border-sev4-incident/20 hover:border-sev4-incident/40',
+    'sev4-alert': 'text-sev4-alert border-sev4-alert/20 hover:border-sev4-alert/40',
+    'sev3-incident': 'text-sev3-incident border-sev3-incident/20 hover:border-sev3-incident/40',
+  };
+
+  return (
+    <div
+      onClick={onClick}
+      className={cn(
+        "p-3 rounded-lg bg-panel-bg/50 border cursor-pointer transition-all duration-200 hover:scale-105",
+        typeStyles[type as keyof typeof typeStyles],
+        isActive && "ring-2 ring-primary/50 ring-offset-1 ring-offset-background"
+      )}
+    >
+      <div className="flex items-center justify-between">
+        <span className="text-sm text-muted-foreground">{label}</span>
+        <span className={cn("text-lg font-semibold", typeStyles[type as keyof typeof typeStyles].split(' ')[0])}>
+          {count}
+        </span>
+      </div>
+    </div>
+  );
+}
