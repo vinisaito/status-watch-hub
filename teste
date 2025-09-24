@@ -1,345 +1,46 @@
-import { 
-  Check, 
-  AlertTriangle, 
-  Timer, 
-  Play, 
-  Settings, 
-  ArrowUpDown, 
-  ArrowUp, 
-  ArrowDown 
-} from 'lucide-react';
+import { Search } from 'lucide-react';
+import { Input } from '@/components/ui/input';
 
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
-
-import type { AlertData, SortField } from '@/hooks/useActionTableLogic';
-
-interface ActionTableBodyProps {
-  loading: boolean;
+interface ActionTableHeaderProps {
   searchTerm: string;
-  sortedAndPaginatedData: AlertData[];
-  sortField: SortField;
-  sortDirection: 'asc' | 'desc' | null;
-  
-  // Handlers
-  handleSort: (field: SortField) => void;
-  handleAcknowledgment: (alert: AlertData) => void;
-  handleStartTimer: (chamado: string) => void;
-  handleOpenTimerManagement: (chamado: string) => void;
-  
-  // WebSocket e Timer
-  isConnected: boolean;
-  getCurrentActiveLevel: (chamado: number) => number | null;
-  getTimerColor: (remainingTime: number) => string;
-  getRemainingTime: (chamado: number, level: number) => number;
-  formatTime: (seconds: number) => string;
-  formatDate: (dateString: string) => string;
-  getSeverityColor: (severity: string) => string;
-  timers: Map<number, any>;
-  LEVEL_NAMES: Record<number, string>;
+  setSearchTerm: (term: string) => void;
+  filteredCount: number;
+  totalCount: number;
 }
 
-export const ActionTableBody = ({
-  loading,
-  searchTerm,
-  sortedAndPaginatedData,
-  sortField,
-  sortDirection,
-  handleSort,
-  handleAcknowledgment,
-  handleStartTimer,
-  handleOpenTimerManagement,
-  isConnected,
-  getCurrentActiveLevel,
-  getTimerColor,
-  getRemainingTime,
-  formatTime,
-  formatDate,
-  getSeverityColor,
-  timers,
-  LEVEL_NAMES
-}: ActionTableBodyProps) => {
-
-  /**
-   * Obtém o ícone de ordenação para uma coluna
-   */
-  const getSortIcon = (field: SortField) => {
-    if (sortField !== field) {
-      return <ArrowUpDown className="h-4 w-4 ml-1 opacity-50" />;
-    }
-    if (sortDirection === 'asc') {
-      return <ArrowUp className="h-4 w-4 ml-1" />;
-    }
-    if (sortDirection === 'desc') {
-      return <ArrowDown className="h-4 w-4 ml-1" />;
-    }
-    return <ArrowUpDown className="h-4 w-4 ml-1 opacity-50" />;
-  };
-
+export const ActionTableHeader = ({ 
+  searchTerm, 
+  setSearchTerm, 
+  filteredCount, 
+  totalCount 
+}: ActionTableHeaderProps) => {
   return (
-    <div className="w-full">
-      <Table className="w-full">
-        <TableHeader>
-          <TableRow className="border-border hover:bg-accent">
-            {/* Cabeçalhos das colunas com ordenação */}
-            <TableHead className="text-muted-foreground w-[80px]">
-              <Button
-                variant="ghost"
-                className="h-auto p-0 font-medium text-muted-foreground hover:text-foreground text-xs"
-                onClick={() => handleSort('chamado')}
-              >
-                Chamado
-                {getSortIcon('chamado')}
-              </Button>
-            </TableHead>
-            <TableHead className="text-muted-foreground hidden md:table-cell">
-              <Button
-                variant="ghost"
-                className="h-auto p-0 font-medium text-muted-foreground hover:text-foreground text-xs"
-                onClick={() => handleSort('tipo_chamado')}
-              >
-                Classificação
-                {getSortIcon('tipo_chamado')}
-              </Button>
-            </TableHead>
-            <TableHead className="text-muted-foreground hidden lg:table-cell">
-              <Button
-                variant="ghost"
-                className="h-auto p-0 font-medium text-muted-foreground hover:text-foreground text-xs"
-                onClick={() => handleSort('grupo_chamado')}
-              >
-                Grupo
-                {getSortIcon('grupo_chamado')}
-              </Button>
-            </TableHead>
-            <TableHead className="text-muted-foreground hidden lg:table-cell">
-              <Button
-                variant="ghost"
-                className="h-auto p-0 font-medium text-muted-foreground hover:text-foreground text-xs"
-                onClick={() => handleSort('status_chamado')}
-              >
-                Status
-                {getSortIcon('status_chamado')}
-              </Button>
-            </TableHead>
-            <TableHead className="text-muted-foreground hidden xl:table-cell">
-              <Button
-                variant="ghost"
-                className="h-auto p-0 font-medium text-muted-foreground hover:text-foreground text-xs"
-                onClick={() => handleSort('abertura_chamado')}
-              >
-                Abertura
-                {getSortIcon('abertura_chamado')}
-              </Button>
-            </TableHead>
-            <TableHead className="text-muted-foreground">
-              <Button
-                variant="ghost"
-                className="h-auto p-0 font-medium text-muted-foreground hover:text-foreground text-xs"
-                onClick={() => handleSort('resumo_chamado')}
-              >
-                Título
-                {getSortIcon('resumo_chamado')}
-              </Button>
-            </TableHead>
-            <TableHead className="text-muted-foreground hidden sm:table-cell">
-              <Button
-                variant="ghost"
-                className="h-auto p-0 font-medium text-muted-foreground hover:text-foreground text-xs"
-                onClick={() => handleSort('severidade_chamado')}
-              >
-                Severidade
-                {getSortIcon('severidade_chamado')}
-              </Button>
-            </TableHead>
-            <TableHead className="text-muted-foreground w-[200px] text-center">
-              <span className="text-xs font-medium">Temporizador</span>
-            </TableHead>
-            <TableHead className="text-muted-foreground w-[60px] text-center">Chat</TableHead>
-          </TableRow>
-        </TableHeader>
+    <div>
+      {/* Campo de Pesquisa */}
+      <div className="relative mb-4">
+        <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+        <Input
+          placeholder="Pesquisar por chamado, tipo, grupo, status, título..."
+          value={searchTerm}
+          onChange={(e) => setSearchTerm(e.target.value)}
+          className="pl-10"
+        />
+      </div>
 
-        <TableBody>
-          {/* Estados de loading e dados vazios */}
-          {loading ? (
-            <TableRow>
-              <TableCell colSpan={9} className="text-center py-8">
-                <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary mb-4"></div>
-                <p>Carregando dados...</p>
-              </TableCell>
-            </TableRow>
-          ) : sortedAndPaginatedData.length === 0 ? (
-            <TableRow>
-              <TableCell colSpan={9} className="text-center py-8 text-muted-foreground">
-                {searchTerm ? 'Nenhum resultado encontrado' : 'Nenhum dado disponível'}
-              </TableCell>
-            </TableRow>
+      {/* Contador de resultados */}
+      {searchTerm && (
+        <div className="text-sm text-muted-foreground">
+          {filteredCount === 0 ? (
+            <span>Nenhum resultado encontrado para "{searchTerm}"</span>
           ) : (
-            /* Renderização das linhas de dados */
-            sortedAndPaginatedData.map((alert) => {
-              const isChat = alert.acionado === 'true' || alert.chat;
-              const chamadoNum = parseInt(alert.chamado);
-              const activeLevel = getCurrentActiveLevel(chamadoNum);
-              const timerState = timers.get(chamadoNum);
-              const remainingTime = activeLevel ? getRemainingTime(chamadoNum, activeLevel) : 0;
-              const isFinalized = timerState?.statusFinal === 'finalizado';
-              const timerColorClass = getTimerColor(remainingTime);
-
-              return (
-                <TableRow key={alert.id} className="border-border hover:bg-accent transition-colors">
-                  {/* Coluna Chamado */}
-                  <TableCell className="font-medium">
-                    <Button
-                      variant="link"
-                      size="sm"
-                      className="p-0 text-foreground hover:underline text-xs"
-                    >
-                      {alert.chamado}
-                    </Button>
-                  </TableCell>
-
-                  {/* Coluna Classificação */}
-                  <TableCell className="hidden md:table-cell">
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <span className="truncate block max-w-[100px] text-xs">
-                          {alert.tipo_chamado}
-                        </span>
-                      </TooltipTrigger>
-                      <TooltipContent>
-                        <p className="max-w-xs">{alert.tipo_chamado}</p>
-                      </TooltipContent>
-                    </Tooltip>
-                  </TableCell>
-
-                  {/* Coluna Grupo */}
-                  <TableCell className="text-xs hidden lg:table-cell">{alert.grupo_chamado}</TableCell>
-
-                  {/* Coluna Status */}
-                  <TableCell className="text-xs hidden lg:table-cell">{alert.status_chamado}</TableCell>
-
-                  {/* Coluna Abertura */}
-                  <TableCell className="text-xs hidden xl:table-cell">{formatDate(alert.abertura_chamado)}</TableCell>
-
-                  {/* Coluna Título */}
-                  <TableCell>
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <span className="truncate block max-w-[150px] text-xs">
-                          {alert.resumo_chamado}
-                        </span>
-                      </TooltipTrigger>
-                      <TooltipContent>
-                        <p className="max-w-md">{alert.resumo_chamado}</p>
-                      </TooltipContent>
-                    </Tooltip>
-                  </TableCell>
-
-                  {/* Coluna Severidade */}
-                  <TableCell className="hidden sm:table-cell">
-                    <Badge className={`${getSeverityColor(alert.severidade_chamado)} text-xs`}>
-                      {alert.severidade_chamado}
-                    </Badge>
-                  </TableCell>
-
-                  {/* Coluna Temporizador */}
-                  <TableCell>
-                    <div className="flex flex-col items-center gap-2">
-                      {isFinalized ? (
-                        /* Estado finalizado */
-                        <div className="space-y-1 text-center">
-                          <Badge className="bg-green-600 text-white text-xs font-semibold px-3 py-1 whitespace-nowrap">
-                            ✅ FINALIZADO
-                          </Badge>
-                          {timerState?.operador && (
-                            <div className="text-xs text-muted-foreground bg-muted rounded px-2 py-1">
-                              👤 {timerState.operador}
-                            </div>
-                          )}
-                        </div>
-                      ) : activeLevel && timerState ? (
-                        /* Timer ativo */
-                        <div className="space-y-1 text-center">
-                          <div className="flex items-center gap-1 justify-center">
-                            <Timer className="h-3 w-3 text-timer-active animate-pulse" />
-                            <Badge className="bg-timer-active text-white text-xs font-semibold px-2 py-1 whitespace-nowrap">
-                              {LEVEL_NAMES[activeLevel as keyof typeof LEVEL_NAMES]}
-                            </Badge>
-                          </div>
-                          <div className={`text-xl font-mono font-black tracking-wide transition-all duration-300 ${timerColorClass}`}>
-                            {formatTime(remainingTime)}
-                          </div>
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => handleOpenTimerManagement(alert.chamado)}
-                            className="h-6 px-2 text-xs font-semibold bg-blue-500 text-white hover:bg-blue-600"
-                          >
-                            <Settings className="h-3 w-3 mr-1" />
-                            Gerenciar
-                          </Button>
-                          {timerState.operador && (
-                            <div className="text-xs text-muted-foreground bg-muted rounded px-2 py-1">
-                              👤 {timerState.operador}
-                            </div>
-                          )}
-                          {remainingTime <= 300 && remainingTime > 0 && (
-                            <Badge variant="destructive" className="text-xs animate-pulse">
-                              ⚠️ Últimos 5 min
-                            </Badge>
-                          )}
-                        </div>
-                      ) : (
-                        /* Timer inativo - botão para iniciar */
-                        <div className="flex flex-col items-center gap-2">
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => handleStartTimer(alert.chamado)}
-                            disabled={!isConnected}
-                          >
-                            <Play className="h-3 w-3 mr-1" />
-                            Iniciar (20min)
-                          </Button>
-                          {!isConnected && (
-                            <span className="text-xs text-destructive">WebSocket desconectado</span>
-                          )}
-                        </div>
-                      )}
-                    </div>
-                  </TableCell>
-
-                  {/* Coluna Chat */}
-                  <TableCell>
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <Button
-                          variant={isChat ? "default" : "outline"}
-                          size="sm"
-                          onClick={() => !isChat && handleAcknowledgment(alert)}
-                          disabled={isChat}
-                          className={`h-8 w-8 p-0 ${isChat ? 'bg-green-600 hover:bg-green-700' : ''}`}
-                        >
-                          {isChat ? (
-                            <Check className="h-4 w-4" />
-                          ) : (
-                            <AlertTriangle className="h-4 w-4" />
-                          )}
-                        </Button>
-                      </TooltipTrigger>
-                      <TooltipContent>
-                        <p>{isChat ? 'Já acionado' : 'Acionar grupo'}</p>
-                      </TooltipContent>
-                    </Tooltip>
-                  </TableCell>
-                </TableRow>
-              );
-            })
+            <span>
+              {filteredCount} resultado{filteredCount !== 1 ? 's' : ''}
+              {filteredCount !== totalCount && ` de ${totalCount} `}
+              para "{searchTerm}"
+            </span>
           )}
-        </TableBody>
-      </Table>
+        </div>
+      )}
     </div>
   );
 };
