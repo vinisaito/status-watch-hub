@@ -1,3 +1,5 @@
 export { ActionTable } from './ActionTable';
-export { EscalacaoDialog } from './EscalacaoDialog';
-export { ChamadoModal } from './ChamadoModal';
+export { ActionTableHeader } from './ActionTableHeader';
+export { ActionTableBody } from './ActionTableBody';
+export { ActionTablePagination } from './ActionTablePagination';
+export type { AlertData } from '../../hooks/useActionTableLogic';
