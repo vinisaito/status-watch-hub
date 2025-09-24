@@ -212,7 +212,7 @@ function CompactCard({ title, count, totalCount, icon: Icon, type, isActive, onC
       border: 'border-orange-500/30',
       text: 'text-orange-600',
       hover: 'hover:bg-orange-500/20 hover:border-orange-500/50',
-      animation: count > 0 ? 'animate-pulse' : '',
+      animation: '',
     },
     'confirmados': {
       bg: 'bg-green-500/10',
