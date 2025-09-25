@@ -1,92 +1,273 @@
-import { useState, useMemo } from 'react';
+import { useState, useCallback } from 'react';
 import { AlertData, SortField, SortDirection } from '../types';
+import { getTimerDuration } from '../constants';
+import { toast } from '@/hooks/use-toast';
 
 /**
- * Hook para gerenciamento de dados da ActionTable (filtros, ordenação, paginação)
+ * Hook para gerenciamento de handlers da ActionTable
  */
-export const useActionTableData = (alertData: AlertData[]) => {
-  // Estados de paginação e filtros
-  const [currentPage, setCurrentPage] = useState(1);
-  const [searchTerm, setSearchTerm] = useState('');
-  const [itemsPerPage, setItemsPerPage] = useState<number>(5);
+export const useActionTableHandlers = (
+  sortField: SortField,
+  sortDirection: SortDirection,
+  setSortField: (field: SortField) => void,
+  setSortDirection: (direction: SortDirection) => void,
+  setCurrentPage: (page: number) => void,
+  setItemsPerPage: (items: number) => void,
+  onUpdateAcknowledgment: (alertId: string, acknowledged: boolean) => void,
+  websocketHandlers: {
+    startTimer: (chamado: number, level: number, duration: number) => boolean;
+    updateObservacao: (chamado: number, level: number, observacao: string) => void;
+    updateStatusFinal: (chamado: number, status: string) => void;
+    getState: (chamado: number) => void;
+    getCurrentActiveLevel: (chamado: number) => number | null;
+  }
+) => {
+  // Estados dos modais
+  const [timerManagementOpen, setTimerManagementOpen] = useState(false);
+  const [selectedChamadoForTimer, setSelectedChamadoForTimer] = useState<string>('');
+  
+  // Estados do modal de detalhes do chamado
+  const [chamadoDetailsOpen, setChamadoDetailsOpen] = useState(false);
+  const [selectedChamadoForDetails, setSelectedChamadoForDetails] = useState<AlertData | null>(null);
 
-  // Estados de ordenação
-  const [sortField, setSortField] = useState<SortField>('chamado');
-  const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
+  // Estados do modal de assumir operador
+  const [assumeOperatorOpen, setAssumeOperatorOpen] = useState(false);
+  const [selectedChamadoForOperator, setSelectedChamadoForOperator] = useState<string>('');
 
-  // Filtragem dos dados baseada no termo de busca
-  const filteredData = useMemo(() => {
-    if (!searchTerm.trim()) return alertData;
-
-    const searchLower = searchTerm.toLowerCase().trim();
-    return alertData.filter(alert =>
-      Object.values(alert).some(value =>
-        String(value).toLowerCase().includes(searchLower)
-      )
-    );
-  }, [alertData, searchTerm]);
-
-  // Ordenação e paginação dos dados filtrados
-  const { sortedAndPaginatedData, totalPages } = useMemo(() => {
-    let sortedData = [...filteredData];
-
-    if (sortField && sortDirection) {
-      sortedData.sort((a, b) => {
-        let aValue: any = a[sortField];
-        let bValue: any = b[sortField];
-
-        // Tratamento especial para campos específicos
-        if (sortField === 'chamado') {
-          aValue = parseInt(a.chamado) || 0;
-          bValue = parseInt(b.chamado) || 0;
-        } else if (sortField === 'abertura_chamado') {
-          aValue = new Date(a.abertura_chamado).getTime() || 0;
-          bValue = new Date(b.abertura_chamado).getTime() || 0;
-        } else {
-          aValue = String(aValue).toLowerCase();
-          bValue = String(bValue).toLowerCase();
-        }
-
-        if (aValue < bValue) return sortDirection === 'asc' ? -1 : 1;
-        if (aValue > bValue) return sortDirection === 'asc' ? 1 : -1;
-        return 0;
+  /**
+   * Processa o acionamento de um alerta
+   */
+  const handleAcknowledgment = useCallback(async (alert: AlertData) => {
+    try {
+      toast({
+        title: "Alerta acionado",
+        description: `Chamado ${alert.chamado} foi acionado com sucesso`,
       });
-    } else {
-      // Ordenação padrão por chamado (decrescente)
-      sortedData.sort((a, b) => {
-        const chamadoA = parseInt(a.chamado) || 0;
-        const chamadoB = parseInt(b.chamado) || 0;
-        return chamadoB - chamadoA;
+
+      onUpdateAcknowledgment(alert.id, true);
+    } catch (error: any) {
+      toast({
+        title: "Erro ao acionar alerta",
+        description: error.message || "Não foi possível concluir o acionamento",
+        variant: "destructive",
       });
     }
+  }, [onUpdateAcknowledgment]);
 
-    // Paginação
-    const startIndex = (currentPage - 1) * itemsPerPage;
-    const endIndex = startIndex + itemsPerPage;
-    const paginatedData = sortedData.slice(startIndex, endIndex);
-    const totalPages = Math.ceil(sortedData.length / itemsPerPage);
+  /**
+   * Handlers de Operador
+   */
+  const handleOpenAssumeOperator = useCallback((chamado: string) => {
+    setSelectedChamadoForOperator(chamado);
+    setAssumeOperatorOpen(true);
+  }, []);
 
-    return { sortedAndPaginatedData: paginatedData, totalPages };
-  }, [filteredData, currentPage, itemsPerPage, sortField, sortDirection]);
+  const handleCloseAssumeOperator = useCallback(() => {
+    setAssumeOperatorOpen(false);
+    setSelectedChamadoForOperator('');
+  }, []);
+
+  const handleAssumeOperator = useCallback(async (chamado: string, operatorName: string) => {
+    try {
+      const chamadoNum = parseInt(chamado);
+      
+      // Força atualização do estado após definir operador
+      setTimeout(() => {
+        websocketHandlers.getState(chamadoNum);
+      }, 500);
+
+      return Promise.resolve();
+    } catch (error) {
+      console.error('Erro ao assumir operador:', error);
+      throw error;
+    }
+  }, [websocketHandlers]);
+
+  /**
+   * Handlers de Detalhes do Chamado
+   */
+  const handleOpenChamadoDetails = useCallback((alert: AlertData) => {
+    setSelectedChamadoForDetails(alert);
+    setChamadoDetailsOpen(true);
+  }, []);
+
+  const handleCloseChamadoDetails = useCallback(() => {
+    setChamadoDetailsOpen(false);
+    setSelectedChamadoForDetails(null);
+  }, []);
+
+  /**
+   * Handlers de Timer
+   */
+  const handleStartTimer = useCallback((chamado: string, alert: AlertData) => {
+    const chamadoNum = parseInt(chamado);
+
+    console.log(`Iniciando Primeiro Acionamento para chamado ${chamado}`);
+
+    const success = websocketHandlers.startTimer(chamadoNum, 1, getTimerDuration(1, alert.tipo_chamado, alert.severidade_chamado));
+
+    if (success) {
+      toast({
+        title: "🚀 Primeiro Acionamento Iniciado",
+        description: `Timer de 20 minutos iniciado para chamado ${chamado}`,
+      });
+
+      // Aguarda e força atualização do estado
+      setTimeout(() => {
+        websocketHandlers.getState(chamadoNum);
+      }, 1000);
+    }
+  }, [websocketHandlers]);
+
+  const handleOpenTimerManagement = useCallback((chamado: string) => {
+    setSelectedChamadoForTimer(chamado);
+    setTimerManagementOpen(true);
+  }, []);
+
+  /**
+   * Handlers de Gerenciamento de Etapas
+   */
+  const handleNextLevel = useCallback(async (chamado: string, nextLevel: number, observacao: string, alert?: AlertData) => {
+    try {
+      const chamadoNum = parseInt(chamado);
+
+      // Salva observação do nível atual antes de avançar
+      const currentLevel = websocketHandlers.getCurrentActiveLevel(chamadoNum);
+      if (currentLevel && observacao.trim()) {
+        websocketHandlers.updateObservacao(chamadoNum, currentLevel, observacao.trim());
+      }
+
+      // Inicia o próximo nível
+      const success = websocketHandlers.startTimer(chamadoNum, nextLevel, getTimerDuration(nextLevel, alert?.tipo_chamado, alert?.severidade_chamado));
+
+      if (success) {
+        // Aguarda para garantir que o timer foi iniciado
+        await new Promise(resolve => setTimeout(resolve, 500));
+
+        // Atualiza estado
+        websocketHandlers.getState(chamadoNum);
+        return true;
+      }
+
+      return false;
+    } catch (error) {
+      console.error('Erro em handleNextLevel:', error);
+      throw error;
+    }
+  }, [websocketHandlers]);
+
+  const handlePreviousLevel = useCallback(async (chamado: string, previousLevel: number, observacao: string, alert?: AlertData) => {
+    try {
+      const chamadoNum = parseInt(chamado);
+
+      // Salva observação do nível atual
+      const currentLevel = websocketHandlers.getCurrentActiveLevel(chamadoNum);
+      if (currentLevel && observacao.trim()) {
+        websocketHandlers.updateObservacao(chamadoNum, currentLevel, observacao.trim());
+      }
+
+      // Inicia o nível anterior
+      const success = websocketHandlers.startTimer(chamadoNum, previousLevel, getTimerDuration(previousLevel, alert?.tipo_chamado, alert?.severidade_chamado));
+
+      if (success) {
+        // Aguarda para garantir que o timer foi iniciado
+        await new Promise(resolve => setTimeout(resolve, 500));
+
+        // Atualiza estado
+        websocketHandlers.getState(chamadoNum);
+        return true;
+      }
+
+      return false;
+    } catch (error) {
+      console.error('Erro em handlePreviousLevel:', error);
+      throw error;
+    }
+  }, [websocketHandlers]);
+
+  const handleFinalize = useCallback(async (chamado: string, observacao: string) => {
+    try {
+      const chamadoNum = parseInt(chamado);
+
+      // Salva observação final
+      const currentLevel = websocketHandlers.getCurrentActiveLevel(chamadoNum);
+      if (currentLevel && observacao.trim()) {
+        websocketHandlers.updateObservacao(chamadoNum, currentLevel, observacao.trim());
+      }
+
+      // Finaliza o chamado
+      websocketHandlers.updateStatusFinal(chamadoNum, 'finalizado');
+
+      // Aguarda para garantir que o status foi atualizado
+      await new Promise(resolve => setTimeout(resolve, 500));
+
+      // Atualiza estado
+      websocketHandlers.getState(chamadoNum);
+      return true;
+    } catch (error) {
+      console.error('Erro em handleFinalize:', error);
+      throw error;
+    }
+  }, [websocketHandlers]);
+
+  /**
+   * Handlers de Ordenação
+   */
+  const handleSort = useCallback((field: SortField) => {
+    if (sortField === field) {
+      // Cicla entre asc -> desc -> null (volta ao padrão)
+      if (sortDirection === 'asc') {
+        setSortDirection('desc');
+      } else if (sortDirection === 'desc') {
+        setSortDirection(null);
+        setSortField('chamado');
+      } else {
+        setSortDirection('asc');
+      }
+    } else {
+      setSortField(field);
+      setSortDirection('asc');
+    }
+  }, [sortField, sortDirection, setSortField, setSortDirection]);
+
+  /**
+   * Handlers de Paginação
+   */
+  const handleItemsPerPageChange = useCallback((value: string) => {
+    const num = parseInt(value, 10);
+    setItemsPerPage(num);
+    setCurrentPage(1); // Volta para primeira página
+  }, [setItemsPerPage, setCurrentPage]);
+
+  const handlePageChange = useCallback((page: number) => {
+    setCurrentPage(page);
+  }, [setCurrentPage]);
 
   return {
-    // Estados
-    currentPage,
-    searchTerm,
-    itemsPerPage,
-    sortField,
-    sortDirection,
-    
-    // Dados processados
-    filteredData,
-    sortedAndPaginatedData,
-    totalPages,
-    
-    // Setters
-    setCurrentPage,
-    setSearchTerm,
-    setItemsPerPage,
-    setSortField,
-    setSortDirection,
+    // Estados dos modais
+    timerManagementOpen,
+    setTimerManagementOpen,
+    selectedChamadoForTimer,
+    setSelectedChamadoForTimer,
+    chamadoDetailsOpen,
+    selectedChamadoForDetails,
+    assumeOperatorOpen,
+    selectedChamadoForOperator,
+
+    // Handlers
+    handleAcknowledgment,
+    handleOpenAssumeOperator,
+    handleCloseAssumeOperator,
+    handleAssumeOperator,
+    handleOpenChamadoDetails,
+    handleCloseChamadoDetails,
+    handleStartTimer,
+    handleOpenTimerManagement,
+    handleNextLevel,
+    handlePreviousLevel,
+    handleFinalize,
+    handleSort,
+    handleItemsPerPageChange,
+    handlePageChange,
   };
 };
