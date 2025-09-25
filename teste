@@ -1,31 +1,7 @@
-import React, { useCallback } from 'react';
-import { ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-react';
-import { SortField, SortDirection } from '../types';
-
 /**
- * Hook para gerenciamento dos ícones de ordenação
+ * Barrel export para o módulo ActionTable
  */
-export const useSortIcons = (sortField: SortField, sortDirection: SortDirection) => {
-  
-  /**
-   * Obtém o ícone de ordenação para uma coluna
-   * @param field Campo da coluna
-   * @returns JSX do ícone apropriado
-   */
-  const getSortIcon = useCallback((field: SortField): React.ReactElement => {
-    if (sortField !== field) {
-      return React.createElement(ArrowUpDown, { className: "h-4 w-4 ml-1 opacity-50" });
-    }
-    if (sortDirection === 'asc') {
-      return React.createElement(ArrowUp, { className: "h-4 w-4 ml-1" });
-    }
-    if (sortDirection === 'desc') {
-      return React.createElement(ArrowDown, { className: "h-4 w-4 ml-1" });
-    }
-    return React.createElement(ArrowUpDown, { className: "h-4 w-4 ml-1 opacity-50" });
-  }, [sortField, sortDirection]);
-
-  return {
-    getSortIcon
-  };
-};
+export { ActionTable } from './ActionTable';
+export type { ActionTableProps, AlertData, SortField, SortDirection, HistoricoAcionamento } from './types';
+export { LEVEL_NAMES, getTimerDuration } from './constants';
+export { getTimerColor, formatDate, getSeverityColor } from './utils';
