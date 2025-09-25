@@ -78,9 +78,15 @@ const LEVEL_NAMES = {
   5: "4ª Escalação"
 };
 
-// Função para obter duração do timer baseada no nível
-const getTimerDuration = (level: number): number => {
-  return level === 1 ? 1200 : 600; // 20 min para nível 1, 10 min para os demais
+// Função para obter duração do timer baseada no nível, tipo e severidade
+const getTimerDuration = (level: number, tipoChamado?: string, severidade?: string): number => {
+  // Caso especial: incidente com severidade alta (7 minutos)
+  if (tipoChamado?.toLowerCase().includes('incidente') && severidade?.includes('4')) {
+    return 420; // 7 minutos em segundos
+  }
+  
+  // Caso padrão: 20 min para nível 1, 10 min para os demais
+  return level === 1 ? 1200 : 600;
 };
 
 /**
@@ -421,13 +427,14 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
   /**
    * Inicia o timer para o primeiro acionamento
    * @param chamado String do número do chamado
+   * @param alert Dados do alerta para obter tipo e severidade
    */
-  const handleStartTimer = useCallback((chamado: string) => {
+  const handleStartTimer = useCallback((chamado: string, alert: AlertData) => {
     const chamadoNum = parseInt(chamado);
 
     console.log(`Iniciando Primeiro Acionamento para chamado ${chamado}`);
 
-    const success = startTimer(chamadoNum, 1, getTimerDuration(1));
+    const success = startTimer(chamadoNum, 1, getTimerDuration(1, alert.tipo_chamado, alert.severidade_chamado));
 
     if (success) {
       toast({
@@ -462,8 +469,9 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
    * @param chamado String do número do chamado
    * @param nextLevel Próximo nível a ser ativado
    * @param observacao Observação do nível atual
+   * @param alert Dados do alerta para obter tipo e severidade
    */
-  const handleNextLevel = useCallback(async (chamado: string, nextLevel: number, observacao: string) => {
+  const handleNextLevel = useCallback(async (chamado: string, nextLevel: number, observacao: string, alert?: AlertData) => {
     try {
       const chamadoNum = parseInt(chamado);
 
@@ -474,7 +482,7 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
       }
 
       // Inicia o próximo nível
-      const success = startTimer(chamadoNum, nextLevel, getTimerDuration(nextLevel));
+      const success = startTimer(chamadoNum, nextLevel, getTimerDuration(nextLevel, alert?.tipo_chamado, alert?.severidade_chamado));
 
       if (success) {
         // Aguarda para garantir que o timer foi iniciado
@@ -497,8 +505,9 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
    * @param chamado String do número do chamado  
    * @param previousLevel Nível anterior a ser ativado
    * @param observacao Observação do nível atual
+   * @param alert Dados do alerta para obter tipo e severidade
    */
-  const handlePreviousLevel = useCallback(async (chamado: string, previousLevel: number, observacao: string) => {
+  const handlePreviousLevel = useCallback(async (chamado: string, previousLevel: number, observacao: string, alert?: AlertData) => {
     try {
       const chamadoNum = parseInt(chamado);
 
@@ -509,7 +518,7 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
       }
 
       // Inicia o nível anterior
-      const success = startTimer(chamadoNum, previousLevel, getTimerDuration(previousLevel));
+      const success = startTimer(chamadoNum, previousLevel, getTimerDuration(previousLevel, alert?.tipo_chamado, alert?.severidade_chamado));
 
       if (success) {
         // Aguarda para garantir que o timer foi iniciado
@@ -974,7 +983,7 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
                                 <Button
                                   variant="outline"
                                   size="sm"
-                                  onClick={() => handleStartTimer(alert.chamado)}
+                                  onClick={() => handleStartTimer(alert.chamado, alert)}
                                   disabled={!isConnected}
                                 >
                                   <Play className="h-3 w-3 mr-1" />
@@ -1127,8 +1136,8 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
               updateObservacao={updateObservacao}
               updateAcionamento={updateAcionamento}
               updateStatusFinal={updateStatusFinal}
-              onNextLevel={handleNextLevel}
-              onPreviousLevel={handlePreviousLevel}
+              onNextLevel={(chamado, nextLevel, observacao) => handleNextLevel(chamado, nextLevel, observacao, sortedAndPaginatedData.find(a => a.chamado === chamado))}
+              onPreviousLevel={(chamado, previousLevel, observacao) => handlePreviousLevel(chamado, previousLevel, observacao, sortedAndPaginatedData.find(a => a.chamado === chamado))}
               historicoAcionamentos={getHistoricoAcionamentos(parseInt(selectedChamadoForTimer))}
             />
           )}
