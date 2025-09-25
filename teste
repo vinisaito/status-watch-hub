@@ -1,31 +1,82 @@
-def handle_start_timer(event, trace, body):
-    chamado = int(body["chamado"])
-    level = int(body["level"])
+import { useState, useMemo, useCallback, useEffect } from 'react';
+import {
+  Check,
+  AlertTriangle,
+  Timer,
+  Play,
+  Settings,
+  Search,
+  ChevronLeft,
+  ChevronRight,
+  ArrowUpDown,
+  ArrowUp,
+  ArrowDown,
+  User,
+  UserCheck,
+  Edit3
+} from 'lucide-react';
 
-    # Se veio duration no body, usa ele. Senão aplica regra por nível.
-    if "duration" in body:
-        duration = int(body["duration"])
-    else:
-        duration = 1200 if level == 1 else 600  # 20 min no nível 1, senão 10 min
+// UI Components
+import { Card, CardContent, CardHeader } from '@/components/ui/card';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 
-    now = datetime.now(timezone.utc).isoformat()
+// Hooks e funcionalidades
+import { toast } from '@/hooks/use-toast';
+import { useWebsocketTimers } from "@/hooks/useWebsocketTimers";
 
-    update = {
-        f"level{level}_timerStart": now,
-        f"level{level}_duration": duration,
-        f"level{level}_status": "running"
-    }
+// Componentes customizados
+import { ModernTimerModal } from '@/components/ActionTable/ModernTimerModal';
+import { ChamadoDetailsModal } from '@/components/ActionTable/ChamadoDetailsModal';
+import { AssumeOperatorModal } from '@/components/ActionTable/AssumeOperatorModal';
 
-    state = update_chamado(trace, chamado, update)
+/**
+ * ====================================================================================
+ * INTERFACES E TIPOS
+ * ====================================================================================
+ */
 
-    broadcast({
-        "event": "startTimer",
-        "chamado": chamado,
-        "level": level,
-        "state": state
-    })
+interface AlertData {
+  id: string;
+  chamado: string;
+  tipo_chamado: string;
+  grupo_chamado: string;
+  status_chamado: string;
+  abertura_chamado: string;
+  resumo_chamado: string;
+  severidade_chamado: string;
+  acionado: string;
+  chat: boolean;
+}
 
-    return {
-        "statusCode": 200,
-        "body": json.dumps({"msg": f"Timer iniciado ({duration//60} min)"}, cls=DecimalEncoder)
-    }
+interface ActionTableProps {
+  alertData: AlertData[];
+  onUpdateAcknowledgment: (alertId: string, acknowledged: boolean) => void;
+  loading: boolean;
+}
+
+type SortField = keyof AlertData;
+type SortDirection = 'asc' | 'desc' | null;
+
+/**
+ * ====================================================================================
+ * CONSTANTES E CONFIGURAÇÕES
+ * ====================================================================================
+ */
+
+// Informações dos níveis de escalação do sistema de timer
+const LEVEL_NAMES = {
+  1: "Primeiro Acionamento",
+  2: "1ª Escalação",
+  3: "2ª Escalação",
+  4: "3ª Escalação",
+  5: "4ª Escalação"
+};
+
+// Duração padrão dos timers (20 minutos em segundos)
+const TIMER_DURATION = 1200;
