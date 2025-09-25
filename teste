@@ -1,7 +1,37 @@
 /**
- * Barrel export para o módulo ActionTable
+ * ====================================================================================
+ * INTERFACES E TIPOS - ACTION TABLE
+ * ====================================================================================
  */
-export { ActionTable } from './ActionTable';
-export type { ActionTableProps, AlertData, SortField, SortDirection, HistoricoAcionamento } from './types';
-export { LEVEL_NAMES, getTimerDuration } from './constants';
-export { getTimerColor, formatDate, getSeverityColor } from './utils';
+
+export interface AlertData {
+  id: string;
+  chamado: string;
+  tipo_chamado: string;
+  grupo_chamado: string;
+  status_chamado: string;
+  abertura_chamado: string;
+  resumo_chamado: string;
+  severidade_chamado: string;
+  acionado: string;
+  chat: boolean;
+}
+
+export interface ActionTableProps {
+  alertData: AlertData[];
+  onUpdateAcknowledgment: (alertId: string, acknowledged: boolean) => void;
+  loading: boolean;
+}
+
+export type SortField = keyof AlertData;
+export type SortDirection = 'asc' | 'desc' | null;
+
+export interface HistoricoAcionamento {
+  operador: string;
+  pessoaAcionada: string;
+  status: string;
+  observacao: string;
+  dataHora: string;
+  updatedAt: string;
+  nivel: number;
+}
