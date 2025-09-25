@@ -1,25 +1,92 @@
+import { useState, useMemo } from 'react';
+import { AlertData, SortField, SortDirection } from '../types';
+
 /**
- * ====================================================================================
- * CONSTANTES E CONFIGURAÇÕES - ACTION TABLE
- * ====================================================================================
+ * Hook para gerenciamento de dados da ActionTable (filtros, ordenação, paginação)
  */
+export const useActionTableData = (alertData: AlertData[]) => {
+  // Estados de paginação e filtros
+  const [currentPage, setCurrentPage] = useState(1);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [itemsPerPage, setItemsPerPage] = useState<number>(5);
 
-// Informações dos níveis de escalação do sistema de timer
-export const LEVEL_NAMES = {
-  1: "Primeiro Acionamento",
-  2: "1ª Escalação",
-  3: "2ª Escalação",
-  4: "3ª Escalação",
-  5: "4ª Escalação"
-};
+  // Estados de ordenação
+  const [sortField, setSortField] = useState<SortField>('chamado');
+  const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
 
-// Função para obter duração do timer baseada no nível, tipo e severidade
-export const getTimerDuration = (level: number, tipoChamado?: string, severidade?: string): number => {
-  // Caso especial: incidente com severidade alta (7 minutos)
-  if (tipoChamado?.toLowerCase().includes('incidente') && severidade?.includes('4')) {
-    return 420; // 7 minutos em segundos
-  }
-  
-  // Caso padrão: 20 min para nível 1, 10 min para os demais
-  return level === 1 ? 1200 : 600;
+  // Filtragem dos dados baseada no termo de busca
+  const filteredData = useMemo(() => {
+    if (!searchTerm.trim()) return alertData;
+
+    const searchLower = searchTerm.toLowerCase().trim();
+    return alertData.filter(alert =>
+      Object.values(alert).some(value =>
+        String(value).toLowerCase().includes(searchLower)
+      )
+    );
+  }, [alertData, searchTerm]);
+
+  // Ordenação e paginação dos dados filtrados
+  const { sortedAndPaginatedData, totalPages } = useMemo(() => {
+    let sortedData = [...filteredData];
+
+    if (sortField && sortDirection) {
+      sortedData.sort((a, b) => {
+        let aValue: any = a[sortField];
+        let bValue: any = b[sortField];
+
+        // Tratamento especial para campos específicos
+        if (sortField === 'chamado') {
+          aValue = parseInt(a.chamado) || 0;
+          bValue = parseInt(b.chamado) || 0;
+        } else if (sortField === 'abertura_chamado') {
+          aValue = new Date(a.abertura_chamado).getTime() || 0;
+          bValue = new Date(b.abertura_chamado).getTime() || 0;
+        } else {
+          aValue = String(aValue).toLowerCase();
+          bValue = String(bValue).toLowerCase();
+        }
+
+        if (aValue < bValue) return sortDirection === 'asc' ? -1 : 1;
+        if (aValue > bValue) return sortDirection === 'asc' ? 1 : -1;
+        return 0;
+      });
+    } else {
+      // Ordenação padrão por chamado (decrescente)
+      sortedData.sort((a, b) => {
+        const chamadoA = parseInt(a.chamado) || 0;
+        const chamadoB = parseInt(b.chamado) || 0;
+        return chamadoB - chamadoA;
+      });
+    }
+
+    // Paginação
+    const startIndex = (currentPage - 1) * itemsPerPage;
+    const endIndex = startIndex + itemsPerPage;
+    const paginatedData = sortedData.slice(startIndex, endIndex);
+    const totalPages = Math.ceil(sortedData.length / itemsPerPage);
+
+    return { sortedAndPaginatedData: paginatedData, totalPages };
+  }, [filteredData, currentPage, itemsPerPage, sortField, sortDirection]);
+
+  return {
+    // Estados
+    currentPage,
+    searchTerm,
+    itemsPerPage,
+    sortField,
+    sortDirection,
+    
+    // Dados processados
+    filteredData,
+    sortedAndPaginatedData,
+    totalPages,
+    
+    // Setters
+    setCurrentPage,
+    setSearchTerm,
+    setItemsPerPage,
+    setSortField,
+    setSortDirection,
+  };
 };
