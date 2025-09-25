@@ -1,153 +1,213 @@
-import { useState } from 'react';
-import { User, UserCheck } from 'lucide-react';
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { toast } from '@/hooks/use-toast';
+import json
+import boto3
+import os
+import uuid
+from datetime import datetime, timezone
+from decimal import Decimal
 
-interface AssumeOperatorModalProps {
-  isOpen: boolean;
-  onClose: () => void;
-  chamado: string;
-  currentOperator?: string;
-  onAssume: (chamado: string, operatorName: string) => Promise<void>;
-}
+# ---------- Config ----------
+dynamodb = boto3.resource("dynamodb")
+table = dynamodb.Table(os.environ["CHAMADOS_TABLE"])  # Tabela principal (chamados)
+conn_table = dynamodb.Table(os.environ["CONNECTIONS_TABLE"])  # Tabela de conexões
+apigw = boto3.client(
+    "apigatewaymanagementapi",
+    endpoint_url=f"https://{os.environ['WS_API_ID']}.execute-api.{os.environ['AWS_REGION']}.amazonaws.com/{os.environ['WS_STAGE']}"
+)
 
-export const AssumeOperatorModal = ({
-  isOpen,
-  onClose,
-  chamado,
-  currentOperator,
-  onAssume
-}: AssumeOperatorModalProps) => {
-  const [operatorName, setOperatorName] = useState(currentOperator || '');
-  const [loading, setLoading] = useState(false);
+# ---------- Helpers ----------
+class DecimalEncoder(json.JSONEncoder):
+    def default(self, o):
+        if isinstance(o, Decimal):
+            if o % 1 == 0:
+                return int(o)
+            return float(o)
+        return super(DecimalEncoder, self).default(o)
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+def log(trace, msg, **kwargs):
+    print(json.dumps({"trace": trace, "msg": msg, **kwargs}, cls=DecimalEncoder, default=str))
+
+def send_to_connection(conn_id, data):
+    """Envia mensagem para uma conexão específica"""
+    try:
+        apigw.post_to_connection(
+            ConnectionId=conn_id,
+            Data=json.dumps(data, cls=DecimalEncoder).encode("utf-8")
+        )
+    except apigw.exceptions.GoneException:
+        # Conexão morta -> remover
+        conn_table.delete_item(Key={"connectionId": conn_id})
+        log("broadcast", "Conexão removida (GoneException)", connectionId=conn_id)
+
+def broadcast(data):
+    """Envia mensagem para todos conectados"""
+    conns = conn_table.scan().get("Items", [])
+    for c in conns:
+        send_to_connection(c["connectionId"], data)
+
+def update_chamado(trace, chamado, update):
+    log(trace, "Atualizando chamado", chamado=chamado, update=update)
+    table.update_item(
+        Key={"chamado": chamado},
+        UpdateExpression="SET " + ", ".join(f"#{k} = :{k}" for k in update.keys()),
+        ExpressionAttributeNames={f"#{k}": k for k in update.keys()},
+        ExpressionAttributeValues={f":{k}": v for k, v in update.items()},
+    )
+
+    # 🔑 Buscar o estado completo do DynamoDB
+    resp = table.get_item(Key={"chamado": chamado})
+    state = resp.get("Item", {})
+    log(trace, "Chamado atualizado (state completo)", state=state)
+    return state
+
+# ---------- Handlers ----------
+def handle_connect(event, trace):
+    conn_id = event["requestContext"]["connectionId"]
+    conn_table.put_item(Item={"connectionId": conn_id, "connectedAt": datetime.now(timezone.utc).isoformat()})
+    log(trace, "Novo cliente conectado", connectionId=conn_id)
+    return {"statusCode": 200}
+
+def handle_disconnect(event, trace):
+    conn_id = event["requestContext"]["connectionId"]
+    conn_table.delete_item(Key={"connectionId": conn_id})
+    log(trace, "Cliente desconectado", connectionId=conn_id)
+    return {"statusCode": 200}
+
+def handle_start_timer(event, trace, body):
+    chamado = int(body["chamado"])
+    level = int(body["level"])
+    duration = int(body.get("duration", 1200))  
+    now = datetime.now(timezone.utc).isoformat()
+
+    update = {
+        f"level{level}_timerStart": now,
+        f"level{level}_duration": duration,
+        f"level{level}_status": "running"
+    }
+    state = update_chamado(trace, chamado, update)
+    broadcast({"event": "startTimer", "chamado": chamado, "level": level, "state": state})
+    return {"statusCode": 200, "body": json.dumps({"msg": "Timer iniciado"}, cls=DecimalEncoder)}
+
+def handle_update_observacao(event, trace, body):
+    """Atualiza a observação de um level de um chamado"""
+    chamado = int(body["chamado"])
+    level = int(body.get("level", 1))  
+    observacao = body["observacao"]
+
+    update = {f"level{level}_observacao": observacao}
+    state = update_chamado(trace, chamado, update)
+
+    broadcast({"event": "updateObservacao", "chamado": chamado, "state": state})
+    return {"statusCode": 200, "body": json.dumps({"msg": f"Observação do level {level} atualizada"}, cls=DecimalEncoder)}
+
+def handle_update_operador(event, trace, body):
+    chamado = int(body["chamado"])
+    operador = body["operador"]
+    update = {"operador": operador}
+    state = update_chamado(trace, chamado, update)
+    broadcast({"event": "updateOperador", "chamado": chamado, "state": state})
+    return {"statusCode": 200, "body": json.dumps({"msg": "Operador atualizado"}, cls=DecimalEncoder)}
+
+def handle_update_status_final(event, trace, body):
+    chamado = int(body["chamado"])
+    status = body["status"]
+    level = body.get("level")  # opcional
+    now = datetime.now(timezone.utc).isoformat()
+
+    # Pega o estado atual do chamado
+    resp = table.get_item(Key={"chamado": chamado})
+    state_atual = resp.get("Item", {})
+
+    update = {"statusFinal": status, "statusFinal_updatedAt": now}
+
+    if level:
+        update[f"level{level}_status"] = status
+        update[f"level{level}_updatedAt"] = now
+    else:
+        for i in range(1, 6):
+            if state_atual.get(f"level{i}_status") == "running":
+                update[f"level{i}_status"] = status
+                update[f"level{i}_updatedAt"] = now
+                break
+
+    state = update_chamado(trace, chamado, update)
+    broadcast({"event": "updateStatusFinal", "chamado": chamado, "state": state})
+    return {"statusCode": 200, "body": json.dumps({"msg": "Status final atualizado"}, cls=DecimalEncoder)}
+
     
-    if (!operatorName.trim()) {
-      toast({
-        title: "Nome obrigatório",
-        description: "Por favor, informe o nome do operador",
-        variant: "destructive",
-      });
-      return;
-    }
+def handle_update_acionamento(event, trace, body):
+    chamado = int(body["chamado"])
+    level = int(body.get("level", 1))
+    now = datetime.now(timezone.utc).isoformat()
 
-    try {
-      setLoading(true);
-      await onAssume(chamado, operatorName.trim());
-      
-      toast({
-        title: currentOperator ? "Operador alterado" : "Chamado assumido",
-        description: `Chamado ${chamado} ${currentOperator ? 'transferido para' : 'assumido por'} ${operatorName.trim()}`,
-      });
-      
-      onClose();
-    } catch (error: any) {
-      toast({
-        title: "Erro",
-        description: error.message || "Não foi possível assumir o chamado",
-        variant: "destructive",
-      });
-    } finally {
-      setLoading(false);
-    }
-  };
+    observacao = body.get("observacao")
+    pessoa_acionada = body.get("pessoaAcionada")
+    status_acionamento = body.get("statusAcionamento")
+    operador = body.get("operador")
 
-  const handleClose = () => {
-    setOperatorName(currentOperator || '');
-    onClose();
-  };
+    update = {f"level{level}_updatedAt": now}  # sempre marca o horário da alteração
 
-  return (
-    <Dialog open={isOpen} onOpenChange={handleClose}>
-      <DialogContent className="sm:max-w-md">
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
-            {currentOperator ? (
-              <>
-                <UserCheck className="h-5 w-5 text-blue-600" />
-                Alterar Responsável
-              </>
-            ) : (
-              <>
-                <User className="h-5 w-5 text-green-600" />
-                Assumir Chamado
-              </>
-            )}
-          </DialogTitle>
-          <DialogDescription>
-            {currentOperator ? (
-              <>
-                Alterar o responsável pelo chamado <strong>#{chamado}</strong>.
-                <br />
-                Responsável atual: <span className="font-medium">{currentOperator}</span>
-              </>
-            ) : (
-              <>
-                Assumir a responsabilidade pelo chamado <strong>#{chamado}</strong>.
-                <br />
-                Informe seu nome para se tornar o responsável por este chamado.
-              </>
-            )}
-          </DialogDescription>
-        </DialogHeader>
+    if observacao is not None:
+        update[f"level{level}_observacao"] = observacao
+    if pessoa_acionada is not None:
+        update[f"level{level}_pessoaAcionada"] = pessoa_acionada
+    if status_acionamento is not None:
+        update[f"level{level}_statusAcionamento"] = status_acionamento
+    if operador is not None:
+        update[f"level{level}_operador"] = operador
 
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <div className="space-y-2">
-            <Label htmlFor="operatorName">
-              Nome do {currentOperator ? 'Novo ' : ''}Responsável
-            </Label>
-            <Input
-              id="operatorName"
-              type="text"
-              placeholder="Digite seu nome..."
-              value={operatorName}
-              onChange={(e) => setOperatorName(e.target.value)}
-              className="w-full"
-              autoFocus
-              disabled={loading}
-            />
-          </div>
+    state = update_chamado(trace, chamado, update)
 
-          <DialogFooter className="flex gap-2">
-            <Button
-              type="button"
-              variant="outline"
-              onClick={handleClose}
-              disabled={loading}
-            >
-              Cancelar
-            </Button>
-            <Button
-              type="submit"
-              disabled={loading || !operatorName.trim()}
-              className="min-w-[100px]"
-            >
-              {loading ? (
-                <div className="flex items-center gap-2">
-                  <div className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" />
-                  Processando...
-                </div>
-              ) : currentOperator ? (
-                'Alterar'
-              ) : (
-                'Assumir'
-              )}
-            </Button>
-          </DialogFooter>
-        </form>
-      </DialogContent>
-    </Dialog>
-  );
-};
+    broadcast({
+        "event": "updateAcionamento",
+        "chamado": chamado,
+        "level": level,
+        "state": state
+    })
+    return {"statusCode": 200, "body": json.dumps({"msg": f"Dados do acionamento do level {level} atualizados"}, cls=DecimalEncoder)}
+
+def handle_get_state(event, trace, body):
+    chamado = int(body["chamado"])
+    resp = table.get_item(Key={"chamado": chamado})
+    state = resp.get("Item", {})
+    log(trace, "Estado retornado", chamado=chamado, state=state)
+
+    # Enviar resposta padronizada só para o cliente que pediu
+    conn_id = event["requestContext"]["connectionId"]
+    payload = {"event": "getState", "chamado": chamado, "state": state}
+    send_to_connection(conn_id, payload)
+    return {"statusCode": 200, "body": json.dumps({"msg": "Estado enviado"}, cls=DecimalEncoder)}
+
+# ---------- Main ----------
+def lambda_handler(event, context):
+    trace = str(uuid.uuid4())[:8]
+    req_ctx = event.get("requestContext", {})
+    route = req_ctx.get("routeKey", "UNKNOWN")
+    conn_id = req_ctx.get("connectionId", "N/A")
+
+    log(trace, "invoke", routeKey=route, connectionId=conn_id, body=event.get("body"))
+
+    try:
+        if route == "$connect":
+            return handle_connect(event, trace)
+        elif route == "$disconnect":
+            return handle_disconnect(event, trace)
+        else:
+            body = json.loads(event.get("body") or "{}")
+            if route == "startTimer":
+                return handle_start_timer(event, trace, body)
+            elif route == "updateObservacao":
+                return handle_update_observacao(event, trace, body)
+            elif route == "updateOperador":
+                return handle_update_operador(event, trace, body)
+            elif route == "updateStatusFinal":
+                return handle_update_status_final(event, trace, body)
+            elif route == "updateAcionamento":
+                return handle_update_acionamento(event, trace, body)
+            elif route == "getState":
+                return handle_get_state(event, trace, body)
+            else:
+                log(trace, "Rota inválida", route=route)
+                return {"statusCode": 400, "body": json.dumps({"error": "Invalid route"}, cls=DecimalEncoder)}
+    except Exception as e:
+        log(trace, "Erro na execução", error=str(e))
+        return {"statusCode": 500, "body": json.dumps({"error": str(e)}, cls=DecimalEncoder)}
