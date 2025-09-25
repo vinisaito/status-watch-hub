@@ -1,1064 +1,439 @@
-import { useState, useEffect } from 'react';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
-import {
-  ChevronDown,
-  Eye,
-  Calendar,
-  User,
-  AlertCircle,
-  Clock,
-  CheckCircle2,
-  AlertTriangle,
-  Circle,
-  Settings,
-  XCircle,
-  RotateCcw,
-  Play,
-  Star,
-  Plus,
-  Save,
-  X
-} from 'lucide-react';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { Textarea } from '@/components/ui/textarea';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { useState } from 'react';
 import {
   Dialog,
   DialogContent,
   DialogHeader,
   DialogTitle,
-  DialogDescription
 } from '@/components/ui/dialog';
-import { format } from "date-fns";
-import { ptBR } from "date-fns/locale";
-import { useToast } from '@/hooks/use-toast';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Separator } from '@/components/ui/separator';
+import { ScrollArea } from '@/components/ui/scroll-area';
+import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion';
+import {
+  Calendar,
+  Clock,
+  User,
+  AlertTriangle,
+  Tag,
+  FileText,
+  Users,
+  X,
+  History,
+  CheckCircle2,
+  XCircle,
+  Phone,
+  MessageSquare
+} from 'lucide-react';
+import { cn } from '@/lib/utils';
 
-interface RDM {
+interface AlertData {
   id: string;
-  numero_rdm: number;
-  descricao_rdm_user: string;
-  executor: string;
-  status_rdm: string;
-  impacto: string;
-  risco: string;
-  ambiente: string;
-  requisitante: string;
-  ["gerente requisitante"]: string;
-  depto_gerencia_requisitante: string;
-  origem: string;
-  warroom_preventivo: string;
-  ic_rdm: string;
-  tipo_rdm: 'Urgente' | 'Padrão' | 'Normal' | 'Informativa';
-  data_inicio_programacao: string;
-  data_fim_programacao?: string;
-  description: string;
-  grupo_executor: string;
-  area_principal_afetada: string;
-  ["duração da Programação"]?: string;
-  status_acompanhamento?: string;
-  sala_acompanhamento: string;
+  chamado: string;
+  tipo_chamado: string;
+  grupo_chamado: string;
+  status_chamado: string;
+  abertura_chamado: string;
+  resumo_chamado: string;
+  severidade_chamado: string;
+  acionado: string;
+  chat: boolean;
 }
 
-interface RDMFormData {
-  numero_rdm: string;
-  descricao_rdm_user: string;
-  executor: string;
-  status_rdm: string;
-  impacto: string;
-  risco: string;
-  ambiente: string;
-  requisitante: string;
-  "gerente requisitante": string;
-  depto_gerencia_requisitante: string;
-  origem: string;
-  warroom_preventivo: string;
-  ic_rdm: string;
-  tipo_rdm: 'Urgente' | 'Padrão' | 'Normal' | 'Informativa';
-  data_inicio_programacao: string;
-  data_fim_programacao: string;
-  description: string;
-  grupo_executor: string;
-  area_principal_afetada: string;
-  sala_acompanhamento: string,
-  indisponibilidade: string,
-  alert_incdent: string,
-  atividade_teste: string,
-  atividade_teste_obs: string,
-  atividade_teste_anexo: File | null,
-  observacoes: string,
-  "duração da Programação": string;
+interface ChamadoDetailsModalProps {
+  isOpen: boolean;
+  onClose: () => void;
+  alertData: AlertData | null;
+  historicoAcionamentos?: {
+    operador: string;
+    pessoaAcionada: string;
+    status: string;
+    observacao: string;
+    dataHora: string;
+    updatedAt: string;
+    nivel: number;
+  }[];
 }
 
-const statusAcompanhamentoOptions = [
-  { value: 'Adicionado para Acompanhamento', label: 'Adicionado para Acompanhamento', icon: Eye },
-  { value: 'Aguardando Inicio', label: 'Em Andamento', icon: Clock },
-  { value: 'Em Execução', label: 'Aguardando Aprovação', icon: Play },
-  { value: 'Fase de Teste', label: 'Fase de Teste', icon: Settings },
-  { value: 'Concluído', label: 'Concluído', icon: CheckCircle2 },
-  { value: 'Cancelado', label: 'Cancelado', icon: XCircle },
-  { value: 'Rollback', label: 'Rollback', icon: RotateCcw }
-];
-
-const formatDateRange = (start: string, end?: string) => {
-  if (!start) return "";
-
-  const startDate = new Date(start);
-  const endDate = end ? new Date(end) : null;
-
-  const formatDate = (date: Date) =>
-    date.toLocaleString("pt-BR", {
-      day: "2-digit",
-      month: "2-digit",
-      year: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
-    });
-
-  return endDate ? `${formatDate(startDate)} - ${formatDate(endDate)}` : formatDate(startDate);
-};
-
-const getStatusAcompanhamentoColor = (status: string) => {
-  switch (status) {
-    case 'Concluído':
-      return 'bg-status-completed text-white';
-    case 'Em Andamento':
-    case 'Em Teste':
-      return 'bg-status-in-progress text-white';
-    case 'Aguardando Aprovação':
-    case 'Aguardando Terceiros':
-      return 'bg-status-pending text-white';
-    case 'Cancelado':
-      return 'bg-status-cancelled text-white';
-    case 'Suspenso':
-      return 'bg-status-on-hold text-white';
-    default:
-      return 'bg-muted text-muted-foreground';
+const LEVEL_INFO = {
+  1: {
+    title: "Primeiro Acionamento",
+  },
+  2: {
+    title: "1ª Escalação",
+  },
+  3: {
+    title: "2ª Escalação",
+  },
+  4: {
+    title: "3ª Escalação",
+  },
+  5: {
+    title: "4ª Escalação",
   }
 };
 
-export const RDMTracker = () => {
-  const [expandedRDM, setExpandedRDM] = useState<string | null>(null);
-  const [selectedRDM, setSelectedRDM] = useState<RDM | null>(null);
-  const [rdms, setRdms] = useState<RDM[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [showForm, setShowForm] = useState(false);
-  const [editingStatus, setEditingStatus] = useState<string | null>(null);
-  const [statusLoading, setStatusLoading] = useState<string | null>(null);
-  const { toast } = useToast();
+const LEVEL_COLORS = {
+  1: { bg: "bg-blue-500/10", border: "border-blue-500/30", text: "text-blue-700 dark:text-blue-400", icon: "text-blue-500" },
+  2: { bg: "bg-yellow-500/10", border: "border-yellow-500/30", text: "text-yellow-700 dark:text-yellow-400", icon: "text-yellow-500" },
+  3: { bg: "bg-orange-500/10", border: "border-orange-500/30", text: "text-orange-700 dark:text-orange-400", icon: "text-orange-500" },
+  4: { bg: "bg-red-500/10", border: "border-red-500/30", text: "text-red-700 dark:text-red-400", icon: "text-red-500" },
+  5: { bg: "bg-purple-600/10", border: "border-purple-600/30", text: "text-purple-700 dark:text-purple-400", icon: "text-purple-600" },
+};
 
-  // Form state
-  const [formData, setFormData] = useState<RDMFormData>({
-    numero_rdm: '',
-    descricao_rdm_user: '',
-    executor: '',
-    status_rdm: 'Aberta',
-    impacto: '',
-    risco: '',
-    ambiente: '',
-    requisitante: '',
-    "gerente requisitante": '',
-    depto_gerencia_requisitante: '',
-    origem: '',
-    warroom_preventivo: '',
-    ic_rdm: '',
-    tipo_rdm: 'Normal',
-    data_inicio_programacao: '',
-    data_fim_programacao: '',
-    description: '',
-    grupo_executor: '',
-    area_principal_afetada: '',
-    sala_acompanhamento: '',
-    indisponibilidade: '',
-    alert_incdent: '',
-    atividade_teste: '',
-    atividade_teste_obs: '',
-    atividade_teste_anexo: null,
-    observacoes: '',
-    "duração da Programação": ''
-  });
+export const ChamadoDetailsModal = ({ isOpen, onClose, alertData, historicoAcionamentos = [] }: ChamadoDetailsModalProps) => {
+  if (!alertData) return null;
 
-  // 🔹 Substitua pela URL do seu API Gateway 
-  const API_URL = "https://f6ffk8e9fe.execute-api.us-east-1.amazonaws.com/prod/acompanhamentordms";
-
-  useEffect(() => {
-    const fetchRDMs = async () => {
-      try {
-        setLoading(true);
-        const response = await fetch(API_URL);
-        if (!response.ok) {
-          throw new Error(`Erro ${response.status}: Não foi possível carregar as RDMs`);
-        }
-        const data = await response.json();
-        // Adiciona status de acompanhamento padrão para RDMs existentes
-        const rdmsWithTrackingStatus = data.map((rdm: RDM) => ({
-          ...rdm,
-          status_acompanhamento: rdm.status_acompanhamento || 'Não Iniciado'
-        }));
-        setRdms(rdmsWithTrackingStatus);
-      } catch (err: any) {
-        setError(err.message || "Erro desconhecido");
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    fetchRDMs();
-  }, []);
-
-  const handleCreateRDM = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setLoading(true);
+  const formatDate = (dateString: string) => {
+    if (!dateString || dateString === '' || dateString === 'null' || dateString === 'undefined') {
+      return '-';
+    }
 
     try {
-      const newRDM = {
-        ...formData,
-        id: Date.now().toString(),
-        numero_rdm: parseInt(formData.numero_rdm),
-        status_acompanhamento: 'Não Iniciado'
-      };
+      let date: Date;
+      const cleanString = String(dateString).trim();
 
-      // Simula chamada para API
-      const response = await fetch(API_URL, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(newRDM)
-      });
+      if (/^\d{13}$/.test(cleanString)) {
+        date = new Date(parseInt(cleanString));
+      } else if (/^\d{10}$/.test(cleanString)) {
+        date = new Date(parseInt(cleanString) * 1000);
+      } else if (/^\d{2}\/\d{2}\/\d{4}/.test(cleanString)) {
+        const parts = cleanString.split(' ');
+        const datePart = parts[0];
+        const timePart = parts[1] || '00:00:00';
+        const [day, month, year] = datePart.split('/');
+        const [hour, minute, second] = timePart.split(':');
 
-      if (!response.ok) {
-        throw new Error('Erro ao criar RDM');
+        date = new Date(
+          parseInt(year),
+          parseInt(month) - 1,
+          parseInt(day),
+          parseInt(hour || '0'),
+          parseInt(minute || '0'),
+          parseInt(second || '0')
+        );
+      } else {
+        date = new Date(cleanString);
       }
 
-      setRdms(prev => [newRDM, ...prev]);
-      toast({
-        title: "RDM criada com sucesso!",
-        description: `RDM ${formData.numero_rdm} foi cadastrada.`,
+      if (isNaN(date.getTime())) return cleanString;
+
+      const year = date.getFullYear();
+      if (year < 1900 || year > 2100) return cleanString;
+
+      return date.toLocaleString('pt-BR', {
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
       });
-      handleCloseForm();
     } catch (error) {
-      toast({
-        title: "Erro ao criar RDM",
-        description: "Ocorreu um erro ao cadastrar a RDM. Tente novamente.",
-        variant: "destructive",
-      });
-    } finally {
-      setLoading(false);
+      return String(dateString);
     }
   };
 
-  const handleStatusChange = async (rdmId: string, newStatus: string) => {
-    setStatusLoading(rdmId);
-    try {
-      // Simula chamada para API
-      const response = await fetch(`${API_URL}/${rdmId}`, {
-        method: 'PATCH',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ status_acompanhamento: newStatus })
-      });
-
-      if (!response.ok) {
-        throw new Error('Erro ao atualizar status');
-      }
-
-      setRdms(prev => prev.map(rdm =>
-        rdm.id === rdmId
-          ? { ...rdm, status_acompanhamento: newStatus }
-          : rdm
-      ));
-
-      if (selectedRDM?.id === rdmId) {
-        setSelectedRDM(prev => prev ? { ...prev, status_acompanhamento: newStatus } : null);
-      }
-
-      toast({
-        title: "Status atualizado!",
-        description: `Status alterado para: ${newStatus}`,
-      });
-      setEditingStatus(null);
-    } catch (error) {
-      toast({
-        title: "Erro ao atualizar status",
-        description: "Ocorreu um erro. Tente novamente.",
-        variant: "destructive",
-      });
-    } finally {
-      setStatusLoading(null);
-    }
+  const getSeverityColor = (severity: string) => {
+    return severity.includes('4')
+      ? 'bg-destructive text-destructive-foreground'
+      : 'bg-yellow-500 text-yellow-950';
   };
 
-  const handleCloseForm = () => {
-    setFormData({
-      numero_rdm: '',
-      descricao_rdm_user: '',
-      executor: '',
-      status_rdm: 'Aberta',
-      impacto: '',
-      risco: '',
-      ambiente: '',
-      requisitante: '',
-      "gerente requisitante": '',
-      depto_gerencia_requisitante: '',
-      origem: '',
-      warroom_preventivo: '',
-      ic_rdm: '',
-      tipo_rdm: 'Normal',
-      data_inicio_programacao: '',
-      data_fim_programacao: '',
-      description: '',
-      grupo_executor: '',
-      area_principal_afetada: '',
-      sala_acompanhamento: '',
-      indisponibilidade: '',
-      alert_incdent: '',
-      atividade_teste: '',
-      atividade_teste_obs: '',
-      atividade_teste_anexo: null,
-      observacoes: '',
-      "duração da Programação": ''
-    });
-    setShowForm(false);
-  };
-
-  const updateFormData = (field: keyof RDMFormData, value: string | File | null) => {
-    setFormData(prev => ({ ...prev, [field]: value }));
-  };
-
-  const getStatusBadgeClass = (status_rdm: string) => {
-    switch (status_rdm) {
-      case 'Aberta':
-      case 'Aprovada':
-        return 'bg-status-approved text-white border-status-approved/50 shadow-md';
-
-      case 'Cancelada':
-      case 'Rejeitada':
-        return 'bg-status-cancelled text-white border-status-cancelled/50 shadow-md';
-
-      case 'Em aprovação':
-      case 'Em aprovação - Comitê':
-        return 'bg-status-pending text-white border-status-pending/50 shadow-md';
-
-      case 'Em implantação':
-        return 'bg-status-in-progress text-white border-status-in-progress/50 shadow-md';
-
-      case 'Implantada':
-      case 'Fechada':
-        return 'bg-status-completed text-white border-status-completed/50 shadow-md';
-
-      case 'Plano de volta em execução':
-      case 'Recuada':
-        return 'bg-status-on-hold text-white border-status-on-hold/50 shadow-md';
-
-      default:
-        return 'bg-muted text-muted-foreground';
-    }
-  };
-
-  const getStatusText = (status_rdm: string) => {
-    switch (status_rdm) {
-      case 'Aberta':
-        return 'Aberta';
-      case 'Aprovada':
-        return 'Aprovada';
-      case 'Cancelada':
-        return 'Cancelada';
-      case 'Em aprovação':
-        return 'Em aprovação';
-      case 'Em aprovação - Comitê':
-        return 'Em aprovação - Comitê';
-      case 'Em implantação':
-        return 'Em implantação';
-      case 'Fechada':
-        return 'Fechada';
-      case 'Implantada':
-        return 'Implantada';
-      case 'Plano de volta em execução':
-        return 'Plano de volta em execução';
-      case 'Recuada':
-        return 'Recuada';
-      case 'Rejeitada':
-        return 'Rejeitada';
-      default:
-        return 'Desconhecido';
-    }
-  };
-
-  const getStatusIcon = (status_rdm: string) => {
-    switch (status_rdm) {
-      case 'Aberta':
-        return <Play className="h-4 w-4 animate-pulse" />;
-      case 'Aprovada':
-        return <Star className="h-4 w-4 animate-bounce" />;
-
-      case 'Cancelada':
-      case 'Rejeitada':
-        return <XCircle className="h-4 w-4" />;
-
-      case 'Em implantação':
-        return <Settings className="h-4 w-4 animate-spin" />;
-
-      case 'Em aprovação':
-      case 'Em aprovação - Comitê':
-        return <Clock className="h-4 w-4 animate-bounce" />;
-
-      case 'Implantada':
-      case 'Fechada':
-        return <CheckCircle2 className="h-4 w-4" />;
-
-      case 'Plano de volta em execução':
-      case 'Recuada':
-        return <RotateCcw className="h-4 w-4" />;
-
-      default:
-        return <Circle className="h-4 w-4" />;
-    }
-  };
-
-  const getPriorityIcon = (tipo_rdm: string) => {
-    switch (tipo_rdm) {
-      case 'Urgente':
-        return <AlertTriangle className="h-4 w-4 text-status-cancelled" />;
-      case 'Padrão':
-      case 'Normal':
-        return <AlertCircle className="h-4 w-4 text-status-in-progress" />;
-      case 'Informativa':
-        return <Circle className="h-4 w-4 text-status-completed" />;
-      default:
-        return <Circle className="h-4 w-4 text-muted-foreground" />;
-    }
-  };
-
-  const getPriorityColor = (tipo_rdm: string) => {
-    switch (tipo_rdm) {
-      case 'Urgente':
-        return 'text-status-cancelled';
-      case 'Padrão':
-      case 'Normal':
-        return 'text-status-in-progress';
-      case 'Informativa':
-        return 'text-status-completed';
-      default:
-        return 'text-muted-foreground';
-    }
-  };
-
-  const getPriorityText = (tipo_rdm: string) => {
-    return tipo_rdm;
-  };
-
-  const toggleExpanded = (id: string) => {
-    setExpandedRDM(prev => prev === id ? null : id);
-  };
-
-  const openModal = (rdm: RDM) => {
-    setSelectedRDM(rdm);
-  };
-
-  const closeModal = () => {
-    setSelectedRDM(null);
-  };
-
-  const activeRDMs = rdms.filter(rdm => rdm.status_rdm !== 'Fechada' && rdm.status_rdm !== 'Implantada').length;
-
-  // Componente StatusSelector inline - Responsivo mas mais próximo ao original
-  const StatusSelector = ({ rdm }: { rdm: RDM }) => {
-    const [selectedStatus, setSelectedStatus] = useState(rdm.status_acompanhamento || 'Não Iniciado');
-    const isEditing = editingStatus === rdm.id;
-    const isLoading = statusLoading === rdm.id;
-
-    const currentStatusOption = statusAcompanhamentoOptions.find(option => option.value === selectedStatus) || statusAcompanhamentoOptions[0];
-    const CurrentIcon = currentStatusOption.icon;
-
-    if (!isEditing) {
-      return (
-        <div className="flex flex-wrap items-center gap-2">
-          <Badge className={`${getStatusAcompanhamentoColor(selectedStatus)} flex items-center gap-1.5 px-3 py-1`}>
-            <CurrentIcon className="h-3 w-3" />
-            {selectedStatus}
-          </Badge>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => setEditingStatus(rdm.id)}
-            className="h-8 px-2 text-xs whitespace-nowrap"
-            disabled={isLoading}
-          >
-            Alterar
-          </Button>
-        </div>
-      );
-    }
-
-    return (
-      <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 p-2 bg-accent/10 rounded-lg border">
-        <div className="flex-1 min-w-0">
-          <Select value={selectedStatus} onValueChange={setSelectedStatus}>
-            <SelectTrigger className="h-8">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {statusAcompanhamentoOptions.map((option) => {
-                const Icon = option.icon;
-                return (
-                  <SelectItem key={option.value} value={option.value}>
-                    <div className="flex items-center gap-2">
-                      <Icon className="h-4 w-4" />
-                      {option.label}
-                    </div>
-                  </SelectItem>
-                );
-              })}
-            </SelectContent>
-          </Select>
-        </div>
-        <div className="flex gap-1 shrink-0">
-          <Button
-            size="sm"
-            onClick={() => handleStatusChange(rdm.id, selectedStatus)}
-            disabled={isLoading || selectedStatus === rdm.status_acompanhamento}
-            className="h-8 px-2"
-          >
-            <Save className="h-3 w-3" />
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => {
-              setSelectedStatus(rdm.status_acompanhamento || 'Não Iniciado');
-              setEditingStatus(null);
-            }}
-            disabled={isLoading}
-            className="h-8 px-2"
-          >
-            ✕
-          </Button>
-        </div>
-      </div>
-    );
-  };
+  const isChat = alertData.acionado === 'true' || alertData.chat;
 
   return (
-    <div className="min-h-screen bg-background p-3 sm:p-6">
-      <Card className="shadow-card border transition-all duration-300 hover:shadow-hover max-w-7xl mx-auto">
-        <CardHeader className="flex flex-col sm:flex-row sm:items-center justify-between space-y-3 sm:space-y-0 pb-3">
-          <CardTitle className="text-primary flex flex-col sm:flex-row sm:items-center gap-3 text-xl font-bold">
-            <div className="flex items-center gap-3">
-              <div className="relative">
-                <Calendar className="h-6 w-6" />
-                {activeRDMs > 0 && (
-                  <div className="absolute -top-1 -right-1 w-3 h-3 bg-status-in-progress rounded-full animate-pulse border border-background" />
-                )}
-              </div>
-              <span>Acompanhamento de RDMs</span>
+    <Dialog open={isOpen} onOpenChange={onClose}>
+      <DialogContent className="max-w-5xl max-h-[85vh] bg-gradient-to-br from-background to-background/95 border-2 border-primary/20 shadow-2xl">
+        <DialogHeader className="pb-6 border-b border-primary/10">
+          <DialogTitle className="text-2xl font-bold flex items-center gap-3 bg-gradient-to-r from-primary to-primary/80 bg-clip-text text-transparent">
+            <div className="p-2 rounded-lg bg-primary/10 text-primary">
+              <FileText className="h-6 w-6" />
             </div>
-            {activeRDMs > 0 && (
-              <Badge variant="outline" className="w-fit px-2 py-1 bg-status-in-progress/10 text-status-in-progress border-status-in-progress/30">
-                {activeRDMs} ativas
-              </Badge>
-            )}
-          </CardTitle>
-          <Button
-            variant="default"
-            size="sm"
-            className="bg-primary hover:bg-primary/90 w-full sm:w-auto"
-            onClick={() => setShowForm(true)}
-          >
-            <Plus className="h-4 w-4 mr-2" />
-            Adicionar RDM
-          </Button>
-        </CardHeader>
+            Detalhes do Chamado #{alertData.chamado}
+          </DialogTitle>
+        </DialogHeader>
 
-        <CardContent className="space-y-3 max-h-[80vh] overflow-y-auto pr-2">
-          {loading && (
-            <div className="text-center py-8 text-muted-foreground">
-              Carregando RDMs...
-            </div>
-          )}
+        <ScrollArea className="max-h-[calc(85vh-140px)] pr-4">
+          <div className="space-y-8">
 
-          {error && (
-            <div className="text-center py-8 text-status-cancelled">
-              {error}
-            </div>
-          )}
-
-          {!loading && !error && rdms.map((rdm, index) => (
-            <div
-              key={rdm.id}
-              className="group relative border rounded-xl p-4 bg-card hover:bg-accent/5 transition-all duration-300 shadow-sm hover:shadow-card animate-in fade-in-0 slide-in-from-bottom-4"
-              style={{ animationDelay: `${index * 100}ms` }}
-            >
-              {/* Priority indicator */}
-              <div className={`absolute left-0 top-4 bottom-4 w-1 rounded-r-lg transition-all duration-300 ${rdm.tipo_rdm === 'Urgente' ? 'bg-status-cancelled' :
-                rdm.tipo_rdm === 'Normal' || rdm.tipo_rdm === 'Padrão' ? 'bg-status-in-progress' :
-                  rdm.tipo_rdm === 'Informativa' ? 'bg-status-completed' : 'bg-muted'
-                }`} />
-
-              <div className="flex flex-col gap-4 ml-4">
-                {/* Header with RDM info - Mais próximo ao original */}
-                <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
-                  <div className="flex flex-wrap items-center gap-3">
-                    <span className="font-mono text-sm bg-accent/30 px-2 py-1 rounded-md text-accent-foreground font-semibold">
-                      #{rdm.numero_rdm}
+            {/* Histórico de Acionamentos - SEMPRE VISÍVEL */}
+            <Accordion type="single" collapsible className="w-full">
+              <AccordionItem value="historico" className="border-2 border-border rounded-lg bg-card">
+                <AccordionTrigger className="px-6 py-4 hover:no-underline hover:bg-muted/50 transition-colors">
+                  <div className="flex items-center gap-3">
+                    <History className="h-6 w-6 text-primary" />
+                    <span className="text-xl font-semibold text-foreground">
+                      Histórico de Acionamentos
                     </span>
-                    <span className="text-sm text-foreground font-medium break-words max-w-xs sm:max-w-md">
-                      {rdm.descricao_rdm_user}
-                    </span>
-                    <span className="text-sm text-muted-foreground font-medium">
-                      {rdm.grupo_executor}
-                    </span>
-                  </div>
-
-                  <div className="flex flex-wrap items-center gap-3">
-                    <Badge className={`${getStatusBadgeClass(rdm.status_rdm)} flex items-center gap-1.5 px-3 py-1`}>
-                      {getStatusIcon(rdm.status_rdm)}
-                      {getStatusText(rdm.status_rdm)}
+                    <Badge variant="secondary" className="ml-2">
+                      {historicoAcionamentos.length} registro(s)
                     </Badge>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="hover:bg-accent/50 transition-all duration-300"
-                      onClick={() => openModal(rdm)}
-                    >
-                      Detalhes
-                    </Button>
                   </div>
-                </div>
+                </AccordionTrigger>
+                <AccordionContent className="px-6 pb-6 pt-2">
+                  {historicoAcionamentos.length > 0 ? (
+                    <div className="relative">
+                      {/* Timeline line */}
+                      <div className="absolute left-6 top-8 bottom-4 w-0.5 bg-gradient-to-b from-primary/30 via-primary/20 to-transparent" />
+                      
+                      <div className="space-y-4">
+                        {[...historicoAcionamentos]
+                          .sort((a, b) => b.nivel - a.nivel)
+                          .map((h, idx) => {
+                            const levelColor = LEVEL_COLORS[h.nivel as keyof typeof LEVEL_COLORS] || LEVEL_COLORS[1];
+                            const StatusIcon = h.status === 'atendido' ? CheckCircle2 : XCircle;
+                            const statusColor = h.status === 'atendido' ? 'text-green-500' : 'text-red-500';
+                            const statusBg = h.status === 'atendido' ? 'bg-green-500/10' : 'bg-red-500/10';
+                            
+                            return (
+                              <div key={idx} className="relative flex gap-4 group">
+                                {/* Timeline node */}
+                                <div className="relative z-10">
+                                  <div className={cn(
+                                    "w-12 h-12 rounded-xl flex items-center justify-center font-bold shadow-sm transition-all duration-200 group-hover:scale-110",
+                                    levelColor.bg,
+                                    levelColor.border,
+                                    levelColor.text,
+                                    "border"
+                                  )}>
+                                    {h.nivel}
+                                  </div>
+                                </div>
 
-                {/* Status de Acompanhamento - Mais próximo ao original */}
-                <div className="flex flex-col sm:flex-row sm:items-center gap-3 p-3 bg-accent/10 rounded-lg border border-accent/20">
-                  <div className="flex items-center gap-2 text-sm font-medium text-foreground shrink-0">
-                    <Settings className="h-4 w-4" />
-                    Status de Acompanhamento:
-                  </div>
-                  <div className="flex-1">
-                    <StatusSelector rdm={rdm} />
-                  </div>
-                </div>
-              </div>
-            </div>
-          ))}
+                                {/* Content card */}
+                                <div className="flex-1 bg-background rounded-xl border p-5 shadow-sm hover:shadow-md transition-all duration-200 group-hover:border-primary/30">
+                                  {/* Header with operator and status */}
+                                  <div className="flex flex-wrap items-start justify-between gap-4 mb-4">
+                                    <div className="space-y-3 flex-1">
+                                      {/* Operator info */}
+                                      <div className="flex items-center gap-3">
+                                        <div className="p-2 bg-primary/5 rounded-lg">
+                                          <User className="h-4 w-4 text-primary" />
+                                        </div>
+                                        <div>
+                                          <p className="text-xs text-muted-foreground">Operador</p>
+                                          <p className="font-semibold text-sm">{h.operador}</p>
+                                        </div>
+                                      </div>
 
-          {!loading && !error && rdms.length === 0 && (
-            <div className="text-center py-12 animate-in fade-in-0">
-              <Calendar className="h-12 w-12 text-muted-foreground mx-auto mb-4 opacity-50" />
-              <p className="text-muted-foreground text-lg font-medium">
-                Nenhuma RDM cadastrada
-              </p>
-              <p className="text-muted-foreground/70 text-sm mt-1">
-                Clique em "Adicionar RDM" para começar
-              </p>
-            </div>
-          )}
-        </CardContent>
-      </Card>
+                                      {/* Person contacted */}
+                                      <div className="flex items-center gap-3">
+                                        <div className="p-2 bg-primary/5 rounded-lg">
+                                          <Phone className="h-4 w-4 text-primary" />
+                                        </div>
+                                        <div>
+                                          <p className="text-xs text-muted-foreground">Pessoa Acionada</p>
+                                          <p className="font-semibold text-sm">{h.pessoaAcionada}</p>
+                                        </div>
+                                      </div>
+                                    </div>
 
-      {/* Form Modal */}
-      <Dialog open={showForm} onOpenChange={handleCloseForm}>
-        <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-3 text-xl">
-              <div className="p-2 rounded-lg bg-primary/10">
-                <Calendar className="h-5 w-5 text-primary" />
-              </div>
-              Nova RDM
-            </DialogTitle>
-          </DialogHeader>
+                                    {/* Status badge */}
+                                    <div className="flex flex-col items-end gap-2">
+                                      <div className={cn(
+                                        "flex items-center gap-2 px-3 py-1.5 rounded-full",
+                                        statusBg
+                                      )}>
+                                        <StatusIcon className={cn("h-4 w-4", statusColor)} />
+                                        <span className={cn("text-sm font-medium capitalize", statusColor)}>
+                                          {h.status === 'atendido' ? 'Atendido' : 'Não Atendido'}
+                                        </span>
+                                      </div>
 
-          <form onSubmit={handleCreateRDM} className="space-y-6 py-4">
-            {/* Basic Information */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label htmlFor="numero_rdm">Número RDM *</Label>
-                <Input
-                  id="numero_rdm"
-                  value={formData.numero_rdm}
-                  onChange={(e) => updateFormData('numero_rdm', e.target.value)}
-                  placeholder="Ex: 12345"
-                  required
-                />
-              </div>
+                                      {/* Date and time */}
+                                      <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                                        <Calendar className="h-3 w-3" />
+                                        <span>{h.updatedAt}</span>
+                                      </div>
+                                    </div>
+                                  </div>
 
-              <div className="space-y-2">
-                <Label htmlFor="tipo_rdm">Tipo RDM *</Label>
-                <Select value={formData.tipo_rdm} onValueChange={(value) => updateFormData('tipo_rdm', value as any)}>
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="Urgente">Urgente</SelectItem>
-                    <SelectItem value="Padrão">Padrão</SelectItem>
-                    <SelectItem value="Normal">Normal</SelectItem>
-                    <SelectItem value="Informativa">Informativa</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
+                                  {/* Observation section */}
+                                  {h.observacao && (
+                                    <div className="mt-4 pt-4 border-t">
+                                      <div className="flex items-start gap-3">
+                                        <div className="p-1.5 bg-muted rounded">
+                                          <MessageSquare className="h-3.5 w-3.5 text-muted-foreground" />
+                                        </div>
+                                        <div className="flex-1">
+                                          <p className="text-xs text-muted-foreground mb-1">Observações</p>
+                                          <p className="text-sm leading-relaxed whitespace-pre-line text-foreground/90">
+                                            {h.observacao}
+                                          </p>
+                                        </div>
+                                      </div>
+                                    </div>
+                                  )}
 
-            <div className="space-y-2">
-              <Label htmlFor="status_rdm">Status *</Label>
-              <Select value={formData.status_rdm} onValueChange={(value) => updateFormData('status_rdm', value as any)}>
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="Aberta">Aberta</SelectItem>
-                  <SelectItem value="Agendada">Agendada</SelectItem>
-                  <SelectItem value="Aprovada">Aprovada</SelectItem>
-                  <SelectItem value="Cancelada">Cancelada</SelectItem>
-                  <SelectItem value="Em aprovação">Em aprovação</SelectItem>
-                  <SelectItem value="Em aprovação - Comitê">Em aprovação - Comitê</SelectItem>
-                  <SelectItem value="Em avaliação">Em avaliação</SelectItem>
-                  <SelectItem value="Em implantação">Em implantação</SelectItem>
-                  <SelectItem value="Em Verificação">Em Verificação</SelectItem>
-                  <SelectItem value="Fechada">Fechada</SelectItem>
-                  <SelectItem value="Implantada">Implantada</SelectItem>
-                  <SelectItem value="Plano de volta em execução">Plano de volta em execução</SelectItem>
-                  <SelectItem value="Recuada">Recuada</SelectItem>
-                  <SelectItem value="Rejeitada">Rejeitada</SelectItem>
-                  <SelectItem value="Validação Automação">Validação Automação</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="descricao_rdm_user">Descrição *</Label>
-              <Textarea
-                id="descricao_rdm_user"
-                value={formData.descricao_rdm_user}
-                onChange={(e) => updateFormData('descricao_rdm_user', e.target.value)}
-                placeholder="Título da Mudança"
-                rows={3}
-                required
-              />
-            </div>
-
-            {/* Responsible Information */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label htmlFor="executor">Executor *</Label>
-                <Input
-                  id="executor"
-                  value={formData.executor}
-                  onChange={(e) => updateFormData('executor', e.target.value)}
-                  placeholder="Nome do responsável"
-                  required
-                />
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="grupo_executor">Grupo Executor *</Label>
-                <Input
-                  id="grupo_executor"
-                  value={formData.grupo_executor}
-                  onChange={(e) => updateFormData('grupo_executor', e.target.value)}
-                  placeholder="Equipe responsável"
-                  required
-                />
-              </div>
-            </div>
-
-            {/* Environment and Risk */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label htmlFor="area_principal_afetada">Área Principal Afetada</Label>
-                <Input
-                  id="area_principal_afetada"
-                  value={formData.area_principal_afetada}
-                  onChange={(e) => updateFormData('area_principal_afetada', e.target.value)}
-                  placeholder="Área impactada"
-                />
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="requisitante">Requisitante</Label>
-                <Input
-                  id="requisitante"
-                  value={formData.requisitante}
-                  onChange={(e) => updateFormData('requisitante', e.target.value)}
-                  placeholder="Nome do solicitante"
-                />
-              </div>
-            </div>
-
-            {/* Scheduling */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label htmlFor="data_inicio_programacao">Data/Hora Início *</Label>
-                <Input
-                  id="data_inicio_programacao"
-                  type="datetime-local"
-                  value={formData.data_inicio_programacao}
-                  onChange={(e) => updateFormData('data_inicio_programacao', e.target.value)}
-                  required
-                />
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="data_fim_programacao">Data/Hora Fim</Label>
-                <Input
-                  id="data_fim_programacao"
-                  type="datetime-local"
-                  value={formData.data_fim_programacao}
-                  onChange={(e) => updateFormData('data_fim_programacao', e.target.value)}
-                />
-              </div>
-            </div>
-
-            {/* Additional Information */}
-            <div className="grid grid-cols-1 md:grid-cols-1 gap-4">
-              <div className="space-y-2">
-                <Label htmlFor="sala_acompanhamento">Sala de Acompanhamento</Label>
-                <Input
-                  id=""
-                  value={formData.sala_acompanhamento}
-                  onChange={(e) => updateFormData('sala_acompanhamento', e.target.value)}
-                  placeholder="Sala de Acompanhamento"
-                />
-              </div>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label htmlFor="indisponibilidade">Indisponibilidade Prevista</Label>
-                <Input
-                  id="indisponibilidade"
-                  value={formData.indisponibilidade}
-                  onChange={(e) => updateFormData('indisponibilidade', e.target.value)}
-                  placeholder="Indisponibilidade Prevista"
-                />
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="alert_incdent">Alertas e Incidentes</Label>
-                <Input
-                  id="alert_incdent"
-                  value={formData.alert_incdent}
-                  onChange={(e) => updateFormData('alert_incdent', e.target.value)}
-                  placeholder="Alertas e Incidentes"
-                />
-              </div>
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="atividade_teste">Atividade de Teste</Label>
-              <Select value={formData.atividade_teste} onValueChange={(value) => updateFormData('atividade_teste', value)}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Selecione" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="Aguardando fase de teste">Aguardando fase de teste</SelectItem>
-                  <SelectItem value="Teste confirmado pelo responsável">Teste confirmado pelo responsável</SelectItem>
-                  <SelectItem value="Teste não confirmado pelo responsável">Teste não confirmado pelo responsável</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            {formData.atividade_teste === "Teste confirmado pelo responsável" && (
-              <div className="grid grid-cols-1 md:grid-cols-1 gap-4">
-                <div className="space-y-2">
-                  <Label htmlFor="atividade_teste_obs">Atividade de Teste - Observações *</Label>
-                  <Input
-                    id="atividade_teste_obs"
-                    value={formData.atividade_teste_obs || ""}
-                    onChange={(e) => updateFormData("atividade_teste_obs", e.target.value)}
-                    placeholder="Observações da Atividade"
-                    required
-                  />
-                </div>
-
-                <div className="space-y-2 col-span-2">
-                  <Label htmlFor="atividade_teste_anexo">Atividade de Teste - Anexo</Label>
-                  <Input
-                    id="atividade_teste_anexo"
-                    type="file"
-                    accept=".pdf,.jpg,.png,.doc,.docx" // <-- restringe tipos aceitos
-                    onChange={(e) => updateFormData("atividade_teste_anexo", e.target.files?.[0] || null)}
-                  />
-                  {formData.atividade_teste_anexo && (
-                    <p className="text-sm text-gray-500">Arquivo selecionado: {formData.atividade_teste_anexo.name}</p>
+                                  {/* Level badge */}
+                                  <div className="flex items-center gap-2 mt-4">
+                                    <Badge 
+                                      variant="outline" 
+                                      className={cn(
+                                        "text-xs",
+                                        levelColor.border,
+                                        levelColor.text
+                                      )}
+                                    >
+                                      {LEVEL_INFO[h.nivel as keyof typeof LEVEL_INFO]?.title || `Nível ${h.nivel}`}
+                                    </Badge>
+                                    {idx === 0 && (
+                                      <Badge variant="secondary" className="text-xs">
+                                        Mais recente
+                                      </Badge>
+                                    )}
+                                  </div>
+                                </div>
+                              </div>
+                            );
+                          })}
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="flex flex-col items-center justify-center py-12 space-y-4">
+                      <div className="p-4 bg-muted/50 rounded-full">
+                        <History className="h-8 w-8 text-muted-foreground" />
+                      </div>
+                      <div className="text-center space-y-2">
+                        <h4 className="font-medium text-foreground">Nenhum acionamento registrado</h4>
+                        <p className="text-sm text-muted-foreground max-w-sm">
+                          Os acionamentos realizados para este chamado aparecerão aqui conforme forem executados.
+                        </p>
+                      </div>
+                    </div>
                   )}
-                </div>
-              </div>
-            )}
-            {formData.atividade_teste === "Teste não confirmado pelo responsável" && (
-              <div className="grid grid-cols-1 md:grid-cols-1 gap-4">
-                <div className="space-y-2">
-                  <Label htmlFor="atividade_teste_obs">Atividade de Teste - Observações *</Label>
-                  <Input
-                    id="atividade_teste_obs"
-                    value={formData.atividade_teste_obs || ""}
-                    onChange={(e) => updateFormData("atividade_teste_obs", e.target.value)}
-                    placeholder="Observações da Atividade"
-                    required
-                  />
-                </div>
-              </div>
-            )}
+                </AccordionContent>
+              </AccordionItem>
+            </Accordion>
 
-            <div className="space-y-2">
-              <Label htmlFor="observacoes">Observações</Label>
-              <Textarea
-                id="observacoes"
-                value={formData.observacoes}
-                onChange={(e) => updateFormData('observacoes', e.target.value)}
-                placeholder="Observações da RDM"
-                rows={3}
-                required
-              />
-            </div>
-
-            {/* Form Actions */}
-            <div className="flex justify-end gap-3 pt-4 border-t">
-              <Button
-                type="button"
-                variant="outline"
-                onClick={handleCloseForm}
-                disabled={loading}
-              >
-                <X className="h-4 w-4 mr-2" />
-                Cancelar
-              </Button>
-              <Button
-                type="submit"
-                disabled={loading}
-                className="bg-primary hover:bg-primary/90"
-              >
-                <Save className="h-4 w-4 mr-2" />
-                {loading ? 'Salvando...' : 'Salvar RDM'}
-              </Button>
-            </div>
-          </form>
-        </DialogContent>
-      </Dialog>
-
-      {/* Details Modal */}
-      <Dialog open={!!selectedRDM} onOpenChange={closeModal}>
-        <DialogContent className="max-w-2xl">
-          <DialogHeader>
-            <DialogTitle className="text-xl flex items-center gap-3">
-              <div className="p-2 rounded-lg bg-primary/10">
-                <Calendar className="h-5 w-5 text-primary" />
-              </div>
-              #{selectedRDM?.numero_rdm} - {selectedRDM?.descricao_rdm_user}
-            </DialogTitle>
-          </DialogHeader>
-
-          {selectedRDM && (
-            <div className="space-y-6 py-4">
-              {/* Status and Priority */}
-              <div className="flex flex-wrap items-center gap-4">
-                <Badge className={`${getStatusBadgeClass(selectedRDM.status_rdm)} flex items-center gap-2 px-3 py-2`}>
-                  {getStatusIcon(selectedRDM.status_rdm)}
-                  {getStatusText(selectedRDM.status_rdm)}
-                </Badge>
-                <div className="flex items-center gap-2">
-                  {getPriorityIcon(selectedRDM.tipo_rdm)}
-                  <span className={`font-semibold ${getPriorityColor(selectedRDM.tipo_rdm)}`}>
-                    Prioridade {getPriorityText(selectedRDM.tipo_rdm)}
-                  </span>
-                </div>
-              </div>
-
-              {/* Status de Acompanhamento no Modal */}
-              <div className="p-4 bg-accent/10 rounded-lg border border-accent/20">
-                <h4 className="font-semibold text-foreground mb-3 flex items-center gap-2">
-                  <Settings className="h-4 w-4" />
-                  Status de Acompanhamento
-                </h4>
-                <StatusSelector rdm={selectedRDM} />
-              </div>
-
-              {/* Details Grid */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div className="space-y-4">
-                  <div className="flex items-center gap-3 p-3 bg-accent/10 rounded-lg border border-accent/20">
-                    <User className="h-5 w-5 text-primary" />
-                    <div>
-                      <p className="text-sm text-muted-foreground">Responsável</p>
-                      <p className="font-semibold text-foreground">{selectedRDM.executor}</p>
+            {/* Informações Principais */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+              {/* Coluna Esquerda */}
+              <div className="p-6 bg-gradient-to-br from-card to-card/80 rounded-xl border border-border/50 shadow-lg">
+                <div className="space-y-5">
+                  <h3 className="text-xl font-bold text-foreground flex items-center gap-3 border-b border-primary/20 pb-3">
+                    <div className="p-2 rounded-lg bg-primary/10 text-primary">
+                      <Tag className="h-5 w-5" />
                     </div>
-                  </div>
+                    Informações Básicas
+                  </h3>
 
-                  <div className="flex items-center gap-3 p-3 bg-accent/10 rounded-lg border border-accent/20">
-                    <Settings className="h-5 w-5 text-primary" />
-                    <div>
-                      <p className="text-sm text-muted-foreground">Equipe</p>
-                      <p className="font-semibold text-foreground">{selectedRDM.grupo_executor}</p>
+                  <div className="space-y-4">
+                    <div className="space-y-2">
+                      <span className="text-sm font-semibold text-primary/80 uppercase tracking-wide flex items-center gap-2">
+                        <FileText className="h-4 w-4" />
+                        Número do Chamado
+                      </span>
+                      <div className="text-lg font-mono font-bold bg-gradient-to-r from-primary/10 to-primary/5 border border-primary/20 px-4 py-3 rounded-lg">
+                        <div className="flex items-center gap-3">
+                          <FileText className="h-5 w-5 text-primary" />
+                          #{alertData.chamado}
+                        </div>
+                      </div>
                     </div>
-                  </div>
-                </div>
 
-                <div className="space-y-4">
-                  <div className="flex items-center gap-3 p-3 bg-accent/10 rounded-lg border border-accent/20">
-                    <Calendar className="h-5 w-5 text-primary" />
-                    <div>
-                      <p className="text-sm text-muted-foreground">Janela de Execução</p>
-                      <p className="font-semibold text-foreground">
-                        {formatDateRange(selectedRDM.data_inicio_programacao, selectedRDM.data_fim_programacao)}
-                      </p>
+                    <div className="space-y-2">
+                      <span className="text-sm font-semibold text-primary/80 uppercase tracking-wide flex items-center gap-2">
+                        <Users className="h-4 w-4" />
+                        Grupo Responsável
+                      </span>
+                      <div className="text-base font-mono font-bold bg-gradient-to-r from-primary/10 to-primary/5 border border-primary/20 px-4 py-3 rounded-lg">
+                        <div className="flex items-center gap-3">
+                          <Users className="h-5 w-5 text-primary" />
+                          {alertData.grupo_chamado}
+                        </div>
+                      </div>
                     </div>
-                  </div>
 
-                  <div className="flex items-center gap-3 p-3 bg-accent/10 rounded-lg border border-accent/20">
-                    <Clock className="h-5 w-5 text-primary" />
-                    <div>
-                      <p className="text-sm text-muted-foreground">Duração Estimada</p>
-                      <p className="font-semibold text-foreground">{selectedRDM["duração da Programação"] || 'N/A'} Horas</p>
+                    <div className="space-y-2">
+                      <span className="text-sm font-semibold text-primary/80 uppercase tracking-wide flex items-center gap-2">
+                        <Tag className="h-4 w-4" />
+                        Classificação
+                      </span>
+                      <div className="text-base font-mono font-bold bg-gradient-to-r from-primary/10 to-primary/5 border border-primary/20 px-4 py-3 rounded-lg">
+                        <div className="flex items-center gap-3">
+                          <Tag className="h-5 w-5 text-primary" />
+                          {alertData.tipo_chamado}
+                        </div>
+                      </div>
                     </div>
                   </div>
                 </div>
               </div>
 
-              {/* Description */}
-              <div className="max-w-3xl w-full max-h-[20vh] overflow-y-auto mx-auto">
-                <h4 className="font-semibold text-foreground mb-4 flex items-center gap-2 text-lg">
-                  <AlertCircle className="h-4 w-4" />
-                  Mais informações
-                </h4>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <div>
-                    <span className="font-medium text-foreground">Ambiente:</span>
-                    <span className="text-muted-foreground ml-1">{selectedRDM.ambiente}</span>
-                  </div>
-                  <div>
-                    <span className="font-medium text-foreground">Origem:</span>
-                    <span className="text-muted-foreground ml-1">{selectedRDM.origem}</span>
-                  </div>
-                  <div>
-                    <span className="font-medium text-foreground">Impacto:</span>
-                    <span className="text-muted-foreground ml-1">{selectedRDM.impacto}</span>
-                  </div>
-                  <div>
-                    <span className="font-medium text-foreground">Risco:</span>
-                    <span className="text-muted-foreground ml-1">{selectedRDM.risco}</span>
-                  </div>
-                  <div>
-                    <span className="font-medium text-foreground">Requisitante:</span>
-                    <span className="text-muted-foreground ml-1">{selectedRDM.requisitante}</span>
-                  </div>
-                  <div>
-                    <span className="font-medium text-foreground">Área Principal:</span>
-                    <span className="text-muted-foreground ml-1">{selectedRDM.area_principal_afetada}</span>
-                  </div>
-                  <div>
-                    <span className="font-medium text-foreground">War Room Preventivo:</span>
-                    <span className="text-muted-foreground ml-1">{selectedRDM.warroom_preventivo}</span>
-                  </div>
-                  <div>
-                    <span className="font-medium text-foreground">IC:</span>
-                    <span className="text-muted-foreground ml-1">{selectedRDM.ic_rdm}</span>
+              {/* Coluna Direita */}
+              <div className="p-6 bg-gradient-to-br from-card to-card/80 rounded-xl border border-border/50 shadow-lg">
+                <div className="space-y-5">
+                  <h3 className="text-xl font-bold text-foreground flex items-center gap-3 border-b border-primary/20 pb-3">
+                    <div className="p-2 rounded-lg bg-primary/10 text-primary">
+                      <Clock className="h-5 w-5" />
+                    </div>
+                    Temporização
+                  </h3>
+
+                  <div className="space-y-4">
+                    <div className="space-y-2">
+                      <span className="text-sm font-semibold text-primary/80 uppercase tracking-wide flex items-center gap-2">
+                        <Calendar className="h-4 w-4" />
+                        Data de Abertura
+                      </span>
+                      <div className="text-base font-mono font-bold bg-gradient-to-r from-primary/10 to-primary/5 border border-primary/20 px-4 py-3 rounded-lg">
+                        <div className="flex items-center gap-3">
+                          <Calendar className="h-5 w-5 text-primary" />
+                          {formatDate(alertData.abertura_chamado)}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="space-y-2">
+                      <span className="text-sm font-semibold text-primary/80 uppercase tracking-wide flex items-center gap-2">
+                        <Clock className="h-4 w-4" />
+                        Status Atual
+                      </span>
+                      <div className="text-base font-mono font-bold bg-gradient-to-r from-primary/10 to-primary/5 border border-primary/20 px-4 py-3 rounded-lg">
+                        <div className="flex items-center gap-3">
+                          <Clock className="h-5 w-5 text-primary" />
+                          {alertData.status_chamado}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="space-y-2">
+                      <span className="text-sm font-semibold text-primary/80 uppercase tracking-wide flex items-center gap-2">
+                        <AlertTriangle className="h-4 w-4" />
+                        Severidade
+                      </span>
+                      <div className="text-base font-mono font-bold bg-gradient-to-r from-primary/10 to-primary/5 border border-primary/20 px-4 py-3 rounded-lg">
+                        <div className="flex items-center gap-3">
+                          <AlertTriangle className="h-5 w-5 text-primary" />
+                          <Badge className={`${getSeverityColor(alertData.severidade_chamado)} text-sm px-3 py-1 font-bold shadow-lg`}>
+                            {alertData.severidade_chamado}
+                          </Badge>
+                        </div>
+                      </div>
+                    </div>
                   </div>
                 </div>
               </div>
             </div>
-          )}
-        </DialogContent>
-      </Dialog>
-    </div>
+
+            {/* Resumo/Título do Chamado */}
+            <div className="p-6 bg-gradient-to-br from-card to-card/80 rounded-xl border border-border/50 shadow-lg">
+              <h3 className="text-xl font-bold text-foreground flex items-center gap-3 border-b border-primary/20 pb-4 mb-4">
+                <div className="p-2 rounded-lg bg-primary/10 text-primary">
+                  <FileText className="h-5 w-5" />
+                </div>
+                Resumo do Chamado
+              </h3>
+              <div className="bg-gradient-to-r from-accent/10 to-accent/5 border border-accent/20 p-6 rounded-lg">
+                <p className="text-base leading-relaxed text-foreground font-medium">{alertData.resumo_chamado}</p>
+              </div>
+            </div>
+
+          </div>
+        </ScrollArea>
+      </DialogContent>
+    </Dialog>
   );
 };
