@@ -141,3 +141,24 @@ export const ChamadoDetailsModal = ({ isOpen, onClose, alertData }: ChamadoDetai
     }
     return historico;
   }, [alertData.chamado, timers]);
+
+  // resto do seu código permanece igual...
+  // apenas substituímos o uso de historicoAcionamentos vindo da prop
+  // pelo calculado no useMemo
+  return (
+    <Dialog open={isOpen} onOpenChange={onClose}>
+      <DialogContent className="max-w-5xl max-h-[85vh]">
+        <DialogHeader>
+          <DialogTitle>
+            Detalhes do Chamado - {alertData.chamado}
+          </DialogTitle>
+        </DialogHeader>
+
+        <ScrollArea className="max-h-[calc(85vh-140px)] pr-4">
+          {/* Aqui você mantém seu acordeão de histórico e resto do layout */}
+          {/* ... */}
+        </ScrollArea>
+      </DialogContent>
+    </Dialog>
+  );
+};
