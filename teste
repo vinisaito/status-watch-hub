@@ -1,60 +1,3 @@
-use-chat-acionados:
-import { useState, useEffect, useCallback } from 'react';
-import { toast } from '@/hooks/use-toast';
-
-export const useChatAcionados = () => {
-  const [acionadosSet, setAcionadosSet] = useState<Set<string>>(new Set());
-  const [loading, setLoading] = useState(true);
-
-  // Busca os incidentes acionados no DynamoDB via API
-  const fetchAcionados = useCallback(async () => {
-    try {
-      setLoading(true);
-      const res = await fetch('https://f6ffk8e9fe.execute-api.us-east-1.amazonaws.com/prod/chatacionados');
-      if (!res.ok) throw new Error(`Erro ao buscar acionados: ${res.status}`);
-      const data: { chamado: string }[] = await res.json();
-      setAcionadosSet(new Set(data.map(item => item.chamado.toString())));
-    } catch (error) {
-      toast({
-        title: 'Erro ao buscar acionados',
-        description: 'Não foi possível carregar os incidentes acionados',
-        variant: 'destructive',
-      });
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    fetchAcionados();
-  }, [fetchAcionados]);
-
-  // Função para adicionar um chamado ao set de acionados
-  const addAcionado = useCallback((chamado: string) => {
-    setAcionadosSet(prev => new Set([...prev, chamado]));
-  }, []);
-
-  // Função para verificar se um chamado foi acionado
-  const isAcionado = useCallback((chamado: string) => {
-    return acionadosSet.has(chamado);
-  }, [acionadosSet]);
-
-  return {
-    acionadosSet,
-    loading,
-    addAcionado,
-    isAcionado,
-    refetch: fetchAcionados
-  };
-};
-
-
-
-
-
-
-
-ChamadoDetailsModal:
 import { useState } from 'react';
 import {
   Dialog,
@@ -80,9 +23,11 @@ import {
   CheckCircle2,
   XCircle,
   Phone,
-  MessageSquare
+  MessageSquare,
+  Loader2
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { useChatAcionados } from '@/hooks/use-chat-acionados';
 
 interface AlertData {
   id: string;
@@ -140,6 +85,9 @@ const LEVEL_COLORS = {
 };
 
 export const ChamadoDetailsModal = ({ isOpen, onClose, alertData, historicoAcionamentos = [] }: ChamadoDetailsModalProps) => {
+  // Hook para verificar acionamentos via API
+  const { isAcionado, loading: loadingAcionados } = useChatAcionados();
+
   if (!alertData) return null;
 
   const formatDate = (dateString: string) => {
@@ -198,7 +146,9 @@ export const ChamadoDetailsModal = ({ isOpen, onClose, alertData, historicoAcion
       : 'bg-yellow-500 text-yellow-950';
   };
 
-  const isChat = alertData.acionado === 'true' || alertData.chat;
+  // Verifica se o chamado foi acionado usando o hook
+  const chamadoFoiAcionado = isAcionado(alertData.chamado);
+  const isChat = alertData.acionado === 'true' || alertData.chat || chamadoFoiAcionado;
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
@@ -209,11 +159,106 @@ export const ChamadoDetailsModal = ({ isOpen, onClose, alertData, historicoAcion
               <FileText className="h-6 w-6" />
             </div>
             Detalhes do Chamado - {alertData.chamado}
+            {/* Indicador de status de acionamento */}
+            <div className="flex items-center gap-2 ml-auto">
+              {loadingAcionados ? (
+                <div className="flex items-center gap-2 text-muted-foreground">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  <span className="text-sm">Verificando...</span>
+                </div>
+              ) : (
+                <Badge 
+                  variant={chamadoFoiAcionado ? "default" : "secondary"}
+                  className={cn(
+                    "flex items-center gap-1.5",
+                    chamadoFoiAcionado 
+                      ? "bg-green-500 hover:bg-green-600 text-white" 
+                      : "bg-gray-500 hover:bg-gray-600 text-white"
+                  )}
+                >
+                  {chamadoFoiAcionado ? (
+                    <>
+                      <CheckCircle2 className="h-3 w-3" />
+                      Acionado
+                    </>
+                  ) : (
+                    <>
+                      <XCircle className="h-3 w-3" />
+                      Não Acionado
+                    </>
+                  )}
+                </Badge>
+              )}
+            </div>
           </DialogTitle>
         </DialogHeader>
 
         <ScrollArea className="max-h-[calc(85vh-140px)] pr-4">
           <div className="space-y-8">
+
+            {/* Status do Acionamento */}
+            <div className="p-6 bg-gradient-to-br from-card to-card/80 rounded-xl border border-border/50 shadow-lg">
+              <h3 className="text-xl font-bold text-foreground flex items-center gap-3 border-b border-primary/20 pb-4 mb-4">
+                <div className="p-2 rounded-lg bg-primary/10 text-primary">
+                  <MessageSquare className="h-5 w-5" />
+                </div>
+                Status do Acionamento
+              </h3>
+              
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div className="bg-gradient-to-r from-accent/10 to-accent/5 border border-accent/20 p-4 rounded-lg">
+                  <div className="flex items-center gap-3">
+                    <div className="p-2 bg-primary/10 rounded-lg">
+                      <FileText className="h-4 w-4 text-primary" />
+                    </div>
+                    <div>
+                      <p className="text-xs text-muted-foreground">Dados Locais</p>
+                      <p className="font-semibold text-sm">
+                        {(alertData.acionado === 'true' || alertData.chat) ? 'Acionado' : 'Não Acionado'}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="bg-gradient-to-r from-accent/10 to-accent/5 border border-accent/20 p-4 rounded-lg">
+                  <div className="flex items-center gap-3">
+                    <div className="p-2 bg-primary/10 rounded-lg">
+                      <MessageSquare className="h-4 w-4 text-primary" />
+                    </div>
+                    <div>
+                      <p className="text-xs text-muted-foreground">API Acionamentos</p>
+                      {loadingAcionados ? (
+                        <div className="flex items-center gap-2">
+                          <Loader2 className="h-3 w-3 animate-spin" />
+                          <span className="text-xs">Carregando...</span>
+                        </div>
+                      ) : (
+                        <p className="font-semibold text-sm">
+                          {chamadoFoiAcionado ? 'Acionado' : 'Não Acionado'}
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="bg-gradient-to-r from-accent/10 to-accent/5 border border-accent/20 p-4 rounded-lg">
+                  <div className="flex items-center gap-3">
+                    <div className="p-2 bg-primary/10 rounded-lg">
+                      <CheckCircle2 className="h-4 w-4 text-primary" />
+                    </div>
+                    <div>
+                      <p className="text-xs text-muted-foreground">Status Final</p>
+                      <p className={cn(
+                        "font-semibold text-sm",
+                        isChat ? "text-green-600" : "text-red-600"
+                      )}>
+                        {isChat ? 'Acionado' : 'Não Acionado'}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
 
             {/* Histórico de Acionamentos*/}
             <Accordion type="single" collapsible className="w-full">
