@@ -1,37 +1,94 @@
 /**
  * ====================================================================================
- * INTERFACES E TIPOS - ACTION TABLE
+ * FUNÇÕES UTILITÁRIAS - ACTION TABLE
  * ====================================================================================
  */
 
-export interface AlertData {
-  id: string;
-  chamado: string;
-  tipo_chamado: string;
-  grupo_chamado: string;
-  status_chamado: string;
-  abertura_chamado: string;
-  resumo_chamado: string;
-  severidade_chamado: string;
-  acionado: string;
-  chat: boolean;
-}
+/**
+ * Obtém a cor do timer baseada no tempo restante
+ * @param remainingTime Tempo restante em segundos
+ * @returns Classe CSS para colorir o timer
+ */
+export const getTimerColor = (remainingTime: number) => {
+  if (remainingTime > 600) {        // > 10 minutos
+    return 'text-timer-safe';
+  } else if (remainingTime > 300) { // 5-10 minutos  
+    return 'text-timer-warning';
+  } else if (remainingTime > 120) { // 2-5 minutos
+    return 'text-timer-danger';
+  } else {                          // < 2 minutos
+    return 'text-timer-critical animate-pulse';
+  }
+};
 
-export interface ActionTableProps {
-  alertData: AlertData[];
-  onUpdateAcknowledgment: (alertId: string, acknowledged: boolean) => void;
-  loading: boolean;
-}
+/**
+ * Formata uma string de data para o padrão brasileiro
+ * @param dateString String da data a ser formatada
+ * @returns Data formatada ou valor original em caso de erro
+ */
+export const formatDate = (dateString: string) => {
+  if (!dateString || dateString === '' || dateString === 'null' || dateString === 'undefined') {
+    return '-';
+  }
 
-export type SortField = keyof AlertData;
-export type SortDirection = 'asc' | 'desc' | null;
+  try {
+    let date: Date;
+    const cleanString = String(dateString).trim();
 
-export interface HistoricoAcionamento {
-  operador: string;
-  pessoaAcionada: string;
-  status: string;
-  observacao: string;
-  dataHora: string;
-  updatedAt: string;
-  nivel: number;
-}
+    // Trata diferentes formatos de timestamp
+    if (/^\d{13}$/.test(cleanString)) {
+      // Timestamp em millisegundos
+      date = new Date(parseInt(cleanString));
+    } else if (/^\d{10}$/.test(cleanString)) {
+      // Timestamp em segundos
+      date = new Date(parseInt(cleanString) * 1000);
+    } else if (/^\d{2}\/\d{2}\/\d{4}/.test(cleanString)) {
+      // Formato brasileiro DD/MM/YYYY
+      const parts = cleanString.split(' ');
+      const datePart = parts[0];
+      const timePart = parts[1] || '00:00:00';
+      const [day, month, year] = datePart.split('/');
+      const [hour, minute, second] = timePart.split(':');
+
+      date = new Date(
+        parseInt(year),
+        parseInt(month) - 1,
+        parseInt(day),
+        parseInt(hour || '0'),
+        parseInt(minute || '0'),
+        parseInt(second || '0')
+      );
+    } else {
+      // Tenta parsing padrão
+      date = new Date(cleanString);
+    }
+
+    // Validações básicas
+    if (isNaN(date.getTime())) return cleanString;
+
+    const year = date.getFullYear();
+    if (year < 1900 || year > 2100) return cleanString;
+
+    return date.toLocaleString('pt-BR', {
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+    });
+  } catch (error) {
+    return String(dateString);
+  }
+};
+
+/**
+ * Obtém a cor da badge baseada na severidade
+ * @param severity String da severidade
+ * @returns Classes CSS para a badge
+ */
+export const getSeverityColor = (severity: string) => {
+  return severity.includes('4')
+    ? 'bg-destructive text-destructive-foreground'
+    : 'bg-yellow-500 text-yellow-950';
+};
