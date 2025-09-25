@@ -1,4 +1,3 @@
-import { useState, useMemo, useCallback, useEffect } from 'react';
 import {
   Check,
   AlertTriangle,
@@ -26,69 +25,13 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 
-// Hooks e funcionalidades
-import { toast } from '@/hooks/use-toast';
-import { useWebsocketTimers } from "@/hooks/useWebsocketTimers";
+// Hook customizado
+import { useActionTableLogic, LEVEL_NAMES, type ActionTableProps } from '@/hooks/useActionTableLogic';
 
-// Componentes customizados
+// Componentes customizados - substitua pelos seus componentes reais
 import { ModernTimerModal } from '@/components/ActionTable/ModernTimerModal';
 import { ChamadoDetailsModal } from '@/components/ActionTable/ChamadoDetailsModal';
 import { AssumeOperatorModal } from '@/components/ActionTable/AssumeOperatorModal';
-
-/**
- * ====================================================================================
- * INTERFACES E TIPOS
- * ====================================================================================
- */
-
-interface AlertData {
-  id: string;
-  chamado: string;
-  tipo_chamado: string;
-  grupo_chamado: string;
-  status_chamado: string;
-  abertura_chamado: string;
-  resumo_chamado: string;
-  severidade_chamado: string;
-  acionado: string;
-  chat: boolean;
-  link_chamado: string;
-}
-
-interface ActionTableProps {
-  alertData: AlertData[];
-  onUpdateAcknowledgment: (alertId: string, acknowledged: boolean) => void;
-  loading: boolean;
-}
-
-type SortField = keyof AlertData;
-type SortDirection = 'asc' | 'desc' | null;
-
-/**
- * ====================================================================================
- * CONSTANTES E CONFIGURAÇÕES
- * ====================================================================================
- */
-
-// Informações dos níveis de escalação do sistema de timer
-const LEVEL_NAMES = {
-  1: "Primeiro Acionamento",
-  2: "1ª Escalação",
-  3: "2ª Escalação",
-  4: "3ª Escalação",
-  5: "4ª Escalação"
-};
-
-// Função para obter duração do timer baseada no nível, tipo e severidade
-const getTimerDuration = (level: number, tipoChamado?: string, severidade?: string): number => {
-  // Caso especial: incidente com severidade alta (7 minutos)
-  if (tipoChamado?.toLowerCase().includes('incidente') && severidade?.includes('4')) {
-    return 420; // 7 minutos em segundos
-  }
-  
-  // Caso padrão: 20 min para nível 1, 10 min para os demais
-  return level === 1 ? 1200 : 600;
-};
 
 /**
  * ====================================================================================
@@ -97,509 +40,70 @@ const getTimerDuration = (level: number, tipoChamado?: string, severidade?: stri
  */
 
 export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: ActionTableProps) => {
-
-  /**
-   * -----------------------------------------------------------------------------------
-   * ESTADOS DO COMPONENTE
-   * -----------------------------------------------------------------------------------
-   */
-
-  // Estados de paginação e filtros
-  const [currentPage, setCurrentPage] = useState(1);
-  const [searchTerm, setSearchTerm] = useState('');
-  const [itemsPerPage, setItemsPerPage] = useState<number>(5);
-
-  // Estados de ordenação
-  const [sortField, setSortField] = useState<SortField>('chamado');
-  const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
-
-  // Estados dos modais
-  const [timerManagementOpen, setTimerManagementOpen] = useState(false);
-  const [selectedChamadoForTimer, setSelectedChamadoForTimer] = useState<string>('');
-  
-  // Estados do modal de detalhes do chamado
-  const [chamadoDetailsOpen, setChamadoDetailsOpen] = useState(false);
-  const [selectedChamadoForDetails, setSelectedChamadoForDetails] = useState<AlertData | null>(null);
-
-  // Estados do modal de assumir operador
-  const [assumeOperatorOpen, setAssumeOperatorOpen] = useState(false);
-  const [selectedChamadoForOperator, setSelectedChamadoForOperator] = useState<string>('');
-
-  /**
-   * -----------------------------------------------------------------------------------
-   * HOOK WEBSOCKET PARA GERENCIAMENTO DE TIMERS
-   * -----------------------------------------------------------------------------------
-   */
-
+  // Hook personalizado com toda a lógica
   const {
+    // Estados
+    currentPage,
+    searchTerm,
+    setSearchTerm,
+    itemsPerPage,
+    sortField,
+    sortDirection,
+    
+    // Estados de modais
+    timerManagementOpen,
+    setTimerManagementOpen,
+    selectedChamadoForTimer,
+    setSelectedChamadoForTimer,
+    chamadoDetailsOpen,
+    selectedChamadoForDetails,
+    assumeOperatorOpen,
+    selectedChamadoForOperator,
+
+    // Estados do WebSocket
     timers,
     isConnected,
-    startTimer,
+
+    // Dados processados
+    filteredData,
+    sortedAndPaginatedData,
+    totalPages,
+
+    // Funções utilitárias
+    getTimerColor,
+    formatDate,
+    getSeverityColor,
+    getCurrentActiveLevel,
+    getHistoricoAcionamentos,
+    formatTime,
+    getRemainingTime,
+
+    // Handlers
+    handleAcknowledgment,
+    handleOpenAssumeOperator,
+    handleCloseAssumeOperator,
+    handleAssumeOperator,
+    handleOpenChamadoDetails,
+    handleCloseChamadoDetails,
+    handleStartTimer,
+    handleOpenTimerManagement,
+    handleNextLevel,
+    handlePreviousLevel,
+    handleFinalize,
+    handleSort,
+    handleItemsPerPageChange,
+    handlePageChange,
+
+    // Funções do WebSocket
     updateObservacao,
     updateAcionamento,
-    updateStatusFinal,
-    getRemainingTime,
-    formatTime,
-    getState,
-    setWatchedChamados
-  } = useWebsocketTimers();
-
-  /**
-   * -----------------------------------------------------------------------------------
-   * EFEITO PARA REGISTRAR CHAMADOS NO WEBSOCKET
-   * -----------------------------------------------------------------------------------
-   */
-
-  // Registra os chamados que queremos monitorar no WebSocket quando os dados mudam
-  useEffect(() => {
-    if (!alertData || alertData.length === 0) return;
-
-    const chamadosNum = alertData.map(a => parseInt(a.chamado));
-    setWatchedChamados(chamadosNum);
-
-    // Força a busca do estado atual de cada chamado
-    chamadosNum.forEach(chamado => getState(chamado));
-  }, [alertData, setWatchedChamados, getState]);
-
-  /**
-   * -----------------------------------------------------------------------------------
-   * FUNÇÕES UTILITÁRIAS
-   * -----------------------------------------------------------------------------------
-   */
-
-  /**
-   * Obtém a cor do timer baseada no tempo restante
-   * @param remainingTime Tempo restante em segundos
-   * @returns Classe CSS para colorir o timer
-   */
-  const getTimerColor = useCallback((remainingTime: number) => {
-    if (remainingTime > 600) {        // > 10 minutos
-      return 'text-timer-safe';
-    } else if (remainingTime > 300) { // 5-10 minutos  
-      return 'text-timer-warning';
-    } else if (remainingTime > 120) { // 2-5 minutos
-      return 'text-timer-danger';
-    } else {                          // < 2 minutos
-      return 'text-timer-critical animate-pulse';
-    }
-  }, []);
-
-  /**
-   * Formata uma string de data para o padrão brasileiro
-   * @param dateString String da data a ser formatada
-   * @returns Data formatada ou valor original em caso de erro
-   */
-  const formatDate = useCallback((dateString: string) => {
-    if (!dateString || dateString === '' || dateString === 'null' || dateString === 'undefined') {
-      return '-';
-    }
-
-    try {
-      let date: Date;
-      const cleanString = String(dateString).trim();
-
-      // Trata diferentes formatos de timestamp
-      if (/^\d{13}$/.test(cleanString)) {
-        // Timestamp em millisegundos
-        date = new Date(parseInt(cleanString));
-      } else if (/^\d{10}$/.test(cleanString)) {
-        // Timestamp em segundos
-        date = new Date(parseInt(cleanString) * 1000);
-      } else if (/^\d{2}\/\d{2}\/\d{4}/.test(cleanString)) {
-        // Formato brasileiro DD/MM/YYYY
-        const parts = cleanString.split(' ');
-        const datePart = parts[0];
-        const timePart = parts[1] || '00:00:00';
-        const [day, month, year] = datePart.split('/');
-        const [hour, minute, second] = timePart.split(':');
-
-        date = new Date(
-          parseInt(year),
-          parseInt(month) - 1,
-          parseInt(day),
-          parseInt(hour || '0'),
-          parseInt(minute || '0'),
-          parseInt(second || '0')
-        );
-      } else {
-        // Tenta parsing padrão
-        date = new Date(cleanString);
-      }
-
-      // Validações básicas
-      if (isNaN(date.getTime())) return cleanString;
-
-      const year = date.getFullYear();
-      if (year < 1900 || year > 2100) return cleanString;
-
-      return date.toLocaleString('pt-BR', {
-        day: '2-digit',
-        month: '2-digit',
-        year: 'numeric',
-        hour: '2-digit',
-        minute: '2-digit',
-        second: '2-digit',
-      });
-    } catch (error) {
-      return String(dateString);
-    }
-  }, []);
-
-  /**
-   * Obtém a cor da badge baseada na severidade
-   * @param severity String da severidade
-   * @returns Classes CSS para a badge
-   */
-  const getSeverityColor = useCallback((severity: string) => {
-    return severity.includes('4')
-      ? 'bg-destructive text-destructive-foreground'
-      : 'bg-yellow-500 text-yellow-950';
-  }, []);
-
-  /**
-   * Obtém o nível ativo atual do timer para um chamado
-   * @param chamado Número do chamado
-   * @returns Nível ativo (1-5) ou null se nenhum timer ativo
-   */
-  const getCurrentActiveLevel = useCallback((chamado: number) => {
-    const timerState = timers.get(chamado);
-    if (!timerState) return null;
-
-    // Verifica levels de 1 a 5 para encontrar o ativo
-    for (let level = 1; level <= 5; level++) {
-      const statusKey = `level${level}_status` as keyof typeof timerState;
-      if (timerState[statusKey] === 'running') {
-        return level;
-      }
-    }
-    return null;
-  }, [timers]);
-
-  /**
-   * Monta o histórico de acionamentos do chamado
-   * @param chamadoNum Número do chamado
-   * @returns Array com histórico dos acionamentos
-   */
-  const getHistoricoAcionamentos = useCallback((chamadoNum: number) => {
-    const timerState = timers.get(chamadoNum);
-    if (!timerState) return [];
-
-    const historico: {
-      operador: string;
-      pessoaAcionada: string;
-      status: string;
-      observacao: string;
-      dataHora: string;
-      updatedAt: string;
-      nivel: number;
-    }[] = [];
-
-    // Percorre todos os níveis e coleta informações do histórico
-    for (let nivel = 1; nivel <= 5; nivel++) {
-      const operador = timerState[`level${nivel}_operador`] || '';
-      const pessoaAcionada = timerState[`level${nivel}_pessoaAcionada`] || '';
-      const status = timerState[`level${nivel}_statusAcionamento`] || '';
-      const observacao = timerState[`level${nivel}_observacao`] || '';
-      const dataHora = timerState[`level${nivel}_dataHora`] || '';
-      const updatedAt = timerState[`level${nivel}_updatedAt`] || '';
-
-      if (operador || pessoaAcionada || status || observacao || dataHora) {
-        historico.push({
-          operador,
-          pessoaAcionada,
-          status,
-          observacao,
-          dataHora,
-          updatedAt: formatDate(updatedAt),
-          nivel,
-        });
-      }
-    }
-    return historico;
-  }, [timers, formatDate]);
-
-  /**
-   * -----------------------------------------------------------------------------------
-   * HANDLERS DE ACIONAMENTO
-   * -----------------------------------------------------------------------------------
-   */
-
-  /**
-   * Processa o acionamento de um alerta
-   * @param alert Dados do alerta a ser acionado
-   */
-  const handleAcknowledgment = useCallback(async (alert: AlertData) => {
-    try {
-      toast({
-        title: "Alerta acionado",
-        description: `Chamado ${alert.chamado} foi acionado com sucesso`,
-      });
-
-      onUpdateAcknowledgment(alert.id, true);
-    } catch (error: any) {
-      toast({
-        title: "Erro ao acionar alerta",
-        description: error.message || "Não foi possível concluir o acionamento",
-        variant: "destructive",
-      });
-    }
-  }, [onUpdateAcknowledgment]);
-
-  /**
-   * -----------------------------------------------------------------------------------
-   * HANDLERS DE OPERADOR
-   * -----------------------------------------------------------------------------------
-   */
-
-  /**
-   * Abre o modal para assumir/alterar operador do chamado
-   * @param chamado String do número do chamado
-   */
-  const handleOpenAssumeOperator = useCallback((chamado: string) => {
-    setSelectedChamadoForOperator(chamado);
-    setAssumeOperatorOpen(true);
-  }, []);
-
-  /**
-   * Fecha o modal de assumir operador
-   */
-  const handleCloseAssumeOperator = useCallback(() => {
-    setAssumeOperatorOpen(false);
-    setSelectedChamadoForOperator('');
-  }, []);
-
-  /**
-   * Processa a atribuição de operador ao chamado
-   * @param chamado String do número do chamado
-   * @param operatorName Nome do operador
-   */
-  const handleAssumeOperator = useCallback(async (chamado: string, operatorName: string) => {
-    try {
-      const chamadoNum = parseInt(chamado);
-      
-      // Simula uma chamada ao websocket para atualizar o operador
-      // Na implementação real, você deve ter uma função específica para isso
-      // Por exemplo: updateOperador(chamadoNum, operatorName)
-      
-      // Por enquanto, vamos usar uma abordagem que funciona com o sistema atual
-      // Você pode precisar ajustar isso baseado na sua implementação do websocket
-      
-      // Força atualização do estado após definir operador
-      setTimeout(() => {
-        getState(chamadoNum);
-      }, 500);
-
-      return Promise.resolve();
-    } catch (error) {
-      console.error('Erro ao assumir operador:', error);
-      throw error;
-    }
-  }, [getState]);
-
-  /**
-   * -----------------------------------------------------------------------------------
-   * HANDLERS DE DETALHES DO CHAMADO
-   * -----------------------------------------------------------------------------------
-   */
-
-  /**
-   * Abre o modal de detalhes do chamado
-   * @param alert Dados do alerta selecionado
-   */
-  const handleOpenChamadoDetails = useCallback((alert: AlertData) => {
-    setSelectedChamadoForDetails(alert);
-    setChamadoDetailsOpen(true);
-  }, []);
-
-  /**
-   * Fecha o modal de detalhes do chamado
-   */
-  const handleCloseChamadoDetails = useCallback(() => {
-    setChamadoDetailsOpen(false);
-    setSelectedChamadoForDetails(null);
-  }, []);
-
-  /**
-   * -----------------------------------------------------------------------------------
-   * HANDLERS DE TIMER
-   * -----------------------------------------------------------------------------------
-   */
-
-  /**
-   * Inicia o timer para o primeiro acionamento
-   * @param chamado String do número do chamado
-   * @param alert Dados do alerta para obter tipo e severidade
-   */
-  const handleStartTimer = useCallback((chamado: string, alert: AlertData) => {
-    const chamadoNum = parseInt(chamado);
-
-    console.log(`Iniciando Primeiro Acionamento para chamado ${chamado}`);
-
-    const success = startTimer(chamadoNum, 1, getTimerDuration(1, alert.tipo_chamado, alert.severidade_chamado));
-
-    if (success) {
-      toast({
-        title: "🚀 Primeiro Acionamento Iniciado",
-        description: `Timer de 20 minutos iniciado para chamado ${chamado}`,
-      });
-
-      // Aguarda e força atualização do estado
-      setTimeout(() => {
-        getState(chamadoNum);
-      }, 1000);
-    }
-  }, [startTimer, getState]);
-
-  /**
-   * Abre o modal de gerenciamento de timer
-   * @param chamado String do número do chamado
-   */
-  const handleOpenTimerManagement = useCallback((chamado: string) => {
-    setSelectedChamadoForTimer(chamado);
-    setTimerManagementOpen(true);
-  }, []);
-
-  /**
-   * -----------------------------------------------------------------------------------
-   * HANDLERS DE GERENCIAMENTO DE ETAPAS
-   * -----------------------------------------------------------------------------------
-   */
-
-  /**
-   * Avança para o próximo nível do timer
-   * @param chamado String do número do chamado
-   * @param nextLevel Próximo nível a ser ativado
-   * @param observacao Observação do nível atual
-   * @param alert Dados do alerta para obter tipo e severidade
-   */
-  const handleNextLevel = useCallback(async (chamado: string, nextLevel: number, observacao: string, alert?: AlertData) => {
-    try {
-      const chamadoNum = parseInt(chamado);
-
-      // Salva observação do nível atual antes de avançar
-      const currentLevel = getCurrentActiveLevel(chamadoNum);
-      if (currentLevel && observacao.trim()) {
-        updateObservacao(chamadoNum, currentLevel, observacao.trim());
-      }
-
-      // Inicia o próximo nível
-      const success = startTimer(chamadoNum, nextLevel, getTimerDuration(nextLevel, alert?.tipo_chamado, alert?.severidade_chamado));
-
-      if (success) {
-        // Aguarda para garantir que o timer foi iniciado
-        await new Promise(resolve => setTimeout(resolve, 500));
-
-        // Atualiza estado
-        getState(chamadoNum);
-        return true;
-      }
-
-      return false;
-    } catch (error) {
-      console.error('Erro em handleNextLevel:', error);
-      throw error;
-    }
-  }, [startTimer, updateObservacao, getState, getCurrentActiveLevel]);
-
-  /**
-   * Volta para o nível anterior do timer
-   * @param chamado String do número do chamado  
-   * @param previousLevel Nível anterior a ser ativado
-   * @param observacao Observação do nível atual
-   * @param alert Dados do alerta para obter tipo e severidade
-   */
-  const handlePreviousLevel = useCallback(async (chamado: string, previousLevel: number, observacao: string, alert?: AlertData) => {
-    try {
-      const chamadoNum = parseInt(chamado);
-
-      // Salva observação do nível atual
-      const currentLevel = getCurrentActiveLevel(chamadoNum);
-      if (currentLevel && observacao.trim()) {
-        updateObservacao(chamadoNum, currentLevel, observacao.trim());
-      }
-
-      // Inicia o nível anterior
-      const success = startTimer(chamadoNum, previousLevel, getTimerDuration(previousLevel, alert?.tipo_chamado, alert?.severidade_chamado));
-
-      if (success) {
-        // Aguarda para garantir que o timer foi iniciado
-        await new Promise(resolve => setTimeout(resolve, 500));
-
-        // Atualiza estado
-        getState(chamadoNum);
-        return true;
-      }
-
-      return false;
-    } catch (error) {
-      console.error('Erro em handlePreviousLevel:', error);
-      throw error;
-    }
-  }, [startTimer, updateObservacao, getState, getCurrentActiveLevel]);
-
-  /**
-   * Finaliza o chamado
-   * @param chamado String do número do chamado
-   * @param observacao Observação final
-   */
-  const handleFinalize = useCallback(async (chamado: string, observacao: string) => {
-    try {
-      const chamadoNum = parseInt(chamado);
-
-      // Salva observação final
-      const currentLevel = getCurrentActiveLevel(chamadoNum);
-      if (currentLevel && observacao.trim()) {
-        updateObservacao(chamadoNum, currentLevel, observacao.trim());
-      }
-
-      // Finaliza o chamado
-      updateStatusFinal(chamadoNum, 'finalizado');
-
-      // Aguarda para garantir que o status foi atualizado
-      await new Promise(resolve => setTimeout(resolve, 500));
-
-      // Atualiza estado
-      getState(chamadoNum);
-      return true;
-    } catch (error) {
-      console.error('Erro em handleFinalize:', error);
-      throw error;
-    }
-  }, [updateObservacao, updateStatusFinal, getState, getCurrentActiveLevel]);
-
-  /**
-   * -----------------------------------------------------------------------------------
-   * HANDLERS DE ORDENAÇÃO
-   * -----------------------------------------------------------------------------------
-   */
-
-  /**
-   * Gerencia a ordenação das colunas da tabela
-   * @param field Campo a ser ordenado
-   */
-  const handleSort = useCallback((field: SortField) => {
-    if (sortField === field) {
-      // Cicla entre asc -> desc -> null (volta ao padrão)
-      if (sortDirection === 'asc') {
-        setSortDirection('desc');
-      } else if (sortDirection === 'desc') {
-        setSortDirection(null);
-        setSortField('chamado');
-      } else {
-        setSortDirection('asc');
-      }
-    } else {
-      setSortField(field);
-      setSortDirection('asc');
-    }
-  }, [sortField, sortDirection]);
+    updateStatusFinal
+  } = useActionTableLogic({ alertData, onUpdateAcknowledgment, loading });
 
   /**
    * Obtém o ícone de ordenação para uma coluna
-   * @param field Campo da coluna
-   * @returns JSX do ícone apropriado
    */
-  const getSortIcon = useCallback((field: SortField) => {
+  const getSortIcon = (field: keyof typeof sortedAndPaginatedData[0]) => {
     if (sortField !== field) {
       return <ArrowUpDown className="h-4 w-4 ml-1 opacity-50" />;
     }
@@ -610,92 +114,7 @@ export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: Acti
       return <ArrowDown className="h-4 w-4 ml-1" />;
     }
     return <ArrowUpDown className="h-4 w-4 ml-1 opacity-50" />;
-  }, [sortField, sortDirection]);
-
-  /**
-   * -----------------------------------------------------------------------------------
-   * PROCESSAMENTO DE DADOS (FILTRO, ORDENAÇÃO E PAGINAÇÃO)
-   * -----------------------------------------------------------------------------------
-   */
-
-  // Filtragem dos dados baseada no termo de busca
-  const filteredData = useMemo(() => {
-    if (!searchTerm.trim()) return alertData;
-
-    const searchLower = searchTerm.toLowerCase().trim();
-    return alertData.filter(alert =>
-      Object.values(alert).some(value =>
-        String(value).toLowerCase().includes(searchLower)
-      )
-    );
-  }, [alertData, searchTerm]);
-
-  // Ordenação e paginação dos dados filtrados
-  const { sortedAndPaginatedData, totalPages } = useMemo(() => {
-    let sortedData = [...filteredData];
-
-    if (sortField && sortDirection) {
-      sortedData.sort((a, b) => {
-        let aValue: any = a[sortField];
-        let bValue: any = b[sortField];
-
-        // Tratamento especial para campos específicos
-        if (sortField === 'chamado') {
-          aValue = parseInt(a.chamado) || 0;
-          bValue = parseInt(b.chamado) || 0;
-        } else if (sortField === 'abertura_chamado') {
-          aValue = new Date(a.abertura_chamado).getTime() || 0;
-          bValue = new Date(b.abertura_chamado).getTime() || 0;
-        } else {
-          aValue = String(aValue).toLowerCase();
-          bValue = String(bValue).toLowerCase();
-        }
-
-        if (aValue < bValue) return sortDirection === 'asc' ? -1 : 1;
-        if (aValue > bValue) return sortDirection === 'asc' ? 1 : -1;
-        return 0;
-      });
-    } else {
-      // Ordenação padrão por chamado (decrescente)
-      sortedData.sort((a, b) => {
-        const chamadoA = parseInt(a.chamado) || 0;
-        const chamadoB = parseInt(b.chamado) || 0;
-        return chamadoB - chamadoA;
-      });
-    }
-
-    // Paginação
-    const startIndex = (currentPage - 1) * itemsPerPage;
-    const endIndex = startIndex + itemsPerPage;
-    const paginatedData = sortedData.slice(startIndex, endIndex);
-    const totalPages = Math.ceil(sortedData.length / itemsPerPage);
-
-    return { sortedAndPaginatedData: paginatedData, totalPages };
-  }, [filteredData, currentPage, itemsPerPage, sortField, sortDirection]);
-
-  /**
-   * -----------------------------------------------------------------------------------
-   * HANDLERS DE PAGINAÇÃO
-   * -----------------------------------------------------------------------------------
-   */
-
-  /**
-   * Altera o número de itens por página
-   * @param value String do novo valor
-   */
-  const handleItemsPerPageChange = useCallback((value: string) => {
-    const num = parseInt(value, 10);
-    setItemsPerPage(num);
-    setCurrentPage(1); // Volta para primeira página
-  }, []);
-
-  /**
-   * Altera a página atual
-   * @param page Número da nova página
-   */
-  const handlePageChange = useCallback((page: number) => {
-    setCurrentPage(page);
-  }, []);
+  };
 
   /**
    * -----------------------------------------------------------------------------------
