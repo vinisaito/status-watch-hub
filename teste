@@ -1,48 +1,31 @@
-import { useCallback } from 'react';
-import { HistoricoAcionamento } from '../types';
-import { formatDate } from '../utils';
+import React, { useCallback } from 'react';
+import { ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-react';
+import { SortField, SortDirection } from '../types';
 
 /**
- * Hook específico para gerenciamento do histórico de acionamentos
+ * Hook para gerenciamento dos ícones de ordenação
  */
-export const useHistoricoAcionamentos = (timers: Map<number, any>) => {
-
+export const useSortIcons = (sortField: SortField, sortDirection: SortDirection) => {
+  
   /**
-   * Monta o histórico de acionamentos do chamado
-   * @param chamadoNum Número do chamado
-   * @returns Array com histórico dos acionamentos
+   * Obtém o ícone de ordenação para uma coluna
+   * @param field Campo da coluna
+   * @returns JSX do ícone apropriado
    */
-  const getHistoricoAcionamentos = useCallback((chamadoNum: number): HistoricoAcionamento[] => {
-    const timerState = timers.get(chamadoNum);
-    if (!timerState) return [];
-
-    const historico: HistoricoAcionamento[] = [];
-
-    // Percorre todos os níveis e coleta informações do histórico
-    for (let nivel = 1; nivel <= 5; nivel++) {
-      const operador = timerState[`level${nivel}_operador`] || '';
-      const pessoaAcionada = timerState[`level${nivel}_pessoaAcionada`] || '';
-      const status = timerState[`level${nivel}_statusAcionamento`] || '';
-      const observacao = timerState[`level${nivel}_observacao`] || '';
-      const dataHora = timerState[`level${nivel}_dataHora`] || '';
-      const updatedAt = timerState[`level${nivel}_updatedAt`] || '';
-
-      if (operador || pessoaAcionada || status || observacao || dataHora) {
-        historico.push({
-          operador,
-          pessoaAcionada,
-          status,
-          observacao,
-          dataHora,
-          updatedAt: formatDate(updatedAt),
-          nivel,
-        });
-      }
+  const getSortIcon = useCallback((field: SortField): React.ReactElement => {
+    if (sortField !== field) {
+      return React.createElement(ArrowUpDown, { className: "h-4 w-4 ml-1 opacity-50" });
     }
-    return historico;
-  }, [timers]);
+    if (sortDirection === 'asc') {
+      return React.createElement(ArrowUp, { className: "h-4 w-4 ml-1" });
+    }
+    if (sortDirection === 'desc') {
+      return React.createElement(ArrowDown, { className: "h-4 w-4 ml-1" });
+    }
+    return React.createElement(ArrowUpDown, { className: "h-4 w-4 ml-1 opacity-50" });
+  }, [sortField, sortDirection]);
 
   return {
-    getHistoricoAcionamentos
+    getSortIcon
   };
 };
