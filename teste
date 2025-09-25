@@ -1,441 +1,632 @@
-import { useState } from 'react';
+import { useEffect } from 'react';
 import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
+  Check,
+  AlertTriangle,
+  Timer,
+  Play,
+  Settings,
+  Search,
+  ChevronLeft,
+  ChevronRight,
+  User,
+  UserCheck,
+  Edit3
+} from 'lucide-react';
+
+// UI Components
+import { Card, CardContent, CardHeader } from '@/components/ui/card';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Separator } from '@/components/ui/separator';
-import { ScrollArea } from '@/components/ui/scroll-area';
-import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion';
-import {
-  Calendar,
-  Clock,
-  User,
-  AlertTriangle,
-  Tag,
-  FileText,
-  Users,
-  X,
-  History,
-  CheckCircle2,
-  XCircle,
-  Phone,
-  MessageSquare
-} from 'lucide-react';
-import { cn } from '@/lib/utils';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 
-interface AlertData {
-  id: string;
-  chamado: string;
-  tipo_chamado: string;
-  grupo_chamado: string;
-  status_chamado: string;
-  abertura_chamado: string;
-  resumo_chamado: string;
-  severidade_chamado: string;
-  acionado: string;
-  link_chamado: string;
-  chat: boolean;
-}
+// Hooks e funcionalidades
+// import { useWebsocketTimers } from "@/hooks/useWebsocketTimers";
 
-interface ChamadoDetailsModalProps {
-  isOpen: boolean;
-  onClose: () => void;
-  alertData: AlertData | null;
-  historicoAcionamentos?: {
-    operador: string;
-    pessoaAcionada: string;
-    status: string;
-    observacao: string;
-    dataHora: string;
-    updatedAt: string;
-    nivel: number;
-  }[];
-}
+// Componentes customizados (comentados temporariamente até criação)
+// import { ModernTimerModal } from '@/components/ActionTable/ModernTimerModal';
+// import { ChamadoDetailsModal } from '@/components/ActionTable/ChamadoDetailsModal';
+// import { AssumeOperatorModal } from '@/components/ActionTable/AssumeOperatorModal';
 
-const LEVEL_INFO = {
-  1: {
-    title: "Primeiro Acionamento",
-  },
-  2: {
-    title: "1ª Escalação",
-  },
-  3: {
-    title: "2ª Escalação",
-  },
-  4: {
-    title: "3ª Escalação",
-  },
-  5: {
-    title: "4ª Escalação",
-  }
-};
+// Tipos, constantes e hooks customizados
+import { ActionTableProps } from './types';
+import { LEVEL_NAMES, getTimerDuration } from './constants';
+import { getTimerColor, formatDate, getSeverityColor } from './utils';
+import { useActionTableData } from './hooks/useActionTableData';
+import { useActionTableHandlers } from './hooks/useActionTableHandlers';
+import { useHistoricoAcionamentos } from './hooks/useHistoricoAcionamentos';
+import { useSortIcons } from './hooks/useSortIcons';
 
-const LEVEL_COLORS = {
-  1: { bg: "bg-blue-500/10", border: "border-blue-500/30", text: "text-blue-700 dark:text-blue-400", icon: "text-blue-500" },
-  2: { bg: "bg-yellow-500/10", border: "border-yellow-500/30", text: "text-yellow-700 dark:text-yellow-400", icon: "text-yellow-500" },
-  3: { bg: "bg-orange-500/10", border: "border-orange-500/30", text: "text-orange-700 dark:text-orange-400", icon: "text-orange-500" },
-  4: { bg: "bg-red-500/10", border: "border-red-500/30", text: "text-red-700 dark:text-red-400", icon: "text-red-500" },
-  5: { bg: "bg-purple-600/10", border: "border-purple-600/30", text: "text-purple-700 dark:text-purple-400", icon: "text-purple-600" },
-};
+/**
+ * ====================================================================================
+ * COMPONENTE PRINCIPAL - ActionTable (Refatorado)
+ * ====================================================================================
+ */
+export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: ActionTableProps) => {
 
-export const ChamadoDetailsModal = ({ isOpen, onClose, alertData, historicoAcionamentos = [] }: ChamadoDetailsModalProps) => {
-  if (!alertData) return null;
+  /**
+   * -----------------------------------------------------------------------------------
+   * HOOK WEBSOCKET PARA GERENCIAMENTO DE TIMERS (Temporariamente desabilitado)
+   * -----------------------------------------------------------------------------------
+   */
+  
+  // Mock dos dados do websocket para manter funcionalidade básica
+  const timers = new Map();
+  const isConnected = true;
+  const startTimer = (chamado: number, level: number, duration: number) => false;
+  const updateObservacao = (chamado: number, level: number, observacao: string) => {};
+  const updateAcionamento = (chamado: number, level: number) => {};
+  const updateStatusFinal = (chamado: number, status: string) => {};
+  const getRemainingTime = (chamado: number, level: number) => 0;
+  const formatTime = (time: number) => '00:00';
+  const getState = (chamado: number) => {};
+  const setWatchedChamados = (chamados: number[]) => {};
 
-  const formatDate = (dateString: string) => {
-    if (!dateString || dateString === '' || dateString === 'null' || dateString === 'undefined') {
-      return '-';
-    }
+  /**
+   * -----------------------------------------------------------------------------------
+   * HOOK PARA PROCESSAMENTO DE DADOS
+   * -----------------------------------------------------------------------------------
+   */
+  const {
+    currentPage,
+    searchTerm,
+    itemsPerPage,
+    sortField,
+    sortDirection,
+    filteredData,
+    sortedAndPaginatedData,
+    totalPages,
+    setCurrentPage,
+    setSearchTerm,
+    setItemsPerPage,
+    setSortField,
+    setSortDirection,
+  } = useActionTableData(alertData);
 
-    try {
-      let date: Date;
-      const cleanString = String(dateString).trim();
+  /**
+   * -----------------------------------------------------------------------------------
+   * FUNÇÃO PARA OBTER NÍVEL ATUAL DO TIMER
+   * -----------------------------------------------------------------------------------
+   */
+  const getCurrentActiveLevel = (chamado: number) => {
+    const timerState = timers.get(chamado);
+    if (!timerState) return null;
 
-      if (/^\d{13}$/.test(cleanString)) {
-        date = new Date(parseInt(cleanString));
-      } else if (/^\d{10}$/.test(cleanString)) {
-        date = new Date(parseInt(cleanString) * 1000);
-      } else if (/^\d{2}\/\d{2}\/\d{4}/.test(cleanString)) {
-        const parts = cleanString.split(' ');
-        const datePart = parts[0];
-        const timePart = parts[1] || '00:00:00';
-        const [day, month, year] = datePart.split('/');
-        const [hour, minute, second] = timePart.split(':');
-
-        date = new Date(
-          parseInt(year),
-          parseInt(month) - 1,
-          parseInt(day),
-          parseInt(hour || '0'),
-          parseInt(minute || '0'),
-          parseInt(second || '0')
-        );
-      } else {
-        date = new Date(cleanString);
+    // Verifica levels de 1 a 5 para encontrar o ativo
+    for (let level = 1; level <= 5; level++) {
+      const statusKey = `level${level}_status` as keyof typeof timerState;
+      if (timerState[statusKey] === 'running') {
+        return level;
       }
-
-      if (isNaN(date.getTime())) return cleanString;
-
-      const year = date.getFullYear();
-      if (year < 1900 || year > 2100) return cleanString;
-
-      return date.toLocaleString('pt-BR', {
-        day: '2-digit',
-        month: '2-digit',
-        year: 'numeric',
-        hour: '2-digit',
-        minute: '2-digit',
-        second: '2-digit',
-      });
-    } catch (error) {
-      return String(dateString);
     }
+    return null;
   };
 
-  const getSeverityColor = (severity: string) => {
-    return severity.includes('4')
-      ? 'bg-destructive text-destructive-foreground'
-      : 'bg-yellow-500 text-yellow-950';
-  };
+  /**
+   * -----------------------------------------------------------------------------------
+   * HOOK PARA HANDLERS
+   * -----------------------------------------------------------------------------------
+   */
+  const {
+    timerManagementOpen,
+    setTimerManagementOpen,
+    selectedChamadoForTimer,
+    setSelectedChamadoForTimer,
+    chamadoDetailsOpen,
+    selectedChamadoForDetails,
+    assumeOperatorOpen,
+    selectedChamadoForOperator,
+    handleAcknowledgment,
+    handleOpenAssumeOperator,
+    handleCloseAssumeOperator,
+    handleAssumeOperator,
+    handleOpenChamadoDetails,
+    handleCloseChamadoDetails,
+    handleStartTimer,
+    handleOpenTimerManagement,
+    handleNextLevel,
+    handlePreviousLevel,
+    handleFinalize,
+    handleSort,
+    handleItemsPerPageChange,
+    handlePageChange,
+  } = useActionTableHandlers(
+    sortField,
+    sortDirection,
+    setSortField,
+    setSortDirection,
+    setCurrentPage,
+    setItemsPerPage,
+    onUpdateAcknowledgment,
+    {
+      startTimer,
+      updateObservacao,
+      updateStatusFinal,
+      getState,
+      getCurrentActiveLevel,
+    }
+  );
 
-  const isChat = alertData.acionado === 'true' || alertData.chat;
+  /**
+   * -----------------------------------------------------------------------------------
+   * HOOK PARA HISTÓRICO DE ACIONAMENTOS
+   * -----------------------------------------------------------------------------------
+   */
+  const { getHistoricoAcionamentos } = useHistoricoAcionamentos(timers);
 
+  /**
+   * -----------------------------------------------------------------------------------
+   * HOOK PARA ÍCONES DE ORDENAÇÃO
+   * -----------------------------------------------------------------------------------
+   */
+  const { getSortIcon } = useSortIcons(sortField, sortDirection);
+
+  /**
+   * -----------------------------------------------------------------------------------
+   * EFEITO PARA REGISTRAR CHAMADOS NO WEBSOCKET
+   * -----------------------------------------------------------------------------------
+   */
+  useEffect(() => {
+    if (!alertData || alertData.length === 0) return;
+
+    const chamadosNum = alertData.map(a => parseInt(a.chamado));
+    setWatchedChamados(chamadosNum);
+
+    // Força a busca do estado atual de cada chamado
+    chamadosNum.forEach(chamado => getState(chamado));
+  }, [alertData, setWatchedChamados, getState]);
+
+  /**
+   * -----------------------------------------------------------------------------------
+   * RENDER DO COMPONENTE
+   * -----------------------------------------------------------------------------------
+   */
   return (
-    <Dialog open={isOpen} onOpenChange={onClose}>
-      <DialogContent className="max-w-5xl max-h-[85vh] bg-gradient-to-br from-background to-background/95 border-2 border-primary/20 shadow-2xl">
-        <DialogHeader className="pb-6 border-b border-primary/10">
-          <DialogTitle className="text-2xl font-bold flex items-center gap-3 bg-gradient-to-r from-primary to-primary/80 bg-clip-text text-transparent">
-            <div className="p-2 rounded-lg bg-primary/10 text-primary">
-              <FileText className="h-6 w-6" />
-            </div>
-            Detalhes do Chamado - {alertData.chamado}
-          </DialogTitle>
-        </DialogHeader>
-
-        <ScrollArea className="max-h-[calc(85vh-140px)] pr-4">
-          <div className="space-y-8">
-
-            {/* Histórico de Acionamentos*/}
-            <Accordion type="single" collapsible className="w-full">
-              <AccordionItem value="historico" className="border-2 border-border rounded-lg bg-card">
-                <AccordionTrigger className="px-6 py-4 hover:no-underline hover:bg-muted/50 transition-colors">
-                  <div className="flex items-center gap-3">
-                    <History className="h-6 w-6 text-primary" />
-                    <span className="text-xl font-semibold text-foreground">
-                      Histórico de Acionamentos
-                    </span>
-                    <Badge variant="secondary" className="ml-2">
-                      {historicoAcionamentos.length} registro(s)
-                    </Badge>
-                  </div>
-                </AccordionTrigger>
-                <AccordionContent className="px-6 pb-6 pt-2">
-                  {historicoAcionamentos.length > 0 ? (
-                    <div className="relative">
-                      {/* Timeline line */}
-                      <div className="absolute left-6 top-8 bottom-4 w-0.5 bg-gradient-to-b from-primary/30 via-primary/20 to-transparent" />
-                      
-                      <div className="space-y-4">
-                        {[...historicoAcionamentos]
-                          .sort((a, b) => b.nivel - a.nivel)
-                          .map((h, idx) => {
-                            const levelColor = LEVEL_COLORS[h.nivel as keyof typeof LEVEL_COLORS] || LEVEL_COLORS[1];
-                            const StatusIcon = h.status === 'atendido' ? CheckCircle2 : XCircle;
-                            const statusColor = h.status === 'atendido' ? 'text-green-500' : 'text-red-500';
-                            const statusBg = h.status === 'atendido' ? 'bg-green-500/10' : 'bg-red-500/10';
-                            
-                            return (
-                              <div key={idx} className="relative flex gap-4 group">
-                                {/* Timeline node */}
-                                <div className="relative z-10">
-                                  <div className={cn(
-                                    "w-12 h-12 rounded-xl flex items-center justify-center font-bold shadow-sm transition-all duration-200 group-hover:scale-110",
-                                    levelColor.bg,
-                                    levelColor.border,
-                                    levelColor.text,
-                                    "border"
-                                  )}>
-                                    {h.nivel}
-                                  </div>
-                                </div>
-
-                                {/* Content card */}
-                                <div className="flex-1 bg-background rounded-xl border p-5 shadow-sm hover:shadow-md transition-all duration-200 group-hover:border-primary/30">
-                                  {/* Header with operator and status */}
-                                  <div className="flex flex-wrap items-start justify-between gap-4 mb-4">
-                                    <div className="space-y-3 flex-1">
-                                      {/* Operator info */}
-                                      <div className="flex items-center gap-3">
-                                        <div className="p-2 bg-primary/5 rounded-lg">
-                                          <User className="h-4 w-4 text-primary" />
-                                        </div>
-                                        <div>
-                                          <p className="text-xs text-muted-foreground">Operador</p>
-                                          <p className="font-semibold text-sm">{h.operador}</p>
-                                        </div>
-                                      </div>
-
-                                      {/* Person contacted */}
-                                      <div className="flex items-center gap-3">
-                                        <div className="p-2 bg-primary/5 rounded-lg">
-                                          <Phone className="h-4 w-4 text-primary" />
-                                        </div>
-                                        <div>
-                                          <p className="text-xs text-muted-foreground">Pessoa Acionada</p>
-                                          <p className="font-semibold text-sm">{h.pessoaAcionada}</p>
-                                        </div>
-                                      </div>
-                                    </div>
-
-                                    {/* Status badge */}
-                                    <div className="flex flex-col items-end gap-2">
-                                      <div className={cn(
-                                        "flex items-center gap-2 px-3 py-1.5 rounded-full",
-                                        statusBg
-                                      )}>
-                                        <StatusIcon className={cn("h-4 w-4", statusColor)} />
-                                        <span className={cn("text-sm font-medium capitalize", statusColor)}>
-                                          {h.status === 'atendido' ? 'Atendido' : 'Não Atendido'}
-                                        </span>
-                                      </div>
-
-                                      {/* Date and time */}
-                                      <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                                        <Calendar className="h-3 w-3" />
-                                        <span>{h.updatedAt}</span>
-                                      </div>
-                                    </div>
-                                  </div>
-
-                                  {/* Observation section */}
-                                  {h.observacao && (
-                                    <div className="mt-4 pt-4 border-t">
-                                      <div className="flex items-start gap-3">
-                                        <div className="p-1.5 bg-muted rounded">
-                                          <MessageSquare className="h-3.5 w-3.5 text-muted-foreground" />
-                                        </div>
-                                        <div className="flex-1">
-                                          <p className="text-xs text-muted-foreground mb-1">Observações</p>
-                                          <p className="text-sm leading-relaxed whitespace-pre-line text-foreground/90">
-                                            {h.observacao}
-                                          </p>
-                                        </div>
-                                      </div>
-                                    </div>
-                                  )}
-
-                                  {/* Level badge */}
-                                  <div className="flex items-center gap-2 mt-4">
-                                    <Badge 
-                                      variant="outline" 
-                                      className={cn(
-                                        "text-xs",
-                                        levelColor.border,
-                                        levelColor.text
-                                      )}
-                                    >
-                                      {LEVEL_INFO[h.nivel as keyof typeof LEVEL_INFO]?.title || `Nível ${h.nivel}`}
-                                    </Badge>
-                                    {idx === 0 && (
-                                      <Badge variant="secondary" className="text-xs">
-                                        Mais recente
-                                      </Badge>
-                                    )}
-                                  </div>
-                                </div>
-                              </div>
-                            );
-                          })}
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="flex flex-col items-center justify-center py-12 space-y-4">
-                      <div className="p-4 bg-muted/50 rounded-full">
-                        <History className="h-8 w-8 text-muted-foreground" />
-                      </div>
-                      <div className="text-center space-y-2">
-                        <h4 className="font-medium text-foreground">Nenhum acionamento registrado</h4>
-                        <p className="text-sm text-muted-foreground max-w-sm">
-                          Os acionamentos realizados para este chamado aparecerão aqui conforme forem executados.
-                        </p>
-                      </div>
-                    </div>
-                  )}
-                </AccordionContent>
-              </AccordionItem>
-            </Accordion>
-
-            {/* Informações Principais */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-              {/* Coluna Esquerda */}
-              <div className="p-6 bg-gradient-to-br from-card to-card/80 rounded-xl border border-border/50 shadow-lg">
-                <div className="space-y-5">
-                  <h3 className="text-xl font-bold text-foreground flex items-center gap-3 border-b border-primary/20 pb-3">
-                    <div className="p-2 rounded-lg bg-primary/10 text-primary">
-                      <Tag className="h-5 w-5" />
-                    </div>
-                    Informações Básicas
-                  </h3>
-
-                  <div className="space-y-4">
-                    <div className="space-y-2">
-                      <span className="text-sm font-semibold text-primary/80 uppercase tracking-wide flex items-center gap-2">
-                        <FileText className="h-4 w-4" />
-                        Número do Chamado
-                      </span>
-                      <div 
-                        className="text-lg font-mono font-bold bg-gradient-to-r from-primary/10 to-primary/5 border border-primary/20 px-4 py-3 rounded-lg cursor-pointer hover:bg-gradient-to-r hover:from-primary/20 hover:to-primary/10 transition-all duration-200"
-                        onClick={() => window.open(alertData.link_chamado, '_blank')}
-                      >
-                        <div className="flex items-center gap-3">
-                          <FileText className="h-5 w-5 text-primary" />
-                          <span className="text-primary hover:underline">{alertData.chamado}</span>
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="space-y-2">
-                      <span className="text-sm font-semibold text-primary/80 uppercase tracking-wide flex items-center gap-2">
-                        <Users className="h-4 w-4" />
-                        Grupo Responsável
-                      </span>
-                      <div className="text-base font-mono font-bold bg-gradient-to-r from-primary/10 to-primary/5 border border-primary/20 px-4 py-3 rounded-lg">
-                        <div className="flex items-center gap-3">
-                          <Users className="h-5 w-5 text-primary" />
-                          {alertData.grupo_chamado}
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="space-y-2">
-                      <span className="text-sm font-semibold text-primary/80 uppercase tracking-wide flex items-center gap-2">
-                        <Tag className="h-4 w-4" />
-                        Classificação
-                      </span>
-                      <div className="text-base font-mono font-bold bg-gradient-to-r from-primary/10 to-primary/5 border border-primary/20 px-4 py-3 rounded-lg">
-                        <div className="flex items-center gap-3">
-                          <Tag className="h-5 w-5 text-primary" />
-                          {alertData.tipo_chamado}
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              {/* Coluna Direita */}
-              <div className="p-6 bg-gradient-to-br from-card to-card/80 rounded-xl border border-border/50 shadow-lg">
-                <div className="space-y-5">
-                  <h3 className="text-xl font-bold text-foreground flex items-center gap-3 border-b border-primary/20 pb-3">
-                    <div className="p-2 rounded-lg bg-primary/10 text-primary">
-                      <Clock className="h-5 w-5" />
-                    </div>
-                    Temporização
-                  </h3>
-
-                  <div className="space-y-4">
-                    <div className="space-y-2">
-                      <span className="text-sm font-semibold text-primary/80 uppercase tracking-wide flex items-center gap-2">
-                        <Calendar className="h-4 w-4" />
-                        Data de Abertura
-                      </span>
-                      <div className="text-base font-mono font-bold bg-gradient-to-r from-primary/10 to-primary/5 border border-primary/20 px-4 py-3 rounded-lg">
-                        <div className="flex items-center gap-3">
-                          <Calendar className="h-5 w-5 text-primary" />
-                          {formatDate(alertData.abertura_chamado)}
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="space-y-2">
-                      <span className="text-sm font-semibold text-primary/80 uppercase tracking-wide flex items-center gap-2">
-                        <Clock className="h-4 w-4" />
-                        Status Atual
-                      </span>
-                      <div className="text-base font-mono font-bold bg-gradient-to-r from-primary/10 to-primary/5 border border-primary/20 px-4 py-3 rounded-lg">
-                        <div className="flex items-center gap-3">
-                          <Clock className="h-5 w-5 text-primary" />
-                          {alertData.status_chamado}
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="space-y-2">
-                      <span className="text-sm font-semibold text-primary/80 uppercase tracking-wide flex items-center gap-2">
-                        <AlertTriangle className="h-4 w-4" />
-                        Severidade
-                      </span>
-                      <div className="text-base font-mono font-bold bg-gradient-to-r from-primary/10 to-primary/5 border border-primary/20 px-4 py-3 rounded-lg">
-                        <div className="flex items-center gap-3">
-                          <AlertTriangle className="h-5 w-5 text-primary" />
-                            {alertData.severidade_chamado}
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            {/* Resumo/Título do Chamado */}
-            <div className="p-6 bg-gradient-to-br from-card to-card/80 rounded-xl border border-border/50 shadow-lg">
-              <h3 className="text-xl font-bold text-foreground flex items-center gap-3 border-b border-primary/20 pb-4 mb-4">
-                <div className="p-2 rounded-lg bg-primary/10 text-primary">
-                  <FileText className="h-5 w-5" />
-                </div>
-                Resumo do Chamado
-              </h3>
-              <div className="bg-gradient-to-r from-accent/10 to-accent/5 border border-accent/20 p-6 rounded-lg">
-                <p className="text-base leading-relaxed text-foreground font-medium">{alertData.resumo_chamado}</p>
-              </div>
-            </div>
-
+    <TooltipProvider>
+      <Card className="bg-card border-border shadow-elegant">
+        <CardHeader>
+          {/* Campo de Pesquisa */}
+          <div className="relative mb-4">
+            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              placeholder="Pesquisar por chamado, tipo, grupo, status, título..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="pl-10"
+            />
           </div>
-        </ScrollArea>
-      </DialogContent>
-    </Dialog>
+
+          {/* Contador de resultados */}
+          {searchTerm && (
+            <div className="text-sm text-muted-foreground">
+              {filteredData.length === 0 ? (
+                <span>Nenhum resultado encontrado para "{searchTerm}"</span>
+              ) : (
+                <span>
+                  {filteredData.length} resultado{filteredData.length !== 1 ? 's' : ''}
+                  {filteredData.length !== alertData.length && ` de ${alertData.length} `}
+                  para "{searchTerm}"
+                </span>
+              )}
+            </div>
+          )}
+        </CardHeader>
+
+        <CardContent>
+          {/* Tabela Responsiva */}
+          <div className="w-full">
+            <Table className="w-full">
+              <TableHeader>
+                <TableRow className="border-border hover:bg-accent">
+                  {/* Cabeçalhos das colunas com ordenação */}
+                  <TableHead className="text-muted-foreground w-[80px]">
+                    <Button
+                      variant="ghost"
+                      className="h-auto p-0 font-medium text-muted-foreground hover:text-foreground text-xs"
+                      onClick={() => handleSort('chamado')}
+                    >
+                      Chamado
+                      {getSortIcon('chamado')}
+                    </Button>
+                  </TableHead>
+                  <TableHead className="text-muted-foreground hidden md:table-cell">
+                    <Button
+                      variant="ghost"
+                      className="h-auto p-0 font-medium text-muted-foreground hover:text-foreground text-xs"
+                      onClick={() => handleSort('tipo_chamado')}
+                    >
+                      Classificação
+                      {getSortIcon('tipo_chamado')}
+                    </Button>
+                  </TableHead>
+                  <TableHead className="text-muted-foreground hidden lg:table-cell">
+                    <Button
+                      variant="ghost"
+                      className="h-auto p-0 font-medium text-muted-foreground hover:text-foreground text-xs"
+                      onClick={() => handleSort('grupo_chamado')}
+                    >
+                      Grupo
+                      {getSortIcon('grupo_chamado')}
+                    </Button>
+                  </TableHead>
+                  <TableHead className="text-muted-foreground hidden lg:table-cell">
+                    <Button
+                      variant="ghost"
+                      className="h-auto p-0 font-medium text-muted-foreground hover:text-foreground text-xs"
+                      onClick={() => handleSort('status_chamado')}
+                    >
+                      Status
+                      {getSortIcon('status_chamado')}
+                    </Button>
+                  </TableHead>
+                  <TableHead className="text-muted-foreground hidden xl:table-cell">
+                    <Button
+                      variant="ghost"
+                      className="h-auto p-0 font-medium text-muted-foreground hover:text-foreground text-xs"
+                      onClick={() => handleSort('abertura_chamado')}
+                    >
+                      Abertura
+                      {getSortIcon('abertura_chamado')}
+                    </Button>
+                  </TableHead>
+                  <TableHead className="text-muted-foreground">
+                    <Button
+                      variant="ghost"
+                      className="h-auto p-0 font-medium text-muted-foreground hover:text-foreground text-xs"
+                      onClick={() => handleSort('resumo_chamado')}
+                    >
+                      Título
+                      {getSortIcon('resumo_chamado')}
+                    </Button>
+                  </TableHead>
+                  <TableHead className="text-muted-foreground hidden sm:table-cell">
+                    <Button
+                      variant="ghost"
+                      className="h-auto p-0 font-medium text-muted-foreground hover:text-foreground text-xs"
+                      onClick={() => handleSort('severidade_chamado')}
+                    >
+                      Severidade
+                      {getSortIcon('severidade_chamado')}
+                    </Button>
+                  </TableHead>
+                  <TableHead className="text-muted-foreground w-[120px] text-center">
+                    <span className="text-xs font-medium">Responsável</span>
+                  </TableHead>
+                  <TableHead className="text-muted-foreground w-[200px] text-center">
+                    <span className="text-xs font-medium">Temporizador</span>
+                  </TableHead>
+                  <TableHead className="text-muted-foreground w-[60px] text-center">Chat</TableHead>
+                </TableRow>
+              </TableHeader>
+
+              <TableBody>
+                {/* Estados de loading e dados vazios */}
+                {loading ? (
+                  <TableRow>
+                    <TableCell colSpan={10} className="text-center py-8">
+                      <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary mb-4"></div>
+                      <p>Carregando dados...</p>
+                    </TableCell>
+                  </TableRow>
+                ) : sortedAndPaginatedData.length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={10} className="text-center py-8 text-muted-foreground">
+                      {searchTerm ? 'Nenhum resultado encontrado' : 'Nenhum dado disponível'}
+                    </TableCell>
+                  </TableRow>
+                ) : (
+                  /* Renderização das linhas de dados */
+                  sortedAndPaginatedData.map((alert) => {
+                    const isChat = alert.acionado === 'true' || alert.chat;
+                    const chamadoNum = parseInt(alert.chamado);
+                    const activeLevel = getCurrentActiveLevel(chamadoNum);
+                    const timerState = timers.get(chamadoNum);
+                    const remainingTime = activeLevel ? getRemainingTime(chamadoNum, activeLevel) : 0;
+                    const isFinalized = timerState?.statusFinal === 'finalizado';
+                    const timerColorClass = getTimerColor(remainingTime);
+                    const currentOperator = timerState?.operador;
+
+                    return (
+                      <TableRow key={alert.id} className="border-border hover:bg-accent transition-colors">
+                        {/* Coluna Chamado */}
+                        <TableCell className="font-medium">
+                          <Button
+                            variant="link"
+                            size="sm"
+                            className="p-0 text-foreground hover:underline text-xs"
+                            onClick={() => handleOpenChamadoDetails(alert)}
+                          >
+                            {alert.chamado}
+                          </Button>
+                        </TableCell>
+
+                        {/* Coluna Classificação */}
+                        <TableCell className="hidden md:table-cell">
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <span className="truncate block max-w-[100px] text-xs">
+                                {alert.tipo_chamado}
+                              </span>
+                            </TooltipTrigger>
+                            <TooltipContent>
+                              <p className="max-w-xs">{alert.tipo_chamado}</p>
+                            </TooltipContent>
+                          </Tooltip>
+                        </TableCell>
+
+                        {/* Coluna Grupo */}
+                        <TableCell className="text-xs hidden lg:table-cell">{alert.grupo_chamado}</TableCell>
+
+                        {/* Coluna Status */}
+                        <TableCell className="text-xs hidden lg:table-cell">{alert.status_chamado}</TableCell>
+
+                        {/* Coluna Abertura */}
+                        <TableCell className="text-xs hidden xl:table-cell">{formatDate(alert.abertura_chamado)}</TableCell>
+
+                        {/* Coluna Título */}
+                        <TableCell>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <span className="truncate block max-w-[150px] text-xs">
+                                {alert.resumo_chamado}
+                              </span>
+                            </TooltipTrigger>
+                            <TooltipContent>
+                              <p className="max-w-md">{alert.resumo_chamado}</p>
+                            </TooltipContent>
+                          </Tooltip>
+                        </TableCell>
+
+                        {/* Coluna Severidade */}
+                        <TableCell className="hidden sm:table-cell">
+                          <Badge className={`${getSeverityColor(alert.severidade_chamado)} text-xs`}>
+                            {alert.severidade_chamado}
+                          </Badge>
+                        </TableCell>
+
+                        {/* Nova Coluna Responsável */}
+                        <TableCell>
+                          <div className="flex flex-col items-center gap-1">
+                            {currentOperator ? (
+                              <div className="space-y-1 text-center">
+                                <div className="flex items-center gap-1 justify-center">
+                                  <UserCheck className="h-3 w-3 text-green-600" />
+                                  <Badge className="bg-green-100 text-green-800 text-xs px-2 py-1 font-medium">
+                                    {currentOperator}
+                                  </Badge>
+                                </div>
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() => handleOpenAssumeOperator(alert.chamado)}
+                                  className="h-6 px-2 text-xs text-blue-600 hover:text-blue-800 hover:bg-blue-50"
+                                >
+                                  <Edit3 className="h-3 w-3 mr-1" />
+                                  Alterar
+                                </Button>
+                              </div>
+                            ) : (
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => handleOpenAssumeOperator(alert.chamado)}
+                                className="h-8 px-3 text-xs bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100 hover:border-blue-300"
+                              >
+                                <User className="h-3 w-3 mr-1" />
+                                Assumir
+                              </Button>
+                            )}
+                          </div>
+                        </TableCell>
+
+                        {/* Coluna Temporizador */}
+                        <TableCell>
+                          <div className="flex flex-col items-center gap-2">
+                            {isFinalized ? (
+                              /* Estado finalizado */
+                              <div className="space-y-1 text-center">
+                                <Badge className="bg-green-600 text-white text-xs font-semibold px-3 py-1 whitespace-nowrap">
+                                  ✅ FINALIZADO
+                                </Badge>
+                              </div>
+                            ) : activeLevel && timerState ? (
+                              /* Timer ativo */
+                              <div className="space-y-1 text-center">
+                                <div className="flex items-center gap-1 justify-center">
+                                  <Timer className="h-3 w-3 text-timer-active animate-pulse" />
+                                  <Badge className="bg-timer-active text-white text-xs font-semibold px-2 py-1 whitespace-nowrap">
+                                    {LEVEL_NAMES[activeLevel as keyof typeof LEVEL_NAMES]}
+                                  </Badge>
+                                </div>
+                                <div className={`text-xl font-mono font-black tracking-wide transition-all duration-300 ${timerColorClass}`}>
+                                  {formatTime(remainingTime)}
+                                </div>
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() => handleOpenTimerManagement(alert.chamado)}
+                                  className="h-6 px-2 text-xs font-semibold bg-blue-500 text-white hover:bg-blue-600"
+                                >
+                                  <Settings className="h-3 w-3 mr-1" />
+                                  Gerenciar
+                                </Button>
+                              </div>
+                            ) : (
+                              /* Timer inativo - botão para iniciar */
+                              <div className="flex flex-col items-center gap-2">
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() => handleStartTimer(alert.chamado, alert)}
+                                  disabled={!isConnected}
+                                >
+                                  <Play className="h-3 w-3 mr-1" />
+                                   Iniciar
+                                </Button>
+                                {!isConnected && (
+                                  <span className="text-xs text-destructive">WebSocket desconectado</span>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        </TableCell>
+
+                        {/* Coluna Chat */}
+                        <TableCell>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <Button
+                                variant={isChat ? "default" : "outline"}
+                                size="sm"
+                                onClick={() => !isChat && handleAcknowledgment(alert)}
+                                disabled={isChat}
+                                className={`h-8 w-8 p-0 ${isChat ? 'bg-green-600 hover:bg-green-700' : ''}`}
+                              >
+                                {isChat ? (
+                                  <Check className="h-4 w-4" />
+                                ) : (
+                                  <AlertTriangle className="h-4 w-4" />
+                                )}
+                              </Button>
+                            </TooltipTrigger>
+                            <TooltipContent>
+                              <p>{isChat ? 'Já acionado' : 'Acionar grupo'}</p>
+                            </TooltipContent>
+                          </Tooltip>
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })
+                )}
+              </TableBody>
+            </Table>
+          </div>
+
+          {/* Sistema de Paginação */}
+          {!loading && sortedAndPaginatedData.length > 0 && totalPages > 1 && (
+            <div className="flex flex-col sm:flex-row items-center justify-between mt-4 pt-4 border-t border-border gap-4">
+              {/* Contador de registros */}
+              <div className="text-sm text-muted-foreground text-center sm:text-left">
+                Mostrando {((currentPage - 1) * itemsPerPage) + 1} a {Math.min(currentPage * itemsPerPage, filteredData.length)} de {filteredData.length} registros
+                {searchTerm && filteredData.length !== alertData.length && ` (filtrados de ${alertData.length})`}
+              </div>
+
+              {/* Seletor de itens por página */}
+              <div className="flex items-center gap-2">
+                <Label htmlFor="itemsPerPage" className="text-sm font-medium whitespace-nowrap">
+                  Por Página:
+                </Label>
+                <Select value={itemsPerPage.toString()} onValueChange={handleItemsPerPageChange}>
+                  <SelectTrigger className="w-20">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="5">5</SelectItem>
+                    <SelectItem value="10">10</SelectItem>
+                    <SelectItem value="15">15</SelectItem>
+                    <SelectItem value="20">20</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {/* Controles de navegação */}
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => handlePageChange(currentPage - 1)}
+                  disabled={currentPage === 1}
+                  className="h-8 px-3"
+                >
+                  <ChevronLeft className="h-4 w-4 mr-1" />
+                  Anterior
+                </Button>
+
+                {/* Botões numerados de páginas */}
+                <div className="flex items-center gap-1">
+                  {[...Array(Math.min(totalPages, 5))].map((_, index) => {
+                    let page;
+                    if (totalPages <= 5) {
+                      page = index + 1;
+                    } else if (currentPage <= 3) {
+                      page = index + 1;
+                    } else if (currentPage >= totalPages - 2) {
+                      page = totalPages - 4 + index;
+                    } else {
+                      page = currentPage - 2 + index;
+                    }
+
+                    return (
+                      <Button
+                        key={page}
+                        variant={currentPage === page ? "default" : "outline"}
+                        size="sm"
+                        onClick={() => handlePageChange(page)}
+                        className="h-8 w-8 p-0"
+                      >
+                        {page}
+                      </Button>
+                    );
+                  })}
+                </div>
+
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => handlePageChange(currentPage + 1)}
+                  disabled={currentPage === totalPages}
+                  className="h-8 px-3"
+                >
+                  Próximo
+                  <ChevronRight className="h-4 w-4 ml-1" />
+                </Button>
+              </div>
+            </div>
+          )}
+
+          {/* Modais comentados temporariamente até implementação dos componentes */}
+          {/* 
+          {selectedChamadoForOperator && (
+            <AssumeOperatorModal
+              isOpen={assumeOperatorOpen}
+              onClose={handleCloseAssumeOperator}
+              chamado={selectedChamadoForOperator}
+              currentOperator={timers.get(parseInt(selectedChamadoForOperator))?.operador}
+              onAssume={handleAssumeOperator}
+            />
+          )}
+
+          {selectedChamadoForTimer && (
+            <ModernTimerModal
+              isOpen={timerManagementOpen}
+              onClose={() => {
+                setTimerManagementOpen(false);
+                setSelectedChamadoForTimer('');
+              }}
+              chamado={selectedChamadoForTimer}
+              currentLevel={getCurrentActiveLevel(parseInt(selectedChamadoForTimer)) || 1}
+              remainingTime={getCurrentActiveLevel(parseInt(selectedChamadoForTimer)) ? getRemainingTime(parseInt(selectedChamadoForTimer), getCurrentActiveLevel(parseInt(selectedChamadoForTimer))!) : 0}
+              formatTime={formatTime}
+              updateObservacao={updateObservacao}
+              updateAcionamento={updateAcionamento}
+              updateStatusFinal={updateStatusFinal}
+              onNextLevel={(chamado, nextLevel, observacao) => handleNextLevel(chamado, nextLevel, observacao, sortedAndPaginatedData.find(a => a.chamado === chamado))}
+              onPreviousLevel={(chamado, previousLevel, observacao) => handlePreviousLevel(chamado, previousLevel, observacao, sortedAndPaginatedData.find(a => a.chamado === chamado))}
+              historicoAcionamentos={getHistoricoAcionamentos(parseInt(selectedChamadoForTimer))}
+            />
+          )}
+
+          <ChamadoDetailsModal
+            isOpen={chamadoDetailsOpen}
+            onClose={handleCloseChamadoDetails}
+            alertData={selectedChamadoForDetails}
+          />
+          */}
+        </CardContent>
+      </Card>
+    </TooltipProvider>
   );
 };
