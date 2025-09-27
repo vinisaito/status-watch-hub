@@ -1,388 +1,251 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
-import { toast } from '@/hooks/use-toast';
+import json
+import boto3
+import os
+import uuid
+from datetime import datetime, timezone
+from decimal import Decimal
 
-export interface TimerState {
-  chamado: number;
-  operador?: string;
-  statusFinal?: string;
-  statusFinal_updateAt?: string;
-  level1_timerStart?: string;
-  level1_duration?: number;
-  level1_status?: 'running' | 'paused' | 'stopped' | 'finished';
-  level1_observacao?: string;
-  level1_operador?: string;
-  level1_pessoaAcionada?: string;
-  level1_statusAcionamento?: string;
-  level1_updateAt?: string;
-  level2_timerStart?: string;
-  level2_duration?: number;
-  level2_status?: 'running' | 'paused' | 'stopped' | 'finished';
-  level2_observacao?: string;
-  level2_operador?: string;
-  level2_pessoaAcionada?: string;
-  level2_statusAcionamento?: string;
-  level2_updateAt?: string;
-  level3_timerStart?: string;
-  level3_duration?: number;
-  level3_status?: 'running' | 'paused' | 'stopped' | 'finished';
-  level3_observacao?: string;
-  level3_operador?: string;
-  level3_pessoaAcionada?: string;
-  level3_statusAcionamento?: string;
-  level3_updateAt?: string;
-  level4_timerStart?: string;
-  level4_duration?: number;
-  level4_status?: 'running' | 'paused' | 'stopped' | 'finished';
-  level4_observacao?: string;
-  level4_operador?: string;
-  level4_pessoaAcionada?: string;
-  level4_statusAcionamento?: string;
-  level4_updateAt?: string;
-  level5_timerStart?: string;
-  level5_duration?: number;
-  level5_status?: 'running' | 'paused' | 'stopped' | 'finished';
-  level5_observacao?: string;
-  level5_operador?: string;
-  level5_pessoaAcionada?: string;
-  level5_statusAcionamento?: string;
-  level5_updateAt?: string;
-}
+# ---------- Config ----------
+dynamodb = boto3.resource("dynamodb")
+table = dynamodb.Table(os.environ["CHAMADOS_TABLE"])  # Tabela principal (chamados)
+conn_table = dynamodb.Table(os.environ["CONNECTIONS_TABLE"])  # Tabela de conexões
+apigw = boto3.client(
+    "apigatewaymanagementapi",
+    endpoint_url=f"https://{os.environ['WS_API_ID']}.execute-api.{os.environ['AWS_REGION']}.amazonaws.com/{os.environ['WS_STAGE']}"
+)
 
-export interface WebSocketMessage {
-  event: 'startTimer' | 'updateObservacao' | 'updateOperador' | 'updateStatusFinal' | 'getState' | 'updateAcionamento';
-  chamado: number;
-  level?: number;
-  state?: TimerState;
-}
+# ---------- Helpers ----------
+class DecimalEncoder(json.JSONEncoder):
+    def default(self, o):
+        if isinstance(o, Decimal):
+            if o % 1 == 0:
+                return int(o)
+            return float(o)
+        return super(DecimalEncoder, self).default(o)
 
-export interface SendMessage {
-  action: 'startTimer' | 'updateObservacao' | 'updateOperador' | 'updateStatusFinal' | 'getState' | 'updateAcionamento';
-  chamado: number;
-  level?: number;
-  duration?: number;
-  observacao?: string;
-  operador?: string;
-  statusFinal?: string;
-  levelStatusKey?: string;
-  status?: string;
-  pessoaAcionada?: string;
-  statusAcionamento?: string;
-}
+def log(trace, msg, **kwargs):
+    print(json.dumps({"trace": trace, "msg": msg, **kwargs}, cls=DecimalEncoder, default=str))
 
-export const useWebsocketTimers = () => {
-  const [timers, setTimers] = useState<Map<number, TimerState>>(new Map());
-  const [isConnected, setIsConnected] = useState(false);
-  const ws = useRef<WebSocket | null>(null);
-  const reconnectAttempts = useRef(0);
-  const maxReconnectAttempts = 5;
-  const reconnectTimeout = useRef<NodeJS.Timeout | null>(null);
+def send_to_connection(conn_id, data):
+    """Envia mensagem para uma conexão específica"""
+    try:
+        apigw.post_to_connection(
+            ConnectionId=conn_id,
+            Data=json.dumps(data, cls=DecimalEncoder).encode("utf-8")
+        )
+    except apigw.exceptions.GoneException:
+        # Conexão morta -> remover
+        conn_table.delete_item(Key={"connectionId": conn_id})
+        log("broadcast", "Conexão removida (GoneException)", connectionId=conn_id)
 
-  // Chamados que o cliente quer garantir que sejam consultados ao conectar
-  const watchedChamadosRef = useRef<Set<number>>(new Set());
+def broadcast(data):
+    """Envia mensagem para todos conectados"""
+    conns = conn_table.scan().get("Items", [])
+    for c in conns:
+        send_to_connection(c["connectionId"], data)
 
-  const connect = useCallback(() => {
-    try {
-      if (ws.current && ws.current.readyState === WebSocket.CONNECTING) {
-        return;
-      }
+def update_chamado(trace, chamado, update):
+    log(trace, "Atualizando chamado", chamado=chamado, update=update)
+    table.update_item(
+        Key={"chamado": chamado},
+        UpdateExpression="SET " + ", ".join(f"#{k} = :{k}" for k in update.keys()),
+        ExpressionAttributeNames={f"#{k}": k for k in update.keys()},
+        ExpressionAttributeValues={f":{k}": v for k, v in update.items()},
+    )
 
-      const wsUrl = 'wss://rsgjd6wsza.execute-api.us-east-1.amazonaws.com/dev';
-      console.log(`🔌 Tentando conectar no WebSocket: ${wsUrl}`);
+    # 🔑 Buscar o estado completo do DynamoDB
+    resp = table.get_item(Key={"chamado": chamado})
+    state = resp.get("Item", {})
+    log(trace, "Chamado atualizado (state completo)", state=state)
+    return state
 
-      ws.current = new WebSocket(wsUrl);
+# ---------- Handlers ----------
+def handle_connect(event, trace):
+    conn_id = event["requestContext"]["connectionId"]
+    conn_table.put_item(Item={"connectionId": conn_id, "connectedAt": datetime.now(timezone.utc).isoformat()})
+    log(trace, "Novo cliente conectado", connectionId=conn_id)
+    return {"statusCode": 200}
 
-      const connectionTimeout = setTimeout(() => {
-        if (ws.current && ws.current.readyState === WebSocket.CONNECTING) {
-          ws.current.close();
-          toast({
-            title: "Timeout de Conexão",
-            description: "WebSocket demorou muito para conectar. Tentando novamente...",
-            variant: "destructive",
-          });
-        }
-      }, 10000);
+def handle_disconnect(event, trace):
+    conn_id = event["requestContext"]["connectionId"]
+    conn_table.delete_item(Key={"connectionId": conn_id})
+    log(trace, "Cliente desconectado", connectionId=conn_id)
+    return {"statusCode": 200}
 
-      ws.current.onopen = () => {
-        clearTimeout(connectionTimeout);
-        setIsConnected(true);
-        reconnectAttempts.current = 0;
+def handle_start_timer(event, trace, body):
+    chamado = int(body["chamado"])
+    level = int(body["level"])
 
-        console.log('✅ WebSocket conectado com sucesso');
-        toast({
-          title: "Conectado",
-          description: "WebSocket conectado com sucesso",
-        });
-      };
+    # Se veio duration no body, usa ele. Senão aplica regra por nível.
+    if "duration" in body:
+        duration = int(body["duration"])
+    else:
+        duration = 1200 if level == 1 else 600  # 20 min no nível 1, senão 10 min
 
-      ws.current.onmessage = (event) => {
-        try {
-          const message: WebSocketMessage = JSON.parse(event.data);
+    now = datetime.now(timezone.utc).isoformat()
 
-          if (message.state && message.chamado) {
-            setTimers(prev => {
-              const oldState = prev.get(message.chamado);
-              const isDifferent = JSON.stringify(oldState) !== JSON.stringify(message.state);
-
-              if (isDifferent) {
-                console.log(`🔔 Novo evento para chamado ${message.chamado}`, message.state);
-              }
-
-              const newTimers = new Map(prev);
-              newTimers.set(message.chamado, message.state!);
-              return newTimers;
-            });
-          }
-        } catch (error) {
-          console.error('❌ Erro ao processar mensagem WebSocket:', error);
-        }
-      };
-
-      ws.current.onclose = (event) => {
-        clearTimeout(connectionTimeout);
-        setIsConnected(false);
-
-        console.warn('⚠️ WebSocket desconectado - Código:', event.code, 'Motivo:', event.reason);
-
-        if (event.code !== 1000 && reconnectAttempts.current < maxReconnectAttempts) {
-          reconnectAttempts.current++;
-          const delay = Math.min(1000 * Math.pow(2, reconnectAttempts.current), 30000);
-          console.log(`🔄 Tentando reconectar em ${delay}ms (tentativa ${reconnectAttempts.current}/${maxReconnectAttempts})`);
-
-          reconnectTimeout.current = setTimeout(() => {
-            connect();
-          }, delay);
-        } else if (reconnectAttempts.current >= maxReconnectAttempts) {
-          console.error('❌ Máximo de tentativas de reconexão atingido');
-          toast({
-            title: "Falha na Conexão",
-            description: "Não foi possível conectar ao WebSocket após várias tentativas",
-            variant: "destructive",
-          });
-        }
-      };
-
-      ws.current.onerror = () => {
-        clearTimeout(connectionTimeout);
-        console.error('❌ Erro WebSocket detectado');
-      };
-
-    } catch (error) {
-      console.error('❌ Erro ao conectar WebSocket:', error);
-      toast({
-        title: "Erro de Inicialização",
-        description: "Erro ao inicializar conexão WebSocket",
-        variant: "destructive",
-      });
-    }
-  }, []);
-
-  const disconnect = useCallback(() => {
-    if (reconnectTimeout.current) {
-      clearTimeout(reconnectTimeout.current);
-      reconnectTimeout.current = null;
+    update = {
+        f"level{level}_timerStart": now,
+        f"level{level}_duration": duration,
+        f"level{level}_status": "running"
     }
 
-    if (ws.current) {
-      ws.current.close(1000, 'Desconexão intencional');
-      ws.current = null;
+    state = update_chamado(trace, chamado, update)
+
+    broadcast({
+        "event": "startTimer",
+        "chamado": chamado,
+        "level": level,
+        "state": state
+    })
+
+    return {
+        "statusCode": 200,
+        "body": json.dumps({"msg": f"Timer iniciado ({duration//60} min)"}, cls=DecimalEncoder)
     }
 
-    setIsConnected(false);
-    console.log('🔌 WebSocket desconectado manualmente');
-  }, []);
 
-  const sendMessage = useCallback((message: SendMessage) => {
-    if (ws.current && ws.current.readyState === WebSocket.OPEN) {
-      try {
-        const payload = JSON.stringify(message); // Armazena o payload em uma variável
-        ws.current.send(payload);
+def handle_update_observacao(event, trace, body):
+    """Atualiza a observação de um level de um chamado"""
+    chamado = int(body["chamado"])
+    level = int(body.get("level", 1))  
+    observacao = body["observacao"]
 
-        // Inclui a variável payload no console.log
-        console.log(`📤 Mensagem enviada: ${message.action} (chamado ${message.chamado})`);
-        console.log('Payload:', payload);
+    update = {f"level{level}_observacao": observacao}
+    state = update_chamado(trace, chamado, update)
 
-        return true;
-      } catch (error) {
-        console.error('❌ Erro ao enviar mensagem:', error);
-        toast({
-          title: "Erro ao Enviar",
-          description: "Não foi possível enviar a mensagem",
-          variant: "destructive",
-        });
-        return false;
-      }
-    } else {
-      toast({
-        title: "Não Conectado",
-        description: "WebSocket não está conectado. Tentando reconectar...",
-        variant: "destructive",
-      });
-      connect();
-      return false;
+    broadcast({"event": "updateObservacao", "chamado": chamado, "state": state})
+    return {"statusCode": 200, "body": json.dumps({"msg": f"Observação do level {level} atualizada"}, cls=DecimalEncoder)}
+
+def handle_update_operador(event, trace, body):
+    chamado = int(body["chamado"])
+    responsavel = body["ResponsavelAcompanhamento"]
+    timestamp = datetime.now(timezone.utc).isoformat()
+
+    # Atualiza apenas ResponsavelAcompanhamento + timestamp
+    update = {
+        "ResponsavelAcompanhamento": responsavel,
+        "timestamp": timestamp
     }
-  }, [connect]);
+    update_chamado(trace, chamado, update)
 
-  // Ações (mantive todas as existentes)
-  const startTimer = useCallback((chamado: number, level: number, duration: number = 1200) => {
-    return sendMessage({ action: 'startTimer', chamado, level, duration });
-  }, [sendMessage]);
-
-  const updateObservacao = useCallback((chamado: number, level: number, observacao: string) => {
-    return sendMessage({ action: 'updateObservacao', chamado, level, observacao });
-  }, [sendMessage]);
-
-  const updateOperador = useCallback((chamado: number, operador: string) => {
-    return sendMessage({ action: 'updateOperador', chamado, operador });
-  }, [sendMessage]);
-
-  const updateAcionamento = useCallback((chamado: number, level: number, operador: string, pessoaAcionada: string, statusAcionamento: string) => {
-    return sendMessage({ action: 'updateAcionamento', chamado, level, operador, pessoaAcionada, statusAcionamento});
-  }, [sendMessage]);
-
-  const updateStatusFinal = useCallback((
-    chamado: number,
-    levelOrKeyOrStatus: number | string,
-    maybeStatus?: string
-  ) => {
-    // caso 1: numeric + status -> level number
-    if (typeof levelOrKeyOrStatus === 'number') {
-      const level = levelOrKeyOrStatus;
-      const status = maybeStatus!;
-      const levelStatusKey = `level${level}_status`;
-      return sendMessage({ action: 'updateStatusFinal', chamado, levelStatusKey, status });
+    # Payload enxuto para front
+    payload = {
+        "event": "updateOperador",
+        "chamado": chamado,
+        "ResponsavelAcompanhamento": responsavel,
+        "timestamp": timestamp
     }
 
-    // caso 2: string + status (treat second param as levelStatusKey)
-    if (typeof maybeStatus === 'string') {
-      const levelStatusKey = levelOrKeyOrStatus;
-      const status = maybeStatus;
-      return sendMessage({ action: 'updateStatusFinal', chamado, levelStatusKey, status });
+    broadcast(payload)
+
+    return {
+        "statusCode": 200,
+        "body": json.dumps(payload, cls=DecimalEncoder)
     }
 
-    // caso 3: apenas chamado + statusFinal (retrocompatível)
-    const statusFinal = levelOrKeyOrStatus;
-    return sendMessage({ action: 'updateStatusFinal', chamado, statusFinal });
-  }, [sendMessage]);
 
-  const getState = useCallback((chamado: number) => {
-    return sendMessage({ action: 'getState', chamado });
-  }, [sendMessage]);
+def handle_update_status_final(event, trace, body):
+    chamado = int(body["chamado"])
+    status = body["status"]
+    level = body.get("level")  # opcional
+    now = datetime.now(timezone.utc).isoformat()
 
-  // Cálculo de tempo restante (sem logs)
-  const getRemainingTime = useCallback((chamado: number, level: number): number => {
-    const timerState = timers.get(chamado);
-    if (!timerState) return 0;
+    # Pega o estado atual do chamado
+    resp = table.get_item(Key={"chamado": chamado})
+    state_atual = resp.get("Item", {})
 
-    const levelPrefix = `level${level}` as 'level1' | 'level2' | 'level3' | 'level4' | 'level5';
-    const timerStart = timerState[`${levelPrefix}_timerStart`];
-    const duration = timerState[`${levelPrefix}_duration`];
-    const status = timerState[`${levelPrefix}_status`];
+    update = {"statusFinal": status, "statusFinal_updatedAt": now}
 
-    if (!timerStart || !duration || status !== 'running') return 0;
+    if level:
+        update[f"level{level}_status"] = status
+        update[f"level{level}_updatedAt"] = now
+    else:
+        for i in range(1, 6):
+            if state_atual.get(f"level{i}_status") == "running":
+                update[f"level{i}_status"] = status
+                update[f"level{i}_updatedAt"] = now
+                break
 
-    try {
-      const startTime = new Date(timerStart).getTime();
-      const endTime = startTime + (duration * 1000);
-      const now = Date.now();
-      return Math.max(0, Math.floor((endTime - now) / 1000));
-    } catch {
-      return 0;
-    }
-  }, [timers]);
+    state = update_chamado(trace, chamado, update)
+    broadcast({"event": "updateStatusFinal", "chamado": chamado, "state": state})
+    return {"statusCode": 200, "body": json.dumps({"msg": "Status final atualizado"}, cls=DecimalEncoder)}
 
-  const formatTime = useCallback((seconds: number): string => {
-    const hours = Math.floor(seconds / 3600);
-    const minutes = Math.floor((seconds % 3600) / 60);
-    const secs = seconds % 60;
+    
+def handle_update_acionamento(event, trace, body):
+    chamado = int(body["chamado"])
+    level = int(body.get("level", 1))
+    now = datetime.now(timezone.utc).isoformat()
 
-    if (hours > 0) {
-      return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
-    }
-    return `${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
-  }, []);
+    observacao = body.get("observacao")
+    pessoa_acionada = body.get("pessoaAcionada")
+    status_acionamento = body.get("statusAcionamento")
+    operador = body.get("operador")
 
-  const isTimerActive = useCallback((chamado: number, level: number): boolean => {
-    const timerState = timers.get(chamado);
-    if (!timerState) return false;
+    update = {f"level{level}_updatedAt": now}  # sempre marca o horário da alteração
 
-    const levelPrefix = `level${level}` as 'level1' | 'level2' | 'level3' | 'level4' | 'level5';
-    return timerState[`${levelPrefix}_status`] === 'running';
-  }, [timers]);
+    if observacao is not None:
+        update[f"level{level}_observacao"] = observacao
+    if pessoa_acionada is not None:
+        update[f"level{level}_pessoaAcionada"] = pessoa_acionada
+    if status_acionamento is not None:
+        update[f"level{level}_statusAcionamento"] = status_acionamento
+    if operador is not None:
+        update[f"level{level}_operador"] = operador
 
-  // Conectar ao montar
-  useEffect(() => {
-    connect();
-    return () => disconnect();
-  }, [connect, disconnect]);
+    state = update_chamado(trace, chamado, update)
 
-  // Força re-render a cada segundo
-  useEffect(() => {
-    const interval = setInterval(() => {
-      setTimers(prev => new Map(prev));
-    }, 1000);
-    return () => clearInterval(interval);
-  }, []);
+    broadcast({
+        "event": "updateAcionamento",
+        "chamado": chamado,
+        "level": level,
+        "state": state
+    })
+    return {"statusCode": 200, "body": json.dumps({"msg": f"Dados do acionamento do level {level} atualizados"}, cls=DecimalEncoder)}
 
-  useEffect(() => {
-    if (!isConnected) return;
+def handle_get_state(event, trace, body):
+    chamado = int(body["chamado"])
+    resp = table.get_item(Key={"chamado": chamado})
+    state = resp.get("Item", {})
+    log(trace, "Estado retornado", chamado=chamado, state=state)
 
-    try {
-      const currentKeys = Array.from(timers.keys());
-      const watchedKeys = Array.from(watchedChamadosRef.current);
-      const uniqueChamados = Array.from(new Set([...currentKeys, ...watchedKeys]));
+    # Enviar resposta padronizada só para o cliente que pediu
+    conn_id = event["requestContext"]["connectionId"]
+    payload = {"event": "getState", "chamado": chamado, "state": state}
+    send_to_connection(conn_id, payload)
+    return {"statusCode": 200, "body": json.dumps({"msg": "Estado enviado"}, cls=DecimalEncoder)}
 
-      if (uniqueChamados.length === 0) {
-        return;
-      }
+# ---------- Main ----------
+def lambda_handler(event, context):
+    trace = str(uuid.uuid4())[:8]
+    req_ctx = event.get("requestContext", {})
+    route = req_ctx.get("routeKey", "UNKNOWN")
+    conn_id = req_ctx.get("connectionId", "N/A")
 
-      console.log('🔁 Solicitando estado inicial para chamados:', uniqueChamados);
-      uniqueChamados.forEach(chamado => {
-        try {
-          getState(chamado);
-        } catch (err) {
-          console.error(`Erro ao solicitar getState para ${chamado}:`, err);
-        }
-      });
-    } catch (err) {
-      console.error('Erro no efeito de sincronização inicial:', err);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isConnected, getState]);
+    log(trace, "invoke", routeKey=route, connectionId=conn_id, body=event.get("body"))
 
-  const addWatchedChamado = useCallback((chamado: number) => {
-    watchedChamadosRef.current.add(chamado);
-  }, []);
-
-  const removeWatchedChamado = useCallback((chamado: number) => {
-    watchedChamadosRef.current.delete(chamado);
-  }, []);
-
-  const setWatchedChamados = useCallback((chamados: number[]) => {
-    watchedChamadosRef.current = new Set(chamados);
-  }, []);
-
-  const getWatchedChamados = useCallback(() => {
-    return Array.from(watchedChamadosRef.current);
-  }, []);
-
-  return {
-    timers,
-    isConnected,
-    sendMessage,
-    startTimer,
-    updateObservacao,
-    updateOperador,
-    updateAcionamento,
-    updateStatusFinal,
-    getState,
-    getRemainingTime,
-    formatTime,
-    isTimerActive,
-    connect,
-    disconnect,
-    addWatchedChamado,
-    removeWatchedChamado,
-    setWatchedChamados,
-    getWatchedChamados
-  };
-};
+    try:
+        if route == "$connect":
+            return handle_connect(event, trace)
+        elif route == "$disconnect":
+            return handle_disconnect(event, trace)
+        else:
+            body = json.loads(event.get("body") or "{}")
+            if route == "startTimer":
+                return handle_start_timer(event, trace, body)
+            elif route == "updateObservacao":
+                return handle_update_observacao(event, trace, body)
+            elif route == "updateOperador":
+                return handle_update_operador(event, trace, body)
+            elif route == "updateStatusFinal":
+                return handle_update_status_final(event, trace, body)
+            elif route == "updateAcionamento":
+                return handle_update_acionamento(event, trace, body)
+            elif route == "getState":
+                return handle_get_state(event, trace, body)
+            else:
+                log(trace, "Rota inválida", route=route)
+                return {"statusCode": 400, "body": json.dumps({"error": "Invalid route"}, cls=DecimalEncoder)}
+    except Exception as e:
+        log(trace, "Erro na execução", error=str(e))
+        return {"statusCode": 500, "body": json.dumps({"error": str(e)}, cls=DecimalEncoder)}
