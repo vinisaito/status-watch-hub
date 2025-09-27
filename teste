@@ -1,867 +1,231 @@
-ActionTable:
-import { useState, useMemo, useCallback, useEffect } from 'react';
-import {
-  Check,
-  AlertTriangle,
-  Timer,
-  Play,
-  Settings,
-  Search,
-  ChevronLeft,
-  ChevronRight,
-  ArrowUpDown,
-  ArrowUp,
-  ArrowDown,
-  User,
-  UserCheck,
-  Edit3
-} from 'lucide-react';
+import json
+import boto3
+import os
+import uuid
+from datetime import datetime, timezone
+from decimal import Decimal
 
-// UI Components
-import { Card, CardContent, CardHeader } from '@/components/ui/card';
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
+# ---------- Config ----------
+dynamodb = boto3.resource("dynamodb")
+table = dynamodb.Table(os.environ["CHAMADOS_TABLE"])  # Tabela principal (chamados)
+conn_table = dynamodb.Table(os.environ["CONNECTIONS_TABLE"])  # Tabela de conexões
+apigw = boto3.client(
+    "apigatewaymanagementapi",
+    endpoint_url=f"https://{os.environ['WS_API_ID']}.execute-api.{os.environ['AWS_REGION']}.amazonaws.com/{os.environ['WS_STAGE']}"
+)
 
-// Hooks e funcionalidades
-import { toast } from '@/hooks/use-toast';
-import { useWebsocketTimers } from "@/hooks/useWebsocketTimers";
+# ---------- Helpers ----------
+class DecimalEncoder(json.JSONEncoder):
+    def default(self, o):
+        if isinstance(o, Decimal):
+            if o % 1 == 0:
+                return int(o)
+            return float(o)
+        return super(DecimalEncoder, self).default(o)
 
-// Componentes customizados
-import { ModernTimerModal } from '@/components/ActionTable/ModernTimerModal';
-import { ChamadoDetailsModal } from '@/components/ActionTable/ChamadoDetailsModal';
-import { AssumeOperatorModal } from '@/components/ActionTable/AssumeOperatorModal';
+def log(trace, msg, **kwargs):
+    print(json.dumps({"trace": trace, "msg": msg, **kwargs}, cls=DecimalEncoder, default=str))
 
-/**
- * ====================================================================================
- * INTERFACES E TIPOS
- * ====================================================================================
- */
+def send_to_connection(conn_id, data):
+    """Envia mensagem para uma conexão específica"""
+    try:
+        apigw.post_to_connection(
+            ConnectionId=conn_id,
+            Data=json.dumps(data, cls=DecimalEncoder).encode("utf-8")
+        )
+    except apigw.exceptions.GoneException:
+        # Conexão morta -> remover
+        conn_table.delete_item(Key={"connectionId": conn_id})
+        log("broadcast", "Conexão removida (GoneException)", connectionId=conn_id)
 
-interface AlertData {
-  id: string;
-  chamado: string;
-  tipo_chamado: string;
-  grupo_chamado: string;
-  status_chamado: string;
-  abertura_chamado: string;
-  resumo_chamado: string;
-  severidade_chamado: string;
-  acionado: string;
-  chat: boolean;
-  link_chamado: string;
-}
+def broadcast(data):
+    """Envia mensagem para todos conectados"""
+    conns = conn_table.scan().get("Items", [])
+    for c in conns:
+        send_to_connection(c["connectionId"], data)
 
-interface ActionTableProps {
-  alertData: AlertData[];
-  onUpdateAcknowledgment: (alertId: string, acknowledged: boolean) => void;
-  loading: boolean;
-}
+def update_chamado(trace, chamado, update):
+    log(trace, "Atualizando chamado", chamado=chamado, update=update)
+    table.update_item(
+        Key={"chamado": chamado},
+        UpdateExpression="SET " + ", ".join(f"#{k} = :{k}" for k in update.keys()),
+        ExpressionAttributeNames={f"#{k}": k for k in update.keys()},
+        ExpressionAttributeValues={f":{k}": v for k, v in update.items()},
+    )
 
-type SortField = keyof AlertData;
-type SortDirection = 'asc' | 'desc' | null;
+    # 🔑 Buscar o estado completo do DynamoDB
+    resp = table.get_item(Key={"chamado": chamado})
+    state = resp.get("Item", {})
+    log(trace, "Chamado atualizado (state completo)", state=state)
+    return state
 
-/**
- * ====================================================================================
- * CONSTANTES E CONFIGURAÇÕES
- * ====================================================================================
- */
+# ---------- Handlers ----------
+def handle_connect(event, trace):
+    conn_id = event["requestContext"]["connectionId"]
+    conn_table.put_item(Item={"connectionId": conn_id, "connectedAt": datetime.now(timezone.utc).isoformat()})
+    log(trace, "Novo cliente conectado", connectionId=conn_id)
+    return {"statusCode": 200}
 
-// Informações dos níveis de escalação do sistema de timer
-const LEVEL_NAMES = {
-  1: "Primeiro Acionamento",
-  2: "1ª Escalação",
-  3: "2ª Escalação",
-  4: "3ª Escalação",
-  5: "4ª Escalação"
-};
+def handle_disconnect(event, trace):
+    conn_id = event["requestContext"]["connectionId"]
+    conn_table.delete_item(Key={"connectionId": conn_id})
+    log(trace, "Cliente desconectado", connectionId=conn_id)
+    return {"statusCode": 200}
 
-// Função para obter duração do timer baseada no nível, tipo e severidade
-const getTimerDuration = (level: number, tipoChamado?: string, severidade?: string): number => {
-  // Caso especial: incidente com severidade alta (7 minutos)
-  if (tipoChamado?.toLowerCase().includes('incidente') && severidade?.includes('4')) {
-    return 420; // 7 minutos em segundos
-  }
-  
-  // Caso padrão: 20 min para nível 1, 10 min para os demais
-  return level === 1 ? 1200 : 600;
-};
+def handle_start_timer(event, trace, body):
+    chamado = int(body["chamado"])
+    level = int(body["level"])
 
-/**
- * ====================================================================================
- * COMPONENTE PRINCIPAL - ActionTable
- * ====================================================================================
- */
+    # Se veio duration no body, usa ele. Senão aplica regra por nível.
+    if "duration" in body:
+        duration = int(body["duration"])
+    else:
+        duration = 1200 if level == 1 else 600  # 20 min no nível 1, senão 10 min
 
-export const ActionTable = ({ alertData, onUpdateAcknowledgment, loading }: ActionTableProps) => {
+    now = datetime.now(timezone.utc).isoformat()
 
-  /**
-   * -----------------------------------------------------------------------------------
-   * ESTADOS DO COMPONENTE
-   * -----------------------------------------------------------------------------------
-   */
-
-  // Estados de paginação e filtros
-  const [currentPage, setCurrentPage] = useState(1);
-  const [searchTerm, setSearchTerm] = useState('');
-  const [itemsPerPage, setItemsPerPage] = useState<number>(5);
-
-  // Estados de ordenação
-  const [sortField, setSortField] = useState<SortField>('chamado');
-  const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
-
-  // Estados dos modais
-  const [timerManagementOpen, setTimerManagementOpen] = useState(false);
-  const [selectedChamadoForTimer, setSelectedChamadoForTimer] = useState<string>('');
-  
-  // Estados do modal de detalhes do chamado
-  const [chamadoDetailsOpen, setChamadoDetailsOpen] = useState(false);
-  const [selectedChamadoForDetails, setSelectedChamadoForDetails] = useState<AlertData | null>(null);
-
-  // Estados do modal de assumir operador
-  const [assumeOperatorOpen, setAssumeOperatorOpen] = useState(false);
-  const [selectedChamadoForOperator, setSelectedChamadoForOperator] = useState<string>('');
-
-  /**
-   * -----------------------------------------------------------------------------------
-   * HOOK WEBSOCKET PARA GERENCIAMENTO DE TIMERS
-   * -----------------------------------------------------------------------------------
-   */
-
-  const {
-    timers,
-    isConnected,
-    startTimer,
-    updateObservacao,
-    updateAcionamento,
-    updateStatusFinal,
-    getRemainingTime,
-    formatTime,
-    getState,
-    setWatchedChamados
-  } = useWebsocketTimers();
-
-  /**
-   * -----------------------------------------------------------------------------------
-   * EFEITO PARA REGISTRAR CHAMADOS NO WEBSOCKET
-   * -----------------------------------------------------------------------------------
-   */
-
-  // Registra os chamados que queremos monitorar no WebSocket quando os dados mudam
-  useEffect(() => {
-    if (!alertData || alertData.length === 0) return;
-
-    const chamadosNum = alertData.map(a => parseInt(a.chamado));
-    setWatchedChamados(chamadosNum);
-
-    // Força a busca do estado atual de cada chamado
-    chamadosNum.forEach(chamado => getState(chamado));
-  }, [alertData, setWatchedChamados, getState]);
-
-  /**
-   * -----------------------------------------------------------------------------------
-   * FUNÇÕES UTILITÁRIAS
-   * -----------------------------------------------------------------------------------
-   */
-
-  /**
-   * Obtém a cor do timer baseada no tempo restante
-   * @param remainingTime Tempo restante em segundos
-   * @returns Classe CSS para colorir o timer
-   */
-  const getTimerColor = useCallback((remainingTime: number) => {
-    if (remainingTime > 600) {        // > 10 minutos
-      return 'text-timer-safe';
-    } else if (remainingTime > 300) { // 5-10 minutos  
-      return 'text-timer-warning';
-    } else if (remainingTime > 120) { // 2-5 minutos
-      return 'text-timer-danger';
-    } else {                          // < 2 minutos
-      return 'text-timer-critical animate-pulse';
-    }
-  }, []);
-
-  /**
-   * Formata uma string de data para o padrão brasileiro
-   * @param dateString String da data a ser formatada
-   * @returns Data formatada ou valor original em caso de erro
-   */
-  const formatDate = useCallback((dateString: string) => {
-    if (!dateString || dateString === '' || dateString === 'null' || dateString === 'undefined') {
-      return '-';
+    update = {
+        f"level{level}_timerStart": now,
+        f"level{level}_duration": duration,
+        f"level{level}_status": "running"
     }
 
-    try {
-      let date: Date;
-      const cleanString = String(dateString).trim();
+    state = update_chamado(trace, chamado, update)
 
-      // Trata diferentes formatos de timestamp
-      if (/^\d{13}$/.test(cleanString)) {
-        // Timestamp em millisegundos
-        date = new Date(parseInt(cleanString));
-      } else if (/^\d{10}$/.test(cleanString)) {
-        // Timestamp em segundos
-        date = new Date(parseInt(cleanString) * 1000);
-      } else if (/^\d{2}\/\d{2}\/\d{4}/.test(cleanString)) {
-        // Formato brasileiro DD/MM/YYYY
-        const parts = cleanString.split(' ');
-        const datePart = parts[0];
-        const timePart = parts[1] || '00:00:00';
-        const [day, month, year] = datePart.split('/');
-        const [hour, minute, second] = timePart.split(':');
+    broadcast({
+        "event": "startTimer",
+        "chamado": chamado,
+        "level": level,
+        "state": state
+    })
 
-        date = new Date(
-          parseInt(year),
-          parseInt(month) - 1,
-          parseInt(day),
-          parseInt(hour || '0'),
-          parseInt(minute || '0'),
-          parseInt(second || '0')
-        );
-      } else {
-        // Tenta parsing padrão
-        date = new Date(cleanString);
-      }
-
-      // Validações básicas
-      if (isNaN(date.getTime())) return cleanString;
-
-      const year = date.getFullYear();
-      if (year < 1900 || year > 2100) return cleanString;
-
-      return date.toLocaleString('pt-BR', {
-        day: '2-digit',
-        month: '2-digit',
-        year: 'numeric',
-        hour: '2-digit',
-        minute: '2-digit',
-        second: '2-digit',
-      });
-    } catch (error) {
-      return String(dateString);
-    }
-  }, []);
-
-  /**
-   * Obtém a cor da badge baseada na severidade
-   * @param severity String da severidade
-   * @returns Classes CSS para a badge
-   */
-  const getSeverityColor = useCallback((severity: string) => {
-    return severity.includes('4')
-      ? 'bg-destructive text-destructive-foreground'
-      : 'bg-yellow-500 text-yellow-950';
-  }, []);
-
-  /**
-   * Obtém o nível ativo atual do timer para um chamado
-   * @param chamado Número do chamado
-   * @returns Nível ativo (1-5) ou null se nenhum timer ativo
-   */
-  const getCurrentActiveLevel = useCallback((chamado: number) => {
-    const timerState = timers.get(chamado);
-    if (!timerState) return null;
-
-    // Verifica levels de 1 a 5 para encontrar o ativo
-    for (let level = 1; level <= 5; level++) {
-      const statusKey = `level${level}_status` as keyof typeof timerState;
-      if (timerState[statusKey] === 'running') {
-        return level;
-      }
-    }
-    return null;
-  }, [timers]);
-
-  /**
-   * Monta o histórico de acionamentos do chamado
-   * @param chamadoNum Número do chamado
-   * @returns Array com histórico dos acionamentos
-   */
-  const getHistoricoAcionamentos = useCallback((chamadoNum: number) => {
-    const timerState = timers.get(chamadoNum);
-    if (!timerState) return [];
-
-    const historico: {
-      operador: string;
-      pessoaAcionada: string;
-      status: string;
-      observacao: string;
-      dataHora: string;
-      updatedAt: string;
-      nivel: number;
-    }[] = [];
-
-    // Percorre todos os níveis e coleta informações do histórico
-    for (let nivel = 1; nivel <= 5; nivel++) {
-      const operador = timerState[`level${nivel}_operador`] || '';
-      const pessoaAcionada = timerState[`level${nivel}_pessoaAcionada`] || '';
-      const status = timerState[`level${nivel}_statusAcionamento`] || '';
-      const observacao = timerState[`level${nivel}_observacao`] || '';
-      const dataHora = timerState[`level${nivel}_dataHora`] || '';
-      const updatedAt = timerState[`level${nivel}_updatedAt`] || '';
-
-      if (operador || pessoaAcionada || status || observacao || dataHora) {
-        historico.push({
-          operador,
-          pessoaAcionada,
-          status,
-          observacao,
-          dataHora,
-          updatedAt: formatDate(updatedAt),
-          nivel,
-        });
-      }
-    }
-    return historico;
-  }, [timers, formatDate]);
-
-
-ChamadoDetailsModal:
-import { useState } from 'react';
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
-import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
-import { Separator } from '@/components/ui/separator';
-import { ScrollArea } from '@/components/ui/scroll-area';
-import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion';
-import {
-  Calendar,
-  Clock,
-  User,
-  AlertTriangle,
-  Tag,
-  FileText,
-  Users,
-  X,
-  History,
-  CheckCircle2,
-  XCircle,
-  Phone,
-  MessageSquare,
-  Loader2
-} from 'lucide-react';
-import { cn } from '@/lib/utils';
-import { useChatAcionados } from '@/hooks/use-chat-acionados';
-
-interface AlertData {
-  id: string;
-  chamado: string;
-  tipo_chamado: string;
-  grupo_chamado: string;
-  status_chamado: string;
-  abertura_chamado: string;
-  resumo_chamado: string;
-  severidade_chamado: string;
-  acionado: string;
-  link_chamado: string;
-  chat: boolean;
-}
-
-interface ChamadoDetailsModalProps {
-  isOpen: boolean;
-  onClose: () => void;
-  alertData: AlertData | null;
-  historicoAcionamentos?: {
-    operador: string;
-    pessoaAcionada: string;
-    status: string;
-    observacao: string;
-    dataHora: string;
-    updatedAt: string;
-    nivel: number;
-  }[];
-}
-
-const LEVEL_INFO = {
-  1: {
-    title: "Primeiro Acionamento",
-  },
-  2: {
-    title: "1ª Escalação",
-  },
-  3: {
-    title: "2ª Escalação",
-  },
-  4: {
-    title: "3ª Escalação",
-  },
-  5: {
-    title: "4ª Escalação",
-  }
-};
-
-const LEVEL_COLORS = {
-  1: { bg: "bg-blue-500/10", border: "border-blue-500/30", text: "text-blue-700 dark:text-blue-400", icon: "text-blue-500" },
-  2: { bg: "bg-yellow-500/10", border: "border-yellow-500/30", text: "text-yellow-700 dark:text-yellow-400", icon: "text-yellow-500" },
-  3: { bg: "bg-orange-500/10", border: "border-orange-500/30", text: "text-orange-700 dark:text-orange-400", icon: "text-orange-500" },
-  4: { bg: "bg-red-500/10", border: "border-red-500/30", text: "text-red-700 dark:text-red-400", icon: "text-red-500" },
-  5: { bg: "bg-purple-600/10", border: "border-purple-600/30", text: "text-purple-700 dark:text-purple-400", icon: "text-purple-600" },
-};
-
-export const ChamadoDetailsModal = ({ isOpen, onClose, alertData, historicoAcionamentos = [] }: ChamadoDetailsModalProps) => {
-  // Hook para verificar acionamentos via API
-  const { isAcionado, loading: loadingAcionados } = useChatAcionados();
-
-  if (!alertData) return null;
-
-  const formatDate = (dateString: string) => {
-    if (!dateString || dateString === '' || dateString === 'null' || dateString === 'undefined') {
-      return '-';
+    return {
+        "statusCode": 200,
+        "body": json.dumps({"msg": f"Timer iniciado ({duration//60} min)"}, cls=DecimalEncoder)
     }
 
-    try {
-      let date: Date;
-      const cleanString = String(dateString).trim();
 
-      if (/^\d{13}$/.test(cleanString)) {
-        date = new Date(parseInt(cleanString));
-      } else if (/^\d{10}$/.test(cleanString)) {
-        date = new Date(parseInt(cleanString) * 1000);
-      } else if (/^\d{2}\/\d{2}\/\d{4}/.test(cleanString)) {
-        const parts = cleanString.split(' ');
-        const datePart = parts[0];
-        const timePart = parts[1] || '00:00:00';
-        const [day, month, year] = datePart.split('/');
-        const [hour, minute, second] = timePart.split(':');
+def handle_update_observacao(event, trace, body):
+    """Atualiza a observação de um level de um chamado"""
+    chamado = int(body["chamado"])
+    level = int(body.get("level", 1))  
+    observacao = body["observacao"]
 
-        date = new Date(
-          parseInt(year),
-          parseInt(month) - 1,
-          parseInt(day),
-          parseInt(hour || '0'),
-          parseInt(minute || '0'),
-          parseInt(second || '0')
-        );
-      } else {
-        date = new Date(cleanString);
-      }
+    update = {f"level{level}_observacao": observacao}
+    state = update_chamado(trace, chamado, update)
 
-      if (isNaN(date.getTime())) return cleanString;
+    broadcast({"event": "updateObservacao", "chamado": chamado, "state": state})
+    return {"statusCode": 200, "body": json.dumps({"msg": f"Observação do level {level} atualizada"}, cls=DecimalEncoder)}
 
-      const year = date.getFullYear();
-      if (year < 1900 || year > 2100) return cleanString;
+def handle_update_operador(event, trace, body):
+    chamado = int(body["chamado"])
+    operador = body["operador"]
+    update = {"operador": operador}
+    state = update_chamado(trace, chamado, update)
+    broadcast({"event": "updateOperador", "chamado": chamado, "state": state})
+    return {"statusCode": 200, "body": json.dumps({"msg": "Operador atualizado"}, cls=DecimalEncoder)}
 
-      return date.toLocaleString('pt-BR', {
-        day: '2-digit',
-        month: '2-digit',
-        year: 'numeric',
-        hour: '2-digit',
-        minute: '2-digit',
-        second: '2-digit',
-      });
-    } catch (error) {
-      return String(dateString);
-    }
-  };
+def handle_update_status_final(event, trace, body):
+    chamado = int(body["chamado"])
+    status = body["status"]
+    level = body.get("level")  # opcional
+    now = datetime.now(timezone.utc).isoformat()
 
-  const getSeverityColor = (severity: string) => {
-    return severity.includes('4')
-      ? 'bg-destructive text-destructive-foreground'
-      : 'bg-yellow-500 text-yellow-950';
-  };
+    # Pega o estado atual do chamado
+    resp = table.get_item(Key={"chamado": chamado})
+    state_atual = resp.get("Item", {})
 
-  // Verifica se o chamado foi acionado usando o hook
-  const chamadoFoiAcionado = isAcionado(alertData.chamado);
-  const isChat = alertData.acionado === 'true' || alertData.chat || chamadoFoiAcionado;
+    update = {"statusFinal": status, "statusFinal_updatedAt": now}
 
-  return (
-    <Dialog open={isOpen} onOpenChange={onClose}>
-      <DialogContent className="max-w-5xl max-h-[85vh] bg-gradient-to-br from-background to-background/95 border-2 border-primary/20 shadow-2xl">
-        <DialogHeader className="pb-6 border-b border-primary/10">
-          <DialogTitle className="text-2xl font-bold flex items-center gap-3 bg-gradient-to-r from-primary to-primary/80 bg-clip-text text-transparent">
-            <div className="p-2 rounded-lg bg-primary/10 text-primary">
-              <FileText className="h-6 w-6" />
-            </div>
-            Detalhes do Chamado - {alertData.chamado}
-            {/* Indicador de status de acionamento */}
-            <div className="flex items-center gap-2 ml-auto">
-              {loadingAcionados ? (
-                <div className="flex items-center gap-2 text-muted-foreground">
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                  <span className="text-sm">Verificando...</span>
-                </div>
-              ) : (
-                <Badge 
-                  variant={chamadoFoiAcionado ? "default" : "secondary"}
-                  className={cn(
-                    "flex items-center gap-1.5",
-                    chamadoFoiAcionado 
-                      ? "bg-green-500 hover:bg-green-600 text-white" 
-                      : "bg-gray-500 hover:bg-gray-600 text-white"
-                  )}
-                >
-                  {chamadoFoiAcionado ? (
-                    <>
-                      <CheckCircle2 className="h-3 w-3" />
-                      Acionado
-                    </>
-                  ) : (
-                    <>
-                      <XCircle className="h-3 w-3" />
-                      Não Acionado
-                    </>
-                  )}
-                </Badge>
-              )}
-            </div>
-          </DialogTitle>
-        </DialogHeader>
+    if level:
+        update[f"level{level}_status"] = status
+        update[f"level{level}_updatedAt"] = now
+    else:
+        for i in range(1, 6):
+            if state_atual.get(f"level{i}_status") == "running":
+                update[f"level{i}_status"] = status
+                update[f"level{i}_updatedAt"] = now
+                break
 
-        <ScrollArea className="max-h-[calc(85vh-140px)] pr-4">
-          <div className="space-y-8">
+    state = update_chamado(trace, chamado, update)
+    broadcast({"event": "updateStatusFinal", "chamado": chamado, "state": state})
+    return {"statusCode": 200, "body": json.dumps({"msg": "Status final atualizado"}, cls=DecimalEncoder)}
 
-            {/* Status do Acionamento */}
-            <div className="p-6 bg-gradient-to-br from-card to-card/80 rounded-xl border border-border/50 shadow-lg">
-              <h3 className="text-xl font-bold text-foreground flex items-center gap-3 border-b border-primary/20 pb-4 mb-4">
-                <div className="p-2 rounded-lg bg-primary/10 text-primary">
-                  <MessageSquare className="h-5 w-5" />
-                </div>
-                Status do Acionamento
-              </h3>
-              
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <div className="bg-gradient-to-r from-accent/10 to-accent/5 border border-accent/20 p-4 rounded-lg">
-                  <div className="flex items-center gap-3">
-                    <div className="p-2 bg-primary/10 rounded-lg">
-                      <FileText className="h-4 w-4 text-primary" />
-                    </div>
-                    <div>
-                      <p className="text-xs text-muted-foreground">Dados Locais</p>
-                      <p className="font-semibold text-sm">
-                        {(alertData.acionado === 'true' || alertData.chat) ? 'Acionado' : 'Não Acionado'}
-                      </p>
-                    </div>
-                  </div>
-                </div>
+    
+def handle_update_acionamento(event, trace, body):
+    chamado = int(body["chamado"])
+    level = int(body.get("level", 1))
+    now = datetime.now(timezone.utc).isoformat()
 
-                <div className="bg-gradient-to-r from-accent/10 to-accent/5 border border-accent/20 p-4 rounded-lg">
-                  <div className="flex items-center gap-3">
-                    <div className="p-2 bg-primary/10 rounded-lg">
-                      <MessageSquare className="h-4 w-4 text-primary" />
-                    </div>
-                    <div>
-                      <p className="text-xs text-muted-foreground">API Acionamentos</p>
-                      {loadingAcionados ? (
-                        <div className="flex items-center gap-2">
-                          <Loader2 className="h-3 w-3 animate-spin" />
-                          <span className="text-xs">Carregando...</span>
-                        </div>
-                      ) : (
-                        <p className="font-semibold text-sm">
-                          {chamadoFoiAcionado ? 'Acionado' : 'Não Acionado'}
-                        </p>
-                      )}
-                    </div>
-                  </div>
-                </div>
+    observacao = body.get("observacao")
+    pessoa_acionada = body.get("pessoaAcionada")
+    status_acionamento = body.get("statusAcionamento")
+    operador = body.get("operador")
 
-                <div className="bg-gradient-to-r from-accent/10 to-accent/5 border border-accent/20 p-4 rounded-lg">
-                  <div className="flex items-center gap-3">
-                    <div className="p-2 bg-primary/10 rounded-lg">
-                      <CheckCircle2 className="h-4 w-4 text-primary" />
-                    </div>
-                    <div>
-                      <p className="text-xs text-muted-foreground">Status Final</p>
-                      <p className={cn(
-                        "font-semibold text-sm",
-                        isChat ? "text-green-600" : "text-red-600"
-                      )}>
-                        {isChat ? 'Acionado' : 'Não Acionado'}
-                      </p>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
+    update = {f"level{level}_updatedAt": now}  # sempre marca o horário da alteração
 
-            {/* Histórico de Acionamentos*/}
-            <Accordion type="single" collapsible className="w-full">
-              <AccordionItem value="historico" className="border-2 border-border rounded-lg bg-card">
-                <AccordionTrigger className="px-6 py-4 hover:no-underline hover:bg-muted/50 transition-colors">
-                  <div className="flex items-center gap-3">
-                    <History className="h-6 w-6 text-primary" />
-                    <span className="text-xl font-semibold text-foreground">
-                      Histórico de Acionamentos
-                    </span>
-                    <Badge variant="secondary" className="ml-2">
-                      {historicoAcionamentos.length} registro(s)
-                    </Badge>
-                  </div>
-                </AccordionTrigger>
-                <AccordionContent className="px-6 pb-6 pt-2">
-                  {historicoAcionamentos.length > 0 ? (
-                    <div className="relative">
-                      {/* Timeline line */}
-                      <div className="absolute left-6 top-8 bottom-4 w-0.5 bg-gradient-to-b from-primary/30 via-primary/20 to-transparent" />
-                      
-                      <div className="space-y-4">
-                        {[...historicoAcionamentos]
-                          .sort((a, b) => b.nivel - a.nivel)
-                          .map((h, idx) => {
-                            const levelColor = LEVEL_COLORS[h.nivel as keyof typeof LEVEL_COLORS] || LEVEL_COLORS[1];
-                            const StatusIcon = h.status === 'atendido' ? CheckCircle2 : XCircle;
-                            const statusColor = h.status === 'atendido' ? 'text-green-500' : 'text-red-500';
-                            const statusBg = h.status === 'atendido' ? 'bg-green-500/10' : 'bg-red-500/10';
-                            
-                            return (
-                              <div key={idx} className="relative flex gap-4 group">
-                                {/* Timeline node */}
-                                <div className="relative z-10">
-                                  <div className={cn(
-                                    "w-12 h-12 rounded-xl flex items-center justify-center font-bold shadow-sm transition-all duration-200 group-hover:scale-110",
-                                    levelColor.bg,
-                                    levelColor.border,
-                                    levelColor.text,
-                                    "border"
-                                  )}>
-                                    {h.nivel}
-                                  </div>
-                                </div>
+    if observacao is not None:
+        update[f"level{level}_observacao"] = observacao
+    if pessoa_acionada is not None:
+        update[f"level{level}_pessoaAcionada"] = pessoa_acionada
+    if status_acionamento is not None:
+        update[f"level{level}_statusAcionamento"] = status_acionamento
+    if operador is not None:
+        update[f"level{level}_operador"] = operador
 
-                                {/* Content card */}
-                                <div className="flex-1 bg-background rounded-xl border p-5 shadow-sm hover:shadow-md transition-all duration-200 group-hover:border-primary/30">
-                                  {/* Header with operator and status */}
-                                  <div className="flex flex-wrap items-start justify-between gap-4 mb-4">
-                                    <div className="space-y-3 flex-1">
-                                      {/* Operator info */}
-                                      <div className="flex items-center gap-3">
-                                        <div className="p-2 bg-primary/5 rounded-lg">
-                                          <User className="h-4 w-4 text-primary" />
-                                        </div>
-                                        <div>
-                                          <p className="text-xs text-muted-foreground">Operador</p>
-                                          <p className="font-semibold text-sm">{h.operador}</p>
-                                        </div>
-                                      </div>
+    state = update_chamado(trace, chamado, update)
 
-                                      {/* Person contacted */}
-                                      <div className="flex items-center gap-3">
-                                        <div className="p-2 bg-primary/5 rounded-lg">
-                                          <Phone className="h-4 w-4 text-primary" />
-                                        </div>
-                                        <div>
-                                          <p className="text-xs text-muted-foreground">Pessoa Acionada</p>
-                                          <p className="font-semibold text-sm">{h.pessoaAcionada}</p>
-                                        </div>
-                                      </div>
-                                    </div>
+    broadcast({
+        "event": "updateAcionamento",
+        "chamado": chamado,
+        "level": level,
+        "state": state
+    })
+    return {"statusCode": 200, "body": json.dumps({"msg": f"Dados do acionamento do level {level} atualizados"}, cls=DecimalEncoder)}
 
-                                    {/* Status badge */}
-                                    <div className="flex flex-col items-end gap-2">
-                                      <div className={cn(
-                                        "flex items-center gap-2 px-3 py-1.5 rounded-full",
-                                        statusBg
-                                      )}>
-                                        <StatusIcon className={cn("h-4 w-4", statusColor)} />
-                                        <span className={cn("text-sm font-medium capitalize", statusColor)}>
-                                          {h.status === 'atendido' ? 'Atendido' : 'Não Atendido'}
-                                        </span>
-                                      </div>
+def handle_get_state(event, trace, body):
+    chamado = int(body["chamado"])
+    resp = table.get_item(Key={"chamado": chamado})
+    state = resp.get("Item", {})
+    log(trace, "Estado retornado", chamado=chamado, state=state)
 
-                                      {/* Date and time */}
-                                      <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                                        <Calendar className="h-3 w-3" />
-                                        <span>{h.updatedAt}</span>
-                                      </div>
-                                    </div>
-                                  </div>
+    # Enviar resposta padronizada só para o cliente que pediu
+    conn_id = event["requestContext"]["connectionId"]
+    payload = {"event": "getState", "chamado": chamado, "state": state}
+    send_to_connection(conn_id, payload)
+    return {"statusCode": 200, "body": json.dumps({"msg": "Estado enviado"}, cls=DecimalEncoder)}
 
-                                  {/* Observation section */}
-                                  {h.observacao && (
-                                    <div className="mt-4 pt-4 border-t">
-                                      <div className="flex items-start gap-3">
-                                        <div className="p-1.5 bg-muted rounded">
-                                          <MessageSquare className="h-3.5 w-3.5 text-muted-foreground" />
-                                        </div>
-                                        <div className="flex-1">
-                                          <p className="text-xs text-muted-foreground mb-1">Observações</p>
-                                          <p className="text-sm leading-relaxed whitespace-pre-line text-foreground/90">
-                                            {h.observacao}
-                                          </p>
-                                        </div>
-                                      </div>
-                                    </div>
-                                  )}
+# ---------- Main ----------
+def lambda_handler(event, context):
+    trace = str(uuid.uuid4())[:8]
+    req_ctx = event.get("requestContext", {})
+    route = req_ctx.get("routeKey", "UNKNOWN")
+    conn_id = req_ctx.get("connectionId", "N/A")
 
-                                  {/* Level badge */}
-                                  <div className="flex items-center gap-2 mt-4">
-                                    <Badge 
-                                      variant="outline" 
-                                      className={cn(
-                                        "text-xs",
-                                        levelColor.border,
-                                        levelColor.text
-                                      )}
-                                    >
-                                      {LEVEL_INFO[h.nivel as keyof typeof LEVEL_INFO]?.title || `Nível ${h.nivel}`}
-                                    </Badge>
-                                    {idx === 0 && (
-                                      <Badge variant="secondary" className="text-xs">
-                                        Mais recente
-                                      </Badge>
-                                    )}
-                                  </div>
-                                </div>
-                              </div>
-                            );
-                          })}
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="flex flex-col items-center justify-center py-12 space-y-4">
-                      <div className="p-4 bg-muted/50 rounded-full">
-                        <History className="h-8 w-8 text-muted-foreground" />
-                      </div>
-                      <div className="text-center space-y-2">
-                        <h4 className="font-medium text-foreground">Nenhum acionamento registrado</h4>
-                        <p className="text-sm text-muted-foreground max-w-sm">
-                          Os acionamentos realizados para este chamado aparecerão aqui conforme forem executados.
-                        </p>
-                      </div>
-                    </div>
-                  )}
-                </AccordionContent>
-              </AccordionItem>
-            </Accordion>
+    log(trace, "invoke", routeKey=route, connectionId=conn_id, body=event.get("body"))
 
-            {/* Informações Principais */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-              {/* Coluna Esquerda */}
-              <div className="p-6 bg-gradient-to-br from-card to-card/80 rounded-xl border border-border/50 shadow-lg">
-                <div className="space-y-5">
-                  <h3 className="text-xl font-bold text-foreground flex items-center gap-3 border-b border-primary/20 pb-3">
-                    <div className="p-2 rounded-lg bg-primary/10 text-primary">
-                      <Tag className="h-5 w-5" />
-                    </div>
-                    Informações Básicas
-                  </h3>
-
-                  <div className="space-y-4">
-                    <div className="space-y-2">
-                      <span className="text-sm font-semibold text-primary/80 uppercase tracking-wide flex items-center gap-2">
-                        <FileText className="h-4 w-4" />
-                        Número do Chamado
-                      </span>
-                      <div 
-                        className="text-lg font-mono font-bold bg-gradient-to-r from-primary/10 to-primary/5 border border-primary/20 px-4 py-3 rounded-lg cursor-pointer hover:bg-gradient-to-r hover:from-primary/20 hover:to-primary/10 transition-all duration-200"
-                        onClick={() => window.open(alertData.link_chamado, '_blank')}
-                      >
-                        <div className="flex items-center gap-3">
-                          <FileText className="h-5 w-5 text-primary" />
-                          <span className="text-primary hover:underline">{alertData.chamado}</span>
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="space-y-2">
-                      <span className="text-sm font-semibold text-primary/80 uppercase tracking-wide flex items-center gap-2">
-                        <Users className="h-4 w-4" />
-                        Grupo Responsável
-                      </span>
-                      <div className="text-base font-mono font-bold bg-gradient-to-r from-primary/10 to-primary/5 border border-primary/20 px-4 py-3 rounded-lg">
-                        <div className="flex items-center gap-3">
-                          <Users className="h-5 w-5 text-primary" />
-                          {alertData.grupo_chamado}
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="space-y-2">
-                      <span className="text-sm font-semibold text-primary/80 uppercase tracking-wide flex items-center gap-2">
-                        <Tag className="h-4 w-4" />
-                        Classificação
-                      </span>
-                      <div className="text-base font-mono font-bold bg-gradient-to-r from-primary/10 to-primary/5 border border-primary/20 px-4 py-3 rounded-lg">
-                        <div className="flex items-center gap-3">
-                          <Tag className="h-5 w-5 text-primary" />
-                          {alertData.tipo_chamado}
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              {/* Coluna Direita */}
-              <div className="p-6 bg-gradient-to-br from-card to-card/80 rounded-xl border border-border/50 shadow-lg">
-                <div className="space-y-5">
-                  <h3 className="text-xl font-bold text-foreground flex items-center gap-3 border-b border-primary/20 pb-3">
-                    <div className="p-2 rounded-lg bg-primary/10 text-primary">
-                      <Clock className="h-5 w-5" />
-                    </div>
-                    Temporização
-                  </h3>
-
-                  <div className="space-y-4">
-                    <div className="space-y-2">
-                      <span className="text-sm font-semibold text-primary/80 uppercase tracking-wide flex items-center gap-2">
-                        <Calendar className="h-4 w-4" />
-                        Data de Abertura
-                      </span>
-                      <div className="text-base font-mono font-bold bg-gradient-to-r from-primary/10 to-primary/5 border border-primary/20 px-4 py-3 rounded-lg">
-                        <div className="flex items-center gap-3">
-                          <Calendar className="h-5 w-5 text-primary" />
-                          {formatDate(alertData.abertura_chamado)}
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="space-y-2">
-                      <span className="text-sm font-semibold text-primary/80 uppercase tracking-wide flex items-center gap-2">
-                        <Clock className="h-4 w-4" />
-                        Status Atual
-                      </span>
-                      <div className="text-base font-mono font-bold bg-gradient-to-r from-primary/10 to-primary/5 border border-primary/20 px-4 py-3 rounded-lg">
-                        <div className="flex items-center gap-3">
-                          <Clock className="h-5 w-5 text-primary" />
-                          {alertData.status_chamado}
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="space-y-2">
-                      <span className="text-sm font-semibold text-primary/80 uppercase tracking-wide flex items-center gap-2">
-                        <AlertTriangle className="h-4 w-4" />
-                        Severidade
-                      </span>
-                      <div className="text-base font-mono font-bold bg-gradient-to-r from-primary/10 to-primary/5 border border-primary/20 px-4 py-3 rounded-lg">
-                        <div className="flex items-center gap-3">
-                          <AlertTriangle className="h-5 w-5 text-primary" />
-                            {alertData.severidade_chamado}
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            {/* Resumo/Título do Chamado */}
-            <div className="p-6 bg-gradient-to-br from-card to-card/80 rounded-xl border border-border/50 shadow-lg">
-              <h3 className="text-xl font-bold text-foreground flex items-center gap-3 border-b border-primary/20 pb-4 mb-4">
-                <div className="p-2 rounded-lg bg-primary/10 text-primary">
-                  <FileText className="h-5 w-5" />
-                </div>
-                Resumo do Chamado
-              </h3>
-              <div className="bg-gradient-to-r from-accent/10 to-accent/5 border border-accent/20 p-6 rounded-lg">
-                <p className="text-base leading-relaxed text-foreground font-medium">{alertData.resumo_chamado}</p>
-              </div>
-            </div>
-
-          </div>
-        </ScrollArea>
-      </DialogContent>
-    </Dialog>
-  );
-};
-
+    try:
+        if route == "$connect":
+            return handle_connect(event, trace)
+        elif route == "$disconnect":
+            return handle_disconnect(event, trace)
+        else:
+            body = json.loads(event.get("body") or "{}")
+            if route == "startTimer":
+                return handle_start_timer(event, trace, body)
+            elif route == "updateObservacao":
+                return handle_update_observacao(event, trace, body)
+            elif route == "updateOperador":
+                return handle_update_operador(event, trace, body)
+            elif route == "updateStatusFinal":
+                return handle_update_status_final(event, trace, body)
+            elif route == "updateAcionamento":
+                return handle_update_acionamento(event, trace, body)
+            elif route == "getState":
+                return handle_get_state(event, trace, body)
+            else:
+                log(trace, "Rota inválida", route=route)
+                return {"statusCode": 400, "body": json.dumps({"error": "Invalid route"}, cls=DecimalEncoder)}
+    except Exception as e:
+        log(trace, "Erro na execução", error=str(e))
+        return {"statusCode": 500, "body": json.dumps({"error": str(e)}, cls=DecimalEncoder)}
