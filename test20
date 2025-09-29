@@ -1,27 +1,148 @@
-{/* Status do Atendimento */}
-<div className="space-y-3">
-  <Label htmlFor="status-atendimento" className="text-base font-medium flex items-center gap-2">
-    <CheckCircle className="h-4 w-4" />
-    Status do Atendimento
-    <span className="text-destructive">*</span>
-  </Label>
-  <Select
-    value={statusAtendimento}
-    onValueChange={(value) => {
-      console.log("Status selecionado:", value); // 🔹 log de debug
-      setStatusAtendimento(value);
-    }}
-    disabled={isProcessing || finalizado}
-  >
-    <SelectTrigger className={cn(
-      "border-2 focus:border-primary",
-      statusAtendimento && "border-success"
-    )}>
-      <SelectValue placeholder="Selecione o status do atendimento" />
-    </SelectTrigger>
-    <SelectContent>
-      <SelectItem value="atendido">✅ Atendido</SelectItem>
-      <SelectItem value="nao-atendido">❌ Não Atendido</SelectItem>
-    </SelectContent>
-  </Select>
-</div>
+import json
+import boto3
+import os
+from botocore.exceptions import ClientError
+from datetime import datetime
+
+# DynamoDB para dados de chamados
+dynamodb = boto3.client('dynamodb')
+TABLE_NAME = os.environ.get('TABLE_NAME', 'painelciops_chatacionados')
+
+# DynamoDB para conexões WebSocket
+dynamodb_resource = boto3.resource("dynamodb")
+conn_table = dynamodb_resource.Table(os.environ["CONNECTIONS_TABLE"])
+
+# Endpoint do API Gateway WebSocket (coloque no env var)
+WEBSOCKET_ENDPOINT = os.environ["WEBSOCKET_ENDPOINT"]
+
+CORS_HEADERS = {
+    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Headers': '*',
+    'Content-Type': 'application/json'
+}
+
+
+def lambda_handler(event, context):
+    method = event.get('httpMethod')  # REST API (v1)
+    if not method:
+        method = event.get("requestContext", {}).get("http", {}).get("method")  # HTTP API (v2)
+
+    print("Método recebido:", method)
+
+    if method == 'OPTIONS':
+        # Pré-voo CORS
+        return {
+            'statusCode': 200,
+            'headers': CORS_HEADERS,
+            'body': json.dumps({'message': 'CORS OK'})
+        }
+
+    if method == 'GET':
+        return listar_acionados()
+
+    elif method == 'POST':
+        return marcar_acionado(event)
+
+    return {
+        'statusCode': 405,
+        'headers': CORS_HEADERS,
+        'body': json.dumps({'message': 'Método não permitido'})
+    }
+
+
+def listar_acionados():
+    try:
+        response = dynamodb.scan(TableName=TABLE_NAME)
+        items = response.get('Items', [])
+        result = [
+            {
+                'chamado': int(item['chamado']['N']),
+                'timestamp': item['timestamp']['S']
+            } for item in items
+        ]
+        return {
+            'statusCode': 200,
+            'headers': CORS_HEADERS,
+            'body': json.dumps(result)
+        }
+
+    except ClientError as e:
+        return {
+            'statusCode': 500,
+            'headers': CORS_HEADERS,
+            'body': json.dumps({'message': 'Erro ao buscar dados', 'error': str(e)})
+        }
+
+
+def marcar_acionado(event):
+    try:
+        body = json.loads(event.get('body', '{}'))
+        numero_chamado = body.get('chamado')
+
+        if numero_chamado is None:
+            return {
+                'statusCode': 400,
+                'headers': CORS_HEADERS,
+                'body': json.dumps({'message': 'chamado é obrigatório'})
+            }
+
+        timestamp = datetime.utcnow().isoformat()
+
+        dynamodb.put_item(
+            TableName=TABLE_NAME,
+            Item={
+                'chamado': {'N': str(numero_chamado)},
+                'timestamp': {'S': timestamp}
+            },
+            ConditionExpression='attribute_not_exists(chamado)'
+        )
+
+        # 🔥 Dispara atualização para WebSocket
+        payload = {
+            "action": "updateChat",  # rota WebSocket
+            "data": {
+                "chamado": numero_chamado,
+                "timestamp": timestamp
+            }
+        }
+        enviar_para_websocket(payload)
+
+        return {
+            'statusCode': 200,
+            'headers': CORS_HEADERS,
+            'body': json.dumps({'message': 'Incidente acionado com sucesso'})
+        }
+
+    except ClientError as e:
+        if e.response['Error']['Code'] == 'ConditionalCheckFailedException':
+            return {
+                'statusCode': 409,
+                'headers': CORS_HEADERS,
+                'body': json.dumps({'message': 'Incidente já foi acionado'})
+            }
+        return {
+            'statusCode': 500,
+            'headers': CORS_HEADERS,
+            'body': json.dumps({'message': 'Erro ao salvar', 'error': str(e)})
+        }
+
+
+def enviar_para_websocket(payload):
+    client = boto3.client(
+        "apigatewaymanagementapi",
+        endpoint_url=WEBSOCKET_ENDPOINT
+    )
+
+    connections = conn_table.scan().get("Items", [])
+
+    for conn in connections:
+        connection_id = conn["connectionId"]
+        try:
+            client.post_to_connection(
+                Data=json.dumps(payload).encode("utf-8"),
+                ConnectionId=connection_id
+            )
+        except ClientError as e:
+            if e.response["Error"]["Code"] == "GoneException":
+                # conexão inválida -> remover da tabela
+                conn_table.delete_item(Key={"connectionId": connection_id})
