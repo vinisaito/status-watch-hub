@@ -4,133 +4,77 @@ import os
 from botocore.exceptions import ClientError
 from datetime import datetime
 
-# DynamoDB para dados de chamados
-dynamodb = boto3.client('dynamodb')
-TABLE_NAME = os.environ.get('TABLE_NAME', 'painelmonitoracao_acompanhamento')
+dynamodb = boto3.client("dynamodb")
+TABLE_NAME = os.environ.get("TABLE_NAME", "painelmonitoracao_acompanhamento")
 
-# DynamoDB para conexões WebSocket
 dynamodb_resource = boto3.resource("dynamodb")
 conn_table = dynamodb_resource.Table(os.environ["CONNECTIONS_TABLE"])
-
-# Endpoint do API Gateway WebSocket (coloque no env var)
 WEBSOCKET_ENDPOINT = os.environ["WEBSOCKET_ENDPOINT"]
-
-CORS_HEADERS = {
-    'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Headers': '*',
-    'Content-Type': 'application/json'
-}
 
 
 def lambda_handler(event, context):
-    method = event.get('httpMethod')  
-    if not method:
-        method = event.get("requestContext", {}).get("http", {}).get("method") 
+    print("==== EVENTO RECEBIDO ====")
+    print(json.dumps(event))
 
-    print("Método recebido:", method)
+    route_key = event.get("requestContext", {}).get("routeKey")
+    connection_id = event.get("requestContext", {}).get("connectionId")
+    print(f"Rota recebida: {route_key} | ConnectionId: {connection_id}")
 
-    if method == 'OPTIONS':
-        # Pré-voo CORS
-        return {
-            'statusCode': 200,
-            'headers': CORS_HEADERS,
-            'body': json.dumps({'message': 'CORS OK'})
-        }
+    if route_key == "$connect":
+        conn_table.put_item(Item={"connectionId": connection_id})
+        return {"statusCode": 200}
 
-    if method == 'GET':
-        return listar_acionados()
+    if route_key == "$disconnect":
+        conn_table.delete_item(Key={"connectionId": connection_id})
+        return {"statusCode": 200}
 
-    elif method == 'POST':
+    if route_key == "updateChat":
         return marcar_acionado(event)
 
     return {
-        'statusCode': 405,
-        'headers': CORS_HEADERS,
-        'body': json.dumps({'message': 'Método não permitido'})
+        "statusCode": 400,
+        "body": json.dumps({"message": f"Rota não suportada: {route_key}"})
     }
-
-
-def listar_acionados():
-    try:
-        response = dynamodb.scan(TableName=TABLE_NAME)
-        items = response.get('Items', [])
-        result = [
-            {
-                'chamado': int(item['chamado']['N']),
-                'timestamp_chat': item['timestamp_chat']['S']
-            } for item in items
-        ]
-        return {
-            'statusCode': 200,
-            'headers': CORS_HEADERS,
-            'body': json.dumps(result)
-        }
-
-    except ClientError as e:
-        return {
-            'statusCode': 500,
-            'headers': CORS_HEADERS,
-            'body': json.dumps({'message': 'Erro ao buscar dados', 'error': str(e)})
-        }
 
 
 def marcar_acionado(event):
     try:
-        body = json.loads(event.get('body', '{}'))
-        numero_chamado = body.get('chamado')
+        body_raw = event.get("body", "{}")
+        print(f"Body recebido: {body_raw}")
+        body = json.loads(body_raw)
 
+        numero_chamado = body.get("chamado")
         if numero_chamado is None:
-            return {
-                'statusCode': 400,
-                'headers': CORS_HEADERS,
-                'body': json.dumps({'message': 'chamado é obrigatório'})
-            }
+            return {"statusCode": 400, "body": json.dumps({"message": "chamado é obrigatório"})}
 
         timestamp_chat = datetime.utcnow().isoformat()
 
         dynamodb.put_item(
             TableName=TABLE_NAME,
             Item={
-                'chamado': {'N': str(numero_chamado)},
-                'timestamp_chat': {'S': timestamp_chat}
+                "chamado": {"N": str(numero_chamado)},
+                "timestamp_chat": {"S": timestamp_chat}
             },
-            ConditionExpression='attribute_not_exists(chamado)'
+            ConditionExpression="attribute_not_exists(chamado)"
         )
 
-        # 🔥 Dispara atualização para WebSocket
         payload = {
-            "action": "updateChat",  # rota WebSocket
+            "action": "updateChat",
             "chamado": numero_chamado,
             "timestamp_chat": timestamp_chat
         }
         enviar_para_websocket(payload)
 
-        return {
-            'statusCode': 200,
-            'headers': CORS_HEADERS,
-            'body': json.dumps({'message': 'Incidente acionado com sucesso'})
-        }
+        return {"statusCode": 200, "body": json.dumps(payload)}
 
     except ClientError as e:
-        if e.response['Error']['Code'] == 'ConditionalCheckFailedException':
-            return {
-                'statusCode': 409,
-                'headers': CORS_HEADERS,
-                'body': json.dumps({'message': 'Incidente já foi acionado'})
-            }
-        return {
-            'statusCode': 500,
-            'headers': CORS_HEADERS,
-            'body': json.dumps({'message': 'Erro ao salvar', 'error': str(e)})
-        }
+        if e.response["Error"]["Code"] == "ConditionalCheckFailedException":
+            return {"statusCode": 409, "body": json.dumps({"message": "Incidente já foi acionado"})}
+        return {"statusCode": 500, "body": json.dumps({"error": str(e)})}
 
 
 def enviar_para_websocket(payload):
-    client = boto3.client(
-        "apigatewaymanagementapi",
-        endpoint_url=WEBSOCKET_ENDPOINT
-    )
-
+    client = boto3.client("apigatewaymanagementapi", endpoint_url=WEBSOCKET_ENDPOINT)
     connections = conn_table.scan().get("Items", [])
 
     for conn in connections:
@@ -142,5 +86,4 @@ def enviar_para_websocket(payload):
             )
         except ClientError as e:
             if e.response["Error"]["Code"] == "GoneException":
-                # conexão inválida -> remover da tabela
                 conn_table.delete_item(Key={"connectionId": connection_id})
