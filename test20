@@ -1,99 +1,38 @@
-import json
-import boto3
-import os
-from botocore.exceptions import ClientError
-from datetime import datetime
-
-# DynamoDB para conexões WebSocket
-dynamodb = boto3.resource("dynamodb")
-conn_table = dynamodb.Table(os.environ["CONNECTIONS_TABLE"])
-
-# DynamoDB para dados de chamados
-ddb_client = boto3.client("dynamodb")
-TABLE_NAME = os.environ["TABLE_NAME"]
-
-# Endpoint do API Gateway WebSocket
-WEBSOCKET_ENDPOINT = os.environ["WEBSOCKET_ENDPOINT"]
-
-
-def lambda_handler(event, context):
-    print("Evento recebido:", json.dumps(event))
-
-    # Identifica a rota chamada no WebSocket
-    route_key = event.get("requestContext", {}).get("routeKey")
-
-    # Trata apenas a rota updateChat
-    if route_key == "updateChat":
-        return handle_update_chat(event)
-
-    # Rota de conexão
-    if route_key == "$connect":
-        return {"statusCode": 200, "body": "Conectado com sucesso"}
-
-    # Rota de desconexão
-    if route_key == "$disconnect":
-        return {"statusCode": 200, "body": "Desconectado com sucesso"}
-
-    # Outras rotas
-    return {"statusCode": 200, "body": "OK"}
-
-
-def handle_update_chat(event):
-    try:
-        body = json.loads(event.get("body", "{}"))
-        numero_chamado = body.get("chamado")
-
-        if not numero_chamado:
-            return {"statusCode": 400, "body": json.dumps({"message": "chamado é obrigatório"})}
-
-        timestamp_chat = datetime.utcnow().isoformat()
-
-        # Salva no DynamoDB (tabela de chamados)
-        try:
-            ddb_client.put_item(
-                TableName=TABLE_NAME,
-                Item={
-                    "chamado": {"N": str(numero_chamado)},
-                    "timestamp_chat": {"S": timestamp_chat}
-                },
-                ConditionExpression="attribute_not_exists(chamado)"
-            )
-        except ClientError as e:
-            if e.response["Error"]["Code"] == "ConditionalCheckFailedException":
-                return {"statusCode": 409, "body": json.dumps({"message": "Incidente já foi acionado"})}
-            else:
-                raise
-
-        # Prepara payload para broadcast
-        payload = {
-            "action": "updateChat",
-            "chamado": numero_chamado,
-            "timestamp_chat": timestamp_chat
+{
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Sid": "DynamoDBChamados",
+            "Effect": "Allow",
+            "Action": [
+                "dynamodb:PutItem",
+                "dynamodb:GetItem",
+                "dynamodb:Scan",
+                "dynamodb:UpdateItem",
+                "dynamodb:DeleteItem"
+            ],
+            "Resource": [
+                "arn:aws:dynamodb:<REGION>:<ACCOUNT_ID>:table/<TABLE_NAME>",
+                "arn:aws:dynamodb:<REGION>:<ACCOUNT_ID>:table/<CONNECTIONS_TABLE>"
+            ]
+        },
+        {
+            "Sid": "APIGatewayWebSocket",
+            "Effect": "Allow",
+            "Action": [
+                "execute-api:ManageConnections"
+            ],
+            "Resource": "arn:aws:execute-api:<REGION>:<ACCOUNT_ID>:<API_ID>/*/@connections/*"
+        },
+        {
+            "Sid": "CloudWatchLogs",
+            "Effect": "Allow",
+            "Action": [
+                "logs:CreateLogGroup",
+                "logs:CreateLogStream",
+                "logs:PutLogEvents"
+            ],
+            "Resource": "*"
         }
-
-        # Envia para todos os WebSocket conectados
-        enviar_para_websocket(payload)
-
-        return {"statusCode": 200, "body": json.dumps({"message": "Incidente acionado com sucesso"})}
-
-    except Exception as e:
-        print("Erro no handle_update_chat:", str(e))
-        return {"statusCode": 500, "body": json.dumps({"message": "Erro interno", "error": str(e)})}
-
-
-def enviar_para_websocket(payload):
-    client = boto3.client("apigatewaymanagementapi", endpoint_url=WEBSOCKET_ENDPOINT)
-
-    connections = conn_table.scan().get("Items", [])
-
-    for conn in connections:
-        connection_id = conn["connectionId"]
-        try:
-            client.post_to_connection(
-                Data=json.dumps(payload).encode("utf-8"),
-                ConnectionId=connection_id
-            )
-        except ClientError as e:
-            if e.response["Error"]["Code"] == "GoneException":
-                # conexão inválida -> remover da tabela
-                conn_table.delete_item(Key={"connectionId": connection_id})
+    ]
+}
