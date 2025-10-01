@@ -4,8 +4,16 @@ import os
 from botocore.exceptions import ClientError
 from datetime import datetime
 
+# DynamoDB para dados de chamados
 dynamodb = boto3.client('dynamodb')
-TABLE_NAME = os.environ.get('TABLE_NAME', 'painelciops_chatacionados')
+TABLE_NAME = os.environ.get('TABLE_NAME', 'painelmonitoracao_acompanhamento')
+
+# DynamoDB para conexões WebSocket
+dynamodb_resource = boto3.resource("dynamodb")
+conn_table = dynamodb_resource.Table(os.environ["CONNECTIONS_TABLE"])
+
+# Endpoint do API Gateway WebSocket (coloque no env var)
+WEBSOCKET_ENDPOINT = os.environ["WEBSOCKET_ENDPOINT"]
 
 CORS_HEADERS = {
     'Access-Control-Allow-Origin': '*',
@@ -14,12 +22,11 @@ CORS_HEADERS = {
 }
 
 
-
 def lambda_handler(event, context):
-    method = event.get('httpMethod')  # REST API (v1)
+    method = event.get('httpMethod')  
     if not method:
-        method = event.get("requestContext", {}).get("http", {}).get("method")  # HTTP API (v2)
-    
+        method = event.get("requestContext", {}).get("http", {}).get("method") 
+
     print("Método recebido:", method)
 
     if method == 'OPTIONS':
@@ -42,6 +49,7 @@ def lambda_handler(event, context):
         'body': json.dumps({'message': 'Método não permitido'})
     }
 
+
 def listar_acionados():
     try:
         response = dynamodb.scan(TableName=TABLE_NAME)
@@ -49,7 +57,7 @@ def listar_acionados():
         result = [
             {
                 'chamado': int(item['chamado']['N']),
-                'timestamp': item['timestamp']['S']
+                'timestamp_chat': item['timestamp_chat']['S']
             } for item in items
         ]
         return {
@@ -65,6 +73,7 @@ def listar_acionados():
             'body': json.dumps({'message': 'Erro ao buscar dados', 'error': str(e)})
         }
 
+
 def marcar_acionado(event):
     try:
         body = json.loads(event.get('body', '{}'))
@@ -77,16 +86,24 @@ def marcar_acionado(event):
                 'body': json.dumps({'message': 'chamado é obrigatório'})
             }
 
-        timestamp = datetime.utcnow().isoformat()
+        timestamp_chat = datetime.utcnow().isoformat()
 
         dynamodb.put_item(
             TableName=TABLE_NAME,
             Item={
                 'chamado': {'N': str(numero_chamado)},
-                'timestamp': {'S': timestamp}
+                'timestamp_chat': {'S': timestamp_chat}
             },
             ConditionExpression='attribute_not_exists(chamado)'
         )
+
+        # 🔥 Dispara atualização para WebSocket
+        payload = {
+            "action": "updateChat",  # rota WebSocket
+            "chamado": numero_chamado,
+            "timestamp_chat": timestamp_chat
+        }
+        enviar_para_websocket(payload)
 
         return {
             'statusCode': 200,
@@ -106,3 +123,24 @@ def marcar_acionado(event):
             'headers': CORS_HEADERS,
             'body': json.dumps({'message': 'Erro ao salvar', 'error': str(e)})
         }
+
+
+def enviar_para_websocket(payload):
+    client = boto3.client(
+        "apigatewaymanagementapi",
+        endpoint_url=WEBSOCKET_ENDPOINT
+    )
+
+    connections = conn_table.scan().get("Items", [])
+
+    for conn in connections:
+        connection_id = conn["connectionId"]
+        try:
+            client.post_to_connection(
+                Data=json.dumps(payload).encode("utf-8"),
+                ConnectionId=connection_id
+            )
+        except ClientError as e:
+            if e.response["Error"]["Code"] == "GoneException":
+                # conexão inválida -> remover da tabela
+                conn_table.delete_item(Key={"connectionId": connection_id})
