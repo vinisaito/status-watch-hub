@@ -44,8 +44,12 @@ def marcar_acionado(event):
         body = json.loads(body_raw)
 
         numero_chamado = body.get("chamado")
+        sending_chat = body.get("sending_chat")  # 🔥 novo campo
+
         if numero_chamado is None:
             return {"statusCode": 400, "body": json.dumps({"message": "chamado é obrigatório"})}
+        if sending_chat is None:
+            return {"statusCode": 400, "body": json.dumps({"message": "sending_chat é obrigatório"})}
 
         timestamp_chat = datetime.utcnow().isoformat()
 
@@ -53,7 +57,8 @@ def marcar_acionado(event):
             TableName=TABLE_NAME,
             Item={
                 "chamado": {"N": str(numero_chamado)},
-                "timestamp_chat": {"S": timestamp_chat}
+                "timestamp_chat": {"S": timestamp_chat},
+                "sending_chat": {"S": str(sending_chat)}  # 🔥 novo atributo
             },
             ConditionExpression="attribute_not_exists(chamado)"
         )
@@ -61,7 +66,8 @@ def marcar_acionado(event):
         payload = {
             "action": "updateChat",
             "chamado": numero_chamado,
-            "timestamp_chat": timestamp_chat
+            "timestamp_chat": timestamp_chat,
+            "sending_chat": sending_chat  # 🔥 enviado também para clientes conectados
         }
         enviar_para_websocket(payload)
 
