@@ -15,87 +15,65 @@ export const RDMNode = forwardRef<HTMLDivElement, RDMNodeProps>(
   const getStatusIcon = () => {
     switch (rdm.status) {
       case 'executed':
-        return <CheckCircle2 className="w-4 h-4" />;
+        return <CheckCircle2 className="w-3.5 h-3.5" />;
       case 'failed':
-        return <XCircle className="w-4 h-4" />;
+        return <XCircle className="w-3.5 h-3.5" />;
       case 'pending':
-        return <Clock className="w-4 h-4" />;
+        return <Clock className="w-3.5 h-3.5" />;
     }
   };
 
-  const getStatusColor = () => {
+  const getStatusStyles = () => {
     switch (rdm.status) {
       case 'executed':
-        return 'bg-green-100 border-green-300 text-green-600';
+        return 'bg-success-light border-success text-success';
       case 'failed':
-        return 'bg-red-100 border-red-300 text-red-600';
+        return 'bg-destructive-light border-destructive text-destructive';
       case 'pending':
-        return 'bg-background border-muted-foreground text-muted-foreground';
+        return 'bg-timeline-node border-timeline-pending text-timeline-pending';
     }
   };
 
   return (
     <div className="relative flex flex-col items-center gap-2 group">
-      {/* First/Last indicators - acima do círculo */}
-      {isFirst && (
-        <div className="absolute -top-8 text-xs font-semibold px-2 py-1 rounded bg-card border border-border" style={{ color: color }}>
-          Início
-        </div>
-      )}
-      {isLast && (
-        <div className="absolute -top-8 text-xs font-semibold px-2 py-1 rounded bg-card border border-border" style={{ color: color }}>
-          Fim
+      {/* Indicadores Início/Fim - simplificados */}
+      {(isFirst || isLast) && (
+        <div className="absolute -top-6 text-[10px] font-medium text-muted-foreground">
+          {isFirst ? 'Início' : 'Fim'}
         </div>
       )}
 
-      {/* Node Circle - linha passa por dentro */}
+      {/* Node Circle - menor e mais limpo */}
       <div className="relative z-10" ref={ref}>
         <div 
           className={cn(
-            "w-14 h-14 rounded-full border-4 flex items-center justify-center",
-            "transition-all duration-300 cursor-pointer",
-            "hover:scale-110 hover:shadow-lg",
-            getStatusColor()
+            "w-10 h-10 rounded-full border-2 flex items-center justify-center",
+            "transition-all duration-200",
+            "hover:scale-105",
+            getStatusStyles()
           )}
-          style={{ 
-            borderColor: rdm.status === 'pending' ? color : undefined,
-            boxShadow: rdm.status === 'executed' ? `0 4px 12px rgba(34, 197, 94, 0.2)` : 
-                       rdm.status === 'failed' ? `0 4px 12px rgba(239, 68, 68, 0.2)` : undefined
-          }}
         >
           {getStatusIcon()}
         </div>
-        
-        {/* Pulse animation for pending */}
-        {rdm.status === 'pending' && (
-          <div 
-            className="absolute inset-0 rounded-full animate-ping opacity-20"
-            style={{ backgroundColor: color }}
-          />
-        )}
       </div>
 
-      {/* Info Box - abaixo do círculo para não sobrepor linha */}
-      <div className="flex flex-col items-center gap-1 mt-2">
+      {/* Info - mais compacta */}
+      <div className="flex flex-col items-center gap-0.5">
         <div 
-          className="font-bold text-xs px-2 py-1 rounded-full whitespace-nowrap shadow-sm"
-          style={{ 
-            backgroundColor: `${color}25`,
-            color: color
-          }}
+          className="font-semibold text-[11px] text-foreground"
         >
           {rdm.number}
         </div>
-        <div className="text-xs font-medium text-muted-foreground bg-card px-2 py-0.5 rounded border border-border shadow-sm">
+        <div className="text-[10px] text-muted-foreground">
           {rdm.time}
         </div>
       </div>
 
-      {/* Hover tooltip */}
+      {/* Tooltip simplificado */}
       {rdm.description && (
-        <div className="absolute top-full mt-20 opacity-0 group-hover:opacity-100 transition-opacity duration-200 z-20 pointer-events-none group-hover:pointer-events-auto">
-          <div className="bg-card border border-border rounded-lg p-3 shadow-lg min-w-[180px] max-w-[250px]">
-            <p className="text-xs text-foreground">{rdm.description}</p>
+        <div className="absolute top-full mt-16 opacity-0 group-hover:opacity-100 transition-opacity duration-200 z-20 pointer-events-none">
+          <div className="bg-card border border-border rounded-lg p-2.5 shadow-lg min-w-[160px] max-w-[220px]">
+            <p className="text-[11px] text-foreground leading-relaxed">{rdm.description}</p>
           </div>
         </div>
       )}
