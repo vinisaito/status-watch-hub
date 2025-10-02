@@ -1,95 +1,208 @@
-import json
-import boto3
-import os
-from botocore.exceptions import ClientError
-from datetime import datetime
+import { Card } from "@/components/ui/card";
+import { RDMTimeline } from "./RDMTimeline";
+import { mockProductLines } from "@/data/mockData";
+import { Calendar, CheckCircle2, XCircle, Clock, Loader, Ban } from "lucide-react";
 
-dynamodb = boto3.client("dynamodb")
-TABLE_NAME = os.environ.get("TABLE_NAME", "painelmonitoracao_acompanhamento")
+export const Dashboard = () => {
+  const yesterday = new Date();
+  yesterday.setDate(yesterday.getDate() - 1);
 
-dynamodb_resource = boto3.resource("dynamodb")
-conn_table = dynamodb_resource.Table(os.environ["CONNECTIONS_TABLE"])
-WEBSOCKET_ENDPOINT = os.environ["WEBSOCKET_ENDPOINT"]
-
-
-def lambda_handler(event, context):
-    print("==== EVENTO RECEBIDO ====")
-    print(json.dumps(event))
-
-    route_key = event.get("requestContext", {}).get("routeKey")
-    connection_id = event.get("requestContext", {}).get("connectionId")
-    print(f"Rota recebida: {route_key} | ConnectionId: {connection_id}")
-
-    if route_key == "$connect":
-        conn_table.put_item(Item={"connectionId": connection_id})
-        return {"statusCode": 200}
-
-    if route_key == "$disconnect":
-        conn_table.delete_item(Key={"connectionId": connection_id})
-        return {"statusCode": 200}
-
-    if route_key == "updateChat":
-        return marcar_acionado(event)
-
-    return {
-        "statusCode": 400,
-        "body": json.dumps({"message": f"Rota não suportada: {route_key}"})
+  const products = [
+    {
+      name: "AZUL PORTO",
+      rgb: "0 | 161 | 252",
+      hex: "#00a1fc",
+      bgColor: "bg-[#00a1fc]",
+      textColor: "text-white"
+    },
+    {
+      name: "AZUL ESCURO",
+      rgb: "0 | 70 | 192",
+      hex: "#0046c0",
+      bgColor: "bg-[#0046c0]",
+      textColor: "text-white"
+    },
+    {
+      name: "WHITE",
+      rgb: "235 | 241 | 238",
+      hex: "#eff1ef",
+      bgColor: "bg-[#eff1ef]",
+      textColor: "text-gray-800",
+      border: true
+    },
+    {
+      name: "BRANCO",
+      rgb: "255 | 255 | 255",
+      hex: "#ffffff",
+      bgColor: "bg-white",
+      textColor: "text-gray-800",
+      border: true
+    },
+    {
+      name: "PRETO",
+      rgb: "0 | 0 | 0",
+      hex: "#000000",
+      bgColor: "bg-black",
+      textColor: "text-white"
+    },
+    {
+      name: "CINZA ESCURO",
+      rgb: "64 | 64 | 64",
+      hex: "#404040",
+      bgColor: "bg-[#404040]",
+      textColor: "text-white"
+    },
+    {
+      name: "CINZA",
+      rgb: "128 | 128 | 128",
+      hex: "#808080",
+      bgColor: "bg-[#808080]",
+      textColor: "text-white"
+    },
+    {
+      name: "CINZA CLARO",
+      rgb: "192 | 192 | 192",
+      hex: "#c0c0c0",
+      bgColor: "bg-[#c0c0c0]",
+      textColor: "text-gray-800"
     }
+  ];
 
+  const totalRDMs = mockProductLines.reduce((acc, line) => acc + line.rdms.length, 0);
+  const executedRDMs = mockProductLines.reduce(
+    (acc, line) => acc + line.rdms.filter(rdm => rdm.status === 'executed').length, 
+    0
+  );
+  const failedRDMs = mockProductLines.reduce(
+    (acc, line) => acc + line.rdms.filter(rdm => rdm.status === 'failed').length, 
+    0
+  );
 
-def marcar_acionado(event):
-    try:
-        body_raw = event.get("body", "{}")
-        print(f"Body recebido: {body_raw}")
-        body = json.loads(body_raw)
+  return (
+    <div className="min-h-screen bg-background">
+      {/* Logo and Product Colors Section */}
+      <div className="border-b bg-card shadow-sm py-12">
+        <div className="container mx-auto px-6">
+          <div className="relative max-w-7xl mx-auto">
+            {/* Logo + connector lines */}
+            <div className="relative flex justify-center">
+              {/* Centered logo */}
+              <img
+                src="/porto.svg"
+                alt="Porto"
+                className="h-10 md:h-12 select-none"
+                draggable={false}
+              />
+              {/* Vertical line from logo bottom center */}
+              <div
+                className="absolute left-1/2 top-full -translate-x-1/2 h-12 w-px bg-gray-300"
+                aria-hidden="true"
+              />
+            </div>
 
-        numero_chamado = body.get("chamado")
-        sending_chat = body.get("sending_chat")  # 🔥 novo campo
+            {/* Horizontal line that connects to products */}
+            <div className="relative h-8 mt-12">
+              <div className="absolute left-0 right-0 top-0 mx-[6%] md:mx-[4%] lg:mx-[2%] h-px bg-gray-300" aria-hidden="true" />
+            </div>
 
-        if numero_chamado is None:
-            return {"statusCode": 400, "body": json.dumps({"message": "chamado é obrigatório"})}
-        if sending_chat is None:
-            return {"statusCode": 400, "body": json.dumps({"message": "sending_chat é obrigatório"})}
+            {/* 8 Product Color Squares */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-4 relative z-10">
+              {products.map((product, index) => (
+                <div 
+                  key={index} 
+                  className="flex flex-col items-center animate-fade-in relative"
+                  style={{ animationDelay: `${index * 0.1}s` }}
+                >
+                  {/* small vertical connector from horizontal line to center top of product box */}
+                  <div className="absolute -top-8 left-1/2 -translate-x-1/2 h-8 w-px bg-gray-300" aria-hidden="true" />
+                  <div 
+                    className={`w-full aspect-square rounded-lg ${product.bgColor} ${product.border ? 'border-2 border-gray-300' : ''} flex flex-col items-center justify-center p-4 shadow-md hover:shadow-lg transition-all hover:-translate-y-1`}
+                  >
+                    <span className={`text-xs font-bold ${product.textColor} text-center mb-2`}>
+                      {product.name}
+                    </span>
+                    <span className={`text-[10px] ${product.textColor} opacity-80 text-center`}>
+                      RGB {product.rgb}
+                    </span>
+                    <span className={`text-[10px] ${product.textColor} opacity-80 text-center mt-1`}>
+                      HEX {product.hex}
+                    </span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
 
-        timestamp_chat = datetime.utcnow().isoformat()
+      {/* Rest of Dashboard */}
+      <div className="container mx-auto px-6 py-6">
 
-        dynamodb.put_item(
-            TableName=TABLE_NAME,
-            Item={
-                "chamado": {"N": str(numero_chamado)},
-                "timestamp_chat": {"S": timestamp_chat},
-                "sending_chat": {"S": str(sending_chat)}  # 🔥 novo atributo
-            },
-            ConditionExpression="attribute_not_exists(chamado)"
-        )
+        {/* Quick Stats */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+          <Card className="p-4">
+            <div className="text-sm text-muted-foreground">Total de RDMs</div>
+            <div className="text-2xl font-bold mt-1">{totalRDMs}</div>
+          </Card>
+          <Card className="p-4">
+            <div className="text-sm text-muted-foreground">Executadas</div>
+            <div className="text-2xl font-bold mt-1 text-success">{executedRDMs}</div>
+          </Card>
+          <Card className="p-4">
+            <div className="text-sm text-muted-foreground">Falhas</div>
+            <div className="text-2xl font-bold mt-1 text-destructive">{failedRDMs}</div>
+          </Card>
+        </div>
 
-        payload = {
-            "action": "updateChat",
-            "chamado": numero_chamado,
-            "timestamp_chat": timestamp_chat,
-            "sending_chat": sending_chat  # 🔥 enviado também para clientes conectados
-        }
-        enviar_para_websocket(payload)
+        {/* Legend */}
+        <Card className="p-4 mb-6 shadow-sm">
+          <h3 className="text-sm font-semibold mb-3">Legenda</h3>
+          <div className="flex flex-wrap gap-6">
+            <div className="flex items-center gap-2">
+              <div className="w-8 h-8 rounded-full border-4 border-success/30 bg-success/10 flex items-center justify-center">
+                <CheckCircle2 className="w-4 h-4 text-success" />
+              </div>
+              <span className="text-sm">Executada</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <div className="w-8 h-8 rounded-full border-4 border-destructive/30 bg-destructive/10 flex items-center justify-center">
+                <XCircle className="w-4 h-4 text-destructive" />
+              </div>
+              <span className="text-sm">Falha</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <div className="w-8 h-8 rounded-full border-4 border-muted-foreground/30 bg-muted flex items-center justify-center">
+                <Clock className="w-4 h-4 text-muted-foreground" />
+              </div>
+              <span className="text-sm">Pendente</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <div className="w-8 h-8 rounded-full border-4 border-warning/30 bg-warning/10 flex items-center justify-center">
+                <Loader className="w-4 h-4 text-warning" />
+              </div>
+              <span className="text-sm">Em Andamento</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <div className="w-8 h-8 rounded-full border-4 border-muted-foreground/20 bg-muted/50 flex items-center justify-center">
+                <Ban className="w-4 h-4 text-muted-foreground" />
+              </div>
+              <span className="text-sm">Cancelada</span>
+            </div>
+          </div>
+        </Card>
 
-        return {"statusCode": 200, "body": json.dumps(payload)}
-
-    except ClientError as e:
-        if e.response["Error"]["Code"] == "ConditionalCheckFailedException":
-            return {"statusCode": 409, "body": json.dumps({"message": "Incidente já foi acionado"})}
-        return {"statusCode": 500, "body": json.dumps({"error": str(e)})}
-
-
-def enviar_para_websocket(payload):
-    client = boto3.client("apigatewaymanagementapi", endpoint_url=WEBSOCKET_ENDPOINT)
-    connections = conn_table.scan().get("Items", [])
-
-    for conn in connections:
-        connection_id = conn["connectionId"]
-        try:
-            client.post_to_connection(
-                Data=json.dumps(payload).encode("utf-8"),
-                ConnectionId=connection_id
-            )
-        except ClientError as e:
-            if e.response["Error"]["Code"] == "GoneException":
-                conn_table.delete_item(Key={"connectionId": connection_id})
+        {/* Timeline Section */}
+        <section>
+          <h2 className="text-xl font-semibold mb-6">Linha do Tempo das RDMs por Produto</h2>
+          <div className="space-y-6">
+            {mockProductLines.map((productLine) => (
+              <Card key={productLine.id} className="p-4 shadow-sm hover:shadow-md transition-shadow">
+                <RDMTimeline productLine={productLine} />
+              </Card>
+            ))}
+          </div>
+        </section>
+      </div>
+    </div>
+  );
+};
