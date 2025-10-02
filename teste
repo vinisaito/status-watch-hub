@@ -1,126 +1,106 @@
-import React, { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { ProductLine } from "@/types/rdm";
-import { RDMNode } from "./RDMNode";
-import { ProductSummary } from "./ProductSummary";
+import React, { forwardRef } from "react";
+import { RDM } from "@/types/rdm";
+import { CheckCircle2, XCircle, Clock } from "lucide-react";
+import { cn } from "@/lib/utils";
 
-interface RDMTimelineProps {
-  productLine: ProductLine;
+interface RDMNodeProps {
+  rdm: RDM;
+  color: string;
+  isFirst?: boolean;
+  isLast?: boolean;
 }
 
-export const RDMTimeline = ({ productLine }: RDMTimelineProps) => {
-  const nodesPerRow = 8; // Quantidade de RDMs por linha
-  const rows = Math.ceil(productLine.rdms.length / nodesPerRow);
-  const containerRef = useRef<HTMLDivElement | null>(null);
-  const svgRef = useRef<SVGSVGElement | null>(null);
-  const nodeRefs = useRef<Array<HTMLDivElement | null>>([]);
-  const [linePositions, setLinePositions] = useState<
-    Array<{ x1: number; y1: number; x2: number; y2: number }>
-  >([]);
-
-  // Ensure refs array has correct length
-  if (nodeRefs.current.length !== productLine.rdms.length) {
-    nodeRefs.current = Array(productLine.rdms.length).fill(null);
-  }
-
-  // Calculate center positions after layout
-  const recalcPositions = () => {
-    if (!containerRef.current) return;
-    const containerRect = containerRef.current.getBoundingClientRect();
-    const positions: Array<{ x: number; y: number; ok: boolean }> = nodeRefs.current.map((el) => {
-      if (!el) return { x: 0, y: 0, ok: false };
-      const rect = el.getBoundingClientRect();
-      return {
-        x: rect.left - containerRect.left + rect.width / 2,
-        y: rect.top - containerRect.top + rect.height / 2,
-        ok: rect.width > 0 && rect.height > 0,
-      };
-    });
-
-    const lines: Array<{ x1: number; y1: number; x2: number; y2: number }> = [];
-    for (let i = 0; i < positions.length - 1; i++) {
-      const p1 = positions[i];
-      const p2 = positions[i + 1];
-      if (p1.ok && p2.ok) {
-        lines.push({ x1: p1.x, y1: p1.y, x2: p2.x, y2: p2.y });
-      }
+export const RDMNode = forwardRef<HTMLDivElement, RDMNodeProps>(
+  ({ rdm, color, isFirst, isLast }: RDMNodeProps, ref) => {
+  const getStatusIcon = () => {
+    switch (rdm.status) {
+      case 'executed':
+        return <CheckCircle2 className="w-4 h-4" />;
+      case 'failed':
+        return <XCircle className="w-4 h-4" />;
+      case 'pending':
+        return <Clock className="w-4 h-4" />;
     }
-    setLinePositions(lines);
   };
 
-  useLayoutEffect(() => {
-    recalcPositions();
-    // Recalculate on resize to keep alignment
-    const onResize = () => recalcPositions();
-    window.addEventListener("resize", onResize);
-    return () => window.removeEventListener("resize", onResize);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [productLine.rdms.length, nodesPerRow]);
-  
+  const getStatusColor = () => {
+    switch (rdm.status) {
+      case 'executed':
+        return 'bg-green-100 border-green-300 text-green-600';
+      case 'failed':
+        return 'bg-red-100 border-red-300 text-red-600';
+      case 'pending':
+        return 'bg-background border-muted-foreground text-muted-foreground';
+    }
+  };
+
   return (
-    <div className="mb-12 last:mb-0">
-      <div className="mb-6">
-        <h3 className="text-lg font-semibold text-foreground">{productLine.name}</h3>
-      </div>
-      
-      <div className="relative w-full mb-4" ref={containerRef}>
-        <svg
-          ref={svgRef}
-          className="absolute inset-0 w-full h-full pointer-events-none"
-          style={{ zIndex: 0 }}
-        >
-          {linePositions.map((pos, index) => (
-            <line
-              key={`line-${index}`}
-              x1={pos.x1}
-              y1={pos.y1}
-              x2={pos.x2}
-              y2={pos.y2}
-              stroke={productLine.color}
-              strokeWidth={4}
-              strokeLinecap="round"
-            />
-          ))}
-        </svg>
-        
-        {/* Grid de RDMs */}
+    <div className="relative flex flex-col items-center gap-2 group">
+      {/* First/Last indicators - acima do círculo */}
+      {isFirst && (
+        <div className="absolute -top-8 text-xs font-semibold px-2 py-1 rounded bg-card border border-border" style={{ color: color }}>
+          Início
+        </div>
+      )}
+      {isLast && (
+        <div className="absolute -top-8 text-xs font-semibold px-2 py-1 rounded bg-card border border-border" style={{ color: color }}>
+          Fim
+        </div>
+      )}
+
+      {/* Node Circle - linha passa por dentro */}
+      <div className="relative z-10" ref={ref}>
         <div 
-          className="relative grid gap-x-4 gap-y-8 py-8"
+          className={cn(
+            "w-14 h-14 rounded-full border-4 flex items-center justify-center",
+            "transition-all duration-300 cursor-pointer",
+            "hover:scale-110 hover:shadow-lg",
+            getStatusColor()
+          )}
           style={{ 
-            gridTemplateColumns: `repeat(${nodesPerRow}, 1fr)`,
-            minHeight: `${rows * 140}px`,
-            zIndex: 1
+            borderColor: rdm.status === 'pending' ? color : undefined,
+            boxShadow: rdm.status === 'executed' ? `0 4px 12px rgba(34, 197, 94, 0.2)` : 
+                       rdm.status === 'failed' ? `0 4px 12px rgba(239, 68, 68, 0.2)` : undefined
           }}
         >
-          {productLine.rdms.map((rdm, index) => {
-            const row = Math.floor(index / nodesPerRow);
-            const col = index % nodesPerRow;
-            const isRightToLeft = row % 2 === 1;
-            const gridCol = isRightToLeft ? nodesPerRow - col : col + 1;
-            
-            return (
-              <div
-                key={rdm.id}
-                style={{
-                  gridColumn: gridCol,
-                  gridRow: row + 1
-                }}
-                className="flex justify-center"
-              >
-                <RDMNode
-                  ref={(el) => (nodeRefs.current[index] = el)}
-                  rdm={rdm}
-                  color={productLine.color}
-                  isFirst={index === 0}
-                  isLast={index === productLine.rdms.length - 1}
-                />
-              </div>
-            );
-          })}
+          {getStatusIcon()}
+        </div>
+        
+        {/* Pulse animation for pending */}
+        {rdm.status === 'pending' && (
+          <div 
+            className="absolute inset-0 rounded-full animate-ping opacity-20"
+            style={{ backgroundColor: color }}
+          />
+        )}
+      </div>
+
+      {/* Info Box - abaixo do círculo para não sobrepor linha */}
+      <div className="flex flex-col items-center gap-1 mt-2">
+        <div 
+          className="font-bold text-xs px-2 py-1 rounded-full whitespace-nowrap shadow-sm"
+          style={{ 
+            backgroundColor: `${color}25`,
+            color: color
+          }}
+        >
+          {rdm.number}
+        </div>
+        <div className="text-xs font-medium text-muted-foreground bg-card px-2 py-0.5 rounded border border-border shadow-sm">
+          {rdm.time}
         </div>
       </div>
 
-      {/* Status Final do Produto */}
-      <ProductSummary productLine={productLine} />
+      {/* Hover tooltip */}
+      {rdm.description && (
+        <div className="absolute top-full mt-20 opacity-0 group-hover:opacity-100 transition-opacity duration-200 z-20 pointer-events-none group-hover:pointer-events-auto">
+          <div className="bg-card border border-border rounded-lg p-3 shadow-lg min-w-[180px] max-w-[250px]">
+            <p className="text-xs text-foreground">{rdm.description}</p>
+          </div>
+        </div>
+      )}
     </div>
   );
-};
+});
+
+RDMNode.displayName = "RDMNode";
