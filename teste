@@ -1,89 +1,125 @@
-import json
-import boto3
-import os
-from botocore.exceptions import ClientError
-from datetime import datetime
+import { Card } from "@/components/ui/card";
+import { RDMTimeline } from "./RDMTimeline";
+import { mockProductLines } from "@/data/mockData";
+import { Calendar, TrendingUp, CheckCircle, XCircle, CheckCircle2, Clock } from "lucide-react";
 
-dynamodb = boto3.client("dynamodb")
-TABLE_NAME = os.environ.get("TABLE_NAME", "painelmonitoracao_acompanhamento")
+export const Dashboard = () => {
+  const yesterday = new Date();
+  yesterday.setDate(yesterday.getDate() - 1);
+  
+  const totalRDMs = mockProductLines.reduce((acc, line) => acc + line.rdms.length, 0);
+  const executedRDMs = mockProductLines.reduce(
+    (acc, line) => acc + line.rdms.filter(rdm => rdm.status === 'executed').length, 
+    0
+  );
+  const failedRDMs = mockProductLines.reduce(
+    (acc, line) => acc + line.rdms.filter(rdm => rdm.status === 'failed').length, 
+    0
+  );
+  const executionRate = ((executedRDMs / totalRDMs) * 100).toFixed(1);
 
-dynamodb_resource = boto3.resource("dynamodb")
-conn_table = dynamodb_resource.Table(os.environ["CONNECTIONS_TABLE"])
-WEBSOCKET_ENDPOINT = os.environ["WEBSOCKET_ENDPOINT"]
+  return (
+    <div className="min-h-screen bg-background">
+      {/* Header */}
+      <header className="border-b bg-card">
+        <div className="container mx-auto px-6 py-6">
+          <div className="flex items-center justify-between">
+            <div>
+              <h1 className="text-3xl font-bold bg-gradient-to-r from-primary to-accent bg-clip-text text-transparent">
+                Gestão de RDMs
+              </h1>
+              <p className="text-sm text-muted-foreground mt-1 flex items-center gap-2">
+                <Calendar className="w-4 h-4" />
+                Relatório do dia {yesterday.toLocaleDateString('pt-BR')}
+              </p>
+            </div>
+          </div>
+        </div>
+      </header>
 
+      {/* Stats Cards */}
+      <div className="container mx-auto px-6 py-6">
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
+          <Card className="p-4 border-l-4 border-l-primary">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm text-muted-foreground">Total de RDMs</p>
+                <p className="text-2xl font-bold mt-1">{totalRDMs}</p>
+              </div>
+              <TrendingUp className="w-8 h-8 text-primary opacity-20" />
+            </div>
+          </Card>
 
-def lambda_handler(event, context):
-    print("==== EVENTO RECEBIDO ====")
-    print(json.dumps(event))
+          <Card className="p-4 border-l-4 border-l-green-500">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm text-muted-foreground">Executadas</p>
+                <p className="text-2xl font-bold mt-1 text-green-600">{executedRDMs}</p>
+              </div>
+              <CheckCircle className="w-8 h-8 text-green-600 opacity-20" />
+            </div>
+          </Card>
 
-    route_key = event.get("requestContext", {}).get("routeKey")
-    connection_id = event.get("requestContext", {}).get("connectionId")
-    print(f"Rota recebida: {route_key} | ConnectionId: {connection_id}")
+          <Card className="p-4 border-l-4 border-l-red-500">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm text-muted-foreground">Falhas</p>
+                <p className="text-2xl font-bold mt-1 text-red-600">{failedRDMs}</p>
+              </div>
+              <XCircle className="w-8 h-8 text-red-600 opacity-20" />
+            </div>
+          </Card>
 
-    if route_key == "$connect":
-        conn_table.put_item(Item={"connectionId": connection_id})
-        return {"statusCode": 200}
+          <Card className="p-4 border-l-4 border-l-accent">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm text-muted-foreground">Taxa de Execução</p>
+                <p className="text-2xl font-bold mt-1 text-accent">{executionRate}%</p>
+              </div>
+              <div className="w-8 h-8 rounded-full bg-accent/20 flex items-center justify-center text-accent font-bold">
+                %
+              </div>
+            </div>
+          </Card>
+        </div>
 
-    if route_key == "$disconnect":
-        conn_table.delete_item(Key={"connectionId": connection_id})
-        return {"statusCode": 200}
+        {/* Legend */}
+        <Card className="p-4 mb-6">
+          <h3 className="text-sm font-semibold mb-3">Legenda</h3>
+          <div className="flex flex-wrap gap-6">
+            <div className="flex items-center gap-2">
+              <div className="w-8 h-8 rounded-full border-4 border-green-300 bg-green-100 flex items-center justify-center">
+                <CheckCircle2 className="w-4 h-4 text-green-600" />
+              </div>
+              <span className="text-sm">Executada</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <div className="w-8 h-8 rounded-full border-4 border-red-300 bg-red-100 flex items-center justify-center">
+                <XCircle className="w-4 h-4 text-red-600" />
+              </div>
+              <span className="text-sm">Falha</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <div className="w-8 h-8 rounded-full border-4 border-muted-foreground bg-background flex items-center justify-center">
+                <Clock className="w-4 h-4 text-muted-foreground" />
+              </div>
+              <span className="text-sm">Pendente</span>
+            </div>
+          </div>
+        </Card>
 
-    if route_key == "updateChat":
-        return marcar_acionado(event)
-
-    return {
-        "statusCode": 400,
-        "body": json.dumps({"message": f"Rota não suportada: {route_key}"})
-    }
-
-
-def marcar_acionado(event):
-    try:
-        body_raw = event.get("body", "{}")
-        print(f"Body recebido: {body_raw}")
-        body = json.loads(body_raw)
-
-        numero_chamado = body.get("chamado")
-        if numero_chamado is None:
-            return {"statusCode": 400, "body": json.dumps({"message": "chamado é obrigatório"})}
-
-        timestamp_chat = datetime.utcnow().isoformat()
-
-        dynamodb.put_item(
-            TableName=TABLE_NAME,
-            Item={
-                "chamado": {"N": str(numero_chamado)},
-                "timestamp_chat": {"S": timestamp_chat}
-            },
-            ConditionExpression="attribute_not_exists(chamado)"
-        )
-
-        payload = {
-            "action": "updateChat",
-            "chamado": numero_chamado,
-            "timestamp_chat": timestamp_chat
-        }
-        enviar_para_websocket(payload)
-
-        return {"statusCode": 200, "body": json.dumps(payload)}
-
-    except ClientError as e:
-        if e.response["Error"]["Code"] == "ConditionalCheckFailedException":
-            return {"statusCode": 409, "body": json.dumps({"message": "Incidente já foi acionado"})}
-        return {"statusCode": 500, "body": json.dumps({"error": str(e)})}
-
-
-def enviar_para_websocket(payload):
-    client = boto3.client("apigatewaymanagementapi", endpoint_url=WEBSOCKET_ENDPOINT)
-    connections = conn_table.scan().get("Items", [])
-
-    for conn in connections:
-        connection_id = conn["connectionId"]
-        try:
-            client.post_to_connection(
-                Data=json.dumps(payload).encode("utf-8"),
-                ConnectionId=connection_id
-            )
-        except ClientError as e:
-            if e.response["Error"]["Code"] == "GoneException":
-                conn_table.delete_item(Key={"connectionId": connection_id})
+        {/* Timeline Section */}
+        <section className="">
+          <h2 className="text-xl font-semibold mb-6">Linha do Tempo das RDMs por Produto</h2>
+          <div className="space-y-6">
+            {mockProductLines.map((productLine) => (
+              <Card key={productLine.id} className="p-4">
+                <RDMTimeline productLine={productLine} />
+              </Card>
+            ))}
+          </div>
+        </section>
+      </div>
+    </div>
+  );
+};
