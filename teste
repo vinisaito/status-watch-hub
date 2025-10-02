@@ -1,12 +1,73 @@
 import { Card } from "@/components/ui/card";
 import { RDMTimeline } from "./RDMTimeline";
 import { mockProductLines } from "@/data/mockData";
-import { Calendar, TrendingUp, CheckCircle, XCircle, CheckCircle2, Clock } from "lucide-react";
+import { Calendar, CheckCircle2, XCircle, Clock, Loader, Ban } from "lucide-react";
 
 export const Dashboard = () => {
   const yesterday = new Date();
   yesterday.setDate(yesterday.getDate() - 1);
   
+  const products = [
+    {
+      name: "AZUL PORTO",
+      rgb: "0 | 161 | 252",
+      hex: "#00a1fc",
+      bgColor: "bg-[#00a1fc]",
+      textColor: "text-white"
+    },
+    {
+      name: "AZUL ESCURO",
+      rgb: "0 | 70 | 192",
+      hex: "#0046c0",
+      bgColor: "bg-[#0046c0]",
+      textColor: "text-white"
+    },
+    {
+      name: "WHITE",
+      rgb: "235 | 241 | 238",
+      hex: "#eff1ef",
+      bgColor: "bg-[#eff1ef]",
+      textColor: "text-gray-800",
+      border: true
+    },
+    {
+      name: "BRANCO",
+      rgb: "255 | 255 | 255",
+      hex: "#ffffff",
+      bgColor: "bg-white",
+      textColor: "text-gray-800",
+      border: true
+    },
+    {
+      name: "PRETO",
+      rgb: "0 | 0 | 0",
+      hex: "#000000",
+      bgColor: "bg-black",
+      textColor: "text-white"
+    },
+    {
+      name: "CINZA ESCURO",
+      rgb: "64 | 64 | 64",
+      hex: "#404040",
+      bgColor: "bg-[#404040]",
+      textColor: "text-white"
+    },
+    {
+      name: "CINZA",
+      rgb: "128 | 128 | 128",
+      hex: "#808080",
+      bgColor: "bg-[#808080]",
+      textColor: "text-white"
+    },
+    {
+      name: "CINZA CLARO",
+      rgb: "192 | 192 | 192",
+      hex: "#c0c0c0",
+      bgColor: "bg-[#c0c0c0]",
+      textColor: "text-gray-800"
+    }
+  ];
+
   const totalRDMs = mockProductLines.reduce((acc, line) => acc + line.rdms.length, 0);
   const executedRDMs = mockProductLines.reduce(
     (acc, line) => acc + line.rdms.filter(rdm => rdm.status === 'executed').length, 
@@ -16,104 +77,153 @@ export const Dashboard = () => {
     (acc, line) => acc + line.rdms.filter(rdm => rdm.status === 'failed').length, 
     0
   );
-  const executionRate = ((executedRDMs / totalRDMs) * 100).toFixed(1);
 
   return (
     <div className="min-h-screen bg-background">
-      {/* Header */}
-      <header className="border-b bg-card">
-        <div className="container mx-auto px-6 py-6">
-          <div className="flex items-center justify-between">
-            <div>
-              <h1 className="text-3xl font-bold bg-gradient-to-r from-primary to-accent bg-clip-text text-transparent">
-                Gestão de RDMs
-              </h1>
-              <p className="text-sm text-muted-foreground mt-1 flex items-center gap-2">
-                <Calendar className="w-4 h-4" />
-                Relatório do dia {yesterday.toLocaleDateString('pt-BR')}
-              </p>
+      {/* Logo and Product Colors Section */}
+      <div className="border-b bg-card shadow-sm py-12">
+        <div className="container mx-auto px-6">
+          <div className="relative max-w-7xl mx-auto">
+            {/* Logo */}
+            <div className="text-center mb-12 relative z-10">
+              <div className="inline-block bg-card px-8 py-4 rounded-lg shadow-sm border-2 border-primary/20">
+                <h1 className="text-5xl font-bold text-primary mb-0">Porto</h1>
+              </div>
+            </div>
+
+            {/* SVG Lines connecting logo to products */}
+            <svg className="absolute inset-0 w-full h-full pointer-events-none" style={{ zIndex: 1 }}>
+              {/* Horizontal line from logo */}
+              <line
+                x1="10%"
+                y1="22%"
+                x2="90%"
+                y2="22%"
+                stroke="hsl(var(--border))"
+                strokeWidth="2"
+                className="animate-fade-in"
+              />
+              
+              {/* Vertical lines from horizontal to each product */}
+              {products.map((_, index) => {
+                const cols = 8; // lg:grid-cols-8
+                const productX = ((index + 0.5) / cols) * 80 + 10; // 10% offset from left
+                
+                return (
+                  <line
+                    key={index}
+                    x1={`${productX}%`}
+                    y1="22%"
+                    x2={`${productX}%`}
+                    y2="52%"
+                    stroke="hsl(var(--border))"
+                    strokeWidth="2"
+                    className="animate-fade-in"
+                    style={{ animationDelay: `${index * 0.05}s` }}
+                  />
+                );
+              })}
+            </svg>
+
+            {/* 8 Product Color Squares */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-4 relative z-10 mt-16">
+              {products.map((product, index) => (
+                <div 
+                  key={index} 
+                  className="flex flex-col items-center animate-fade-in"
+                  style={{ animationDelay: `${index * 0.1}s` }}
+                >
+                  <div 
+                    className={`w-full aspect-square rounded-lg ${product.bgColor} ${product.border ? 'border-2 border-gray-300' : ''} flex flex-col items-center justify-center p-4 shadow-md hover:shadow-lg transition-all hover:-translate-y-1`}
+                  >
+                    <span className={`text-xs font-bold ${product.textColor} text-center mb-2`}>
+                      {product.name}
+                    </span>
+                    <span className={`text-[10px] ${product.textColor} opacity-80 text-center`}>
+                      RGB {product.rgb}
+                    </span>
+                    <span className={`text-[10px] ${product.textColor} opacity-80 text-center mt-1`}>
+                      HEX {product.hex}
+                    </span>
+                  </div>
+                </div>
+              ))}
             </div>
           </div>
         </div>
-      </header>
+      </div>
 
-      {/* Stats Cards */}
+      {/* Rest of Dashboard */}
       <div className="container mx-auto px-6 py-6">
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
-          <Card className="p-4 border-l-4 border-l-primary">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm text-muted-foreground">Total de RDMs</p>
-                <p className="text-2xl font-bold mt-1">{totalRDMs}</p>
-              </div>
-              <TrendingUp className="w-8 h-8 text-primary opacity-20" />
-            </div>
-          </Card>
+        <div className="flex items-center justify-between mb-6">
+          <div>
+            <h2 className="text-2xl font-bold">Gestão de RDMs</h2>
+            <p className="text-sm text-muted-foreground mt-1 flex items-center gap-2">
+              <Calendar className="w-4 h-4" />
+              Relatório do dia {yesterday.toLocaleDateString('pt-BR')}
+            </p>
+          </div>
+        </div>
 
-          <Card className="p-4 border-l-4 border-l-green-500">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm text-muted-foreground">Executadas</p>
-                <p className="text-2xl font-bold mt-1 text-green-600">{executedRDMs}</p>
-              </div>
-              <CheckCircle className="w-8 h-8 text-green-600 opacity-20" />
-            </div>
+        {/* Quick Stats */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+          <Card className="p-4">
+            <div className="text-sm text-muted-foreground">Total de RDMs</div>
+            <div className="text-2xl font-bold mt-1">{totalRDMs}</div>
           </Card>
-
-          <Card className="p-4 border-l-4 border-l-red-500">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm text-muted-foreground">Falhas</p>
-                <p className="text-2xl font-bold mt-1 text-red-600">{failedRDMs}</p>
-              </div>
-              <XCircle className="w-8 h-8 text-red-600 opacity-20" />
-            </div>
+          <Card className="p-4">
+            <div className="text-sm text-muted-foreground">Executadas</div>
+            <div className="text-2xl font-bold mt-1 text-success">{executedRDMs}</div>
           </Card>
-
-          <Card className="p-4 border-l-4 border-l-accent">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm text-muted-foreground">Taxa de Execução</p>
-                <p className="text-2xl font-bold mt-1 text-accent">{executionRate}%</p>
-              </div>
-              <div className="w-8 h-8 rounded-full bg-accent/20 flex items-center justify-center text-accent font-bold">
-                %
-              </div>
-            </div>
+          <Card className="p-4">
+            <div className="text-sm text-muted-foreground">Falhas</div>
+            <div className="text-2xl font-bold mt-1 text-destructive">{failedRDMs}</div>
           </Card>
         </div>
 
         {/* Legend */}
-        <Card className="p-4 mb-6">
+        <Card className="p-4 mb-6 shadow-sm">
           <h3 className="text-sm font-semibold mb-3">Legenda</h3>
           <div className="flex flex-wrap gap-6">
             <div className="flex items-center gap-2">
-              <div className="w-8 h-8 rounded-full border-4 border-green-300 bg-green-100 flex items-center justify-center">
-                <CheckCircle2 className="w-4 h-4 text-green-600" />
+              <div className="w-8 h-8 rounded-full border-4 border-success/30 bg-success/10 flex items-center justify-center">
+                <CheckCircle2 className="w-4 h-4 text-success" />
               </div>
               <span className="text-sm">Executada</span>
             </div>
             <div className="flex items-center gap-2">
-              <div className="w-8 h-8 rounded-full border-4 border-red-300 bg-red-100 flex items-center justify-center">
-                <XCircle className="w-4 h-4 text-red-600" />
+              <div className="w-8 h-8 rounded-full border-4 border-destructive/30 bg-destructive/10 flex items-center justify-center">
+                <XCircle className="w-4 h-4 text-destructive" />
               </div>
               <span className="text-sm">Falha</span>
             </div>
             <div className="flex items-center gap-2">
-              <div className="w-8 h-8 rounded-full border-4 border-muted-foreground bg-background flex items-center justify-center">
+              <div className="w-8 h-8 rounded-full border-4 border-muted-foreground/30 bg-muted flex items-center justify-center">
                 <Clock className="w-4 h-4 text-muted-foreground" />
               </div>
               <span className="text-sm">Pendente</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <div className="w-8 h-8 rounded-full border-4 border-warning/30 bg-warning/10 flex items-center justify-center">
+                <Loader className="w-4 h-4 text-warning" />
+              </div>
+              <span className="text-sm">Em Andamento</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <div className="w-8 h-8 rounded-full border-4 border-muted-foreground/20 bg-muted/50 flex items-center justify-center">
+                <Ban className="w-4 h-4 text-muted-foreground" />
+              </div>
+              <span className="text-sm">Cancelada</span>
             </div>
           </div>
         </Card>
 
         {/* Timeline Section */}
-        <section className="">
+        <section>
           <h2 className="text-xl font-semibold mb-6">Linha do Tempo das RDMs por Produto</h2>
           <div className="space-y-6">
             {mockProductLines.map((productLine) => (
-              <Card key={productLine.id} className="p-4">
+              <Card key={productLine.id} className="p-4 shadow-sm hover:shadow-md transition-shadow">
                 <RDMTimeline productLine={productLine} />
               </Card>
             ))}
