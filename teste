@@ -1,235 +1,126 @@
-import { Card } from "@/components/ui/card";
-import { RDMTimeline } from "./RDMTimeline";
-import { mockProductLines } from "@/data/mockData";
-import { Calendar, CheckCircle2, XCircle, Clock, Loader, Ban } from "lucide-react";
+import React, { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { ProductLine } from "@/types/rdm";
+import { RDMNode } from "./RDMNode";
+import { ProductSummary } from "./ProductSummary";
 
-export const Dashboard = () => {
-  const yesterday = new Date();
-  yesterday.setDate(yesterday.getDate() - 1);
-  
-  const products = [
-    {
-      name: "AZUL PORTO",
-      rgb: "0 | 161 | 252",
-      hex: "#00a1fc",
-      bgColor: "bg-[#00a1fc]",
-      textColor: "text-white"
-    },
-    {
-      name: "AZUL ESCURO",
-      rgb: "0 | 70 | 192",
-      hex: "#0046c0",
-      bgColor: "bg-[#0046c0]",
-      textColor: "text-white"
-    },
-    {
-      name: "WHITE",
-      rgb: "235 | 241 | 238",
-      hex: "#eff1ef",
-      bgColor: "bg-[#eff1ef]",
-      textColor: "text-gray-800",
-      border: true
-    },
-    {
-      name: "BRANCO",
-      rgb: "255 | 255 | 255",
-      hex: "#ffffff",
-      bgColor: "bg-white",
-      textColor: "text-gray-800",
-      border: true
-    },
-    {
-      name: "PRETO",
-      rgb: "0 | 0 | 0",
-      hex: "#000000",
-      bgColor: "bg-black",
-      textColor: "text-white"
-    },
-    {
-      name: "CINZA ESCURO",
-      rgb: "64 | 64 | 64",
-      hex: "#404040",
-      bgColor: "bg-[#404040]",
-      textColor: "text-white"
-    },
-    {
-      name: "CINZA",
-      rgb: "128 | 128 | 128",
-      hex: "#808080",
-      bgColor: "bg-[#808080]",
-      textColor: "text-white"
-    },
-    {
-      name: "CINZA CLARO",
-      rgb: "192 | 192 | 192",
-      hex: "#c0c0c0",
-      bgColor: "bg-[#c0c0c0]",
-      textColor: "text-gray-800"
+interface RDMTimelineProps {
+  productLine: ProductLine;
+}
+
+export const RDMTimeline = ({ productLine }: RDMTimelineProps) => {
+  const nodesPerRow = 8; // Quantidade de RDMs por linha
+  const rows = Math.ceil(productLine.rdms.length / nodesPerRow);
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const svgRef = useRef<SVGSVGElement | null>(null);
+  const nodeRefs = useRef<Array<HTMLDivElement | null>>([]);
+  const [linePositions, setLinePositions] = useState<
+    Array<{ x1: number; y1: number; x2: number; y2: number }>
+  >([]);
+
+  // Ensure refs array has correct length
+  if (nodeRefs.current.length !== productLine.rdms.length) {
+    nodeRefs.current = Array(productLine.rdms.length).fill(null);
+  }
+
+  // Calculate center positions after layout
+  const recalcPositions = () => {
+    if (!containerRef.current) return;
+    const containerRect = containerRef.current.getBoundingClientRect();
+    const positions: Array<{ x: number; y: number; ok: boolean }> = nodeRefs.current.map((el) => {
+      if (!el) return { x: 0, y: 0, ok: false };
+      const rect = el.getBoundingClientRect();
+      return {
+        x: rect.left - containerRect.left + rect.width / 2,
+        y: rect.top - containerRect.top + rect.height / 2,
+        ok: rect.width > 0 && rect.height > 0,
+      };
+    });
+
+    const lines: Array<{ x1: number; y1: number; x2: number; y2: number }> = [];
+    for (let i = 0; i < positions.length - 1; i++) {
+      const p1 = positions[i];
+      const p2 = positions[i + 1];
+      if (p1.ok && p2.ok) {
+        lines.push({ x1: p1.x, y1: p1.y, x2: p2.x, y2: p2.y });
+      }
     }
-  ];
+    setLinePositions(lines);
+  };
 
-  const totalRDMs = mockProductLines.reduce((acc, line) => acc + line.rdms.length, 0);
-  const executedRDMs = mockProductLines.reduce(
-    (acc, line) => acc + line.rdms.filter(rdm => rdm.status === 'executed').length, 
-    0
-  );
-  const failedRDMs = mockProductLines.reduce(
-    (acc, line) => acc + line.rdms.filter(rdm => rdm.status === 'failed').length, 
-    0
-  );
-
+  useLayoutEffect(() => {
+    recalcPositions();
+    // Recalculate on resize to keep alignment
+    const onResize = () => recalcPositions();
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [productLine.rdms.length, nodesPerRow]);
+  
   return (
-    <div className="min-h-screen bg-background">
-      {/* Logo and Product Colors Section */}
-      <div className="border-b bg-card shadow-sm py-12">
-        <div className="container mx-auto px-6">
-          <div className="relative max-w-7xl mx-auto">
-            {/* Logo */}
-            <div className="text-center mb-12 relative z-10">
-              <div className="inline-block bg-card px-8 py-4 rounded-lg shadow-sm border-2 border-primary/20">
-                <h1 className="text-5xl font-bold text-primary mb-0">Porto</h1>
+    <div className="mb-12 last:mb-0">
+      <div className="mb-6">
+        <h3 className="text-lg font-semibold text-foreground">{productLine.name}</h3>
+      </div>
+      
+      <div className="relative w-full mb-4" ref={containerRef}>
+        <svg
+          ref={svgRef}
+          className="absolute inset-0 w-full h-full pointer-events-none"
+          style={{ zIndex: 0 }}
+        >
+          {linePositions.map((pos, index) => (
+            <line
+              key={`line-${index}`}
+              x1={pos.x1}
+              y1={pos.y1}
+              x2={pos.x2}
+              y2={pos.y2}
+              stroke={productLine.color}
+              strokeWidth={4}
+              strokeLinecap="round"
+            />
+          ))}
+        </svg>
+        
+        {/* Grid de RDMs */}
+        <div 
+          className="relative grid gap-x-4 gap-y-8 py-8"
+          style={{ 
+            gridTemplateColumns: `repeat(${nodesPerRow}, 1fr)`,
+            minHeight: `${rows * 140}px`,
+            zIndex: 1
+          }}
+        >
+          {productLine.rdms.map((rdm, index) => {
+            const row = Math.floor(index / nodesPerRow);
+            const col = index % nodesPerRow;
+            const isRightToLeft = row % 2 === 1;
+            const gridCol = isRightToLeft ? nodesPerRow - col : col + 1;
+            
+            return (
+              <div
+                key={rdm.id}
+                style={{
+                  gridColumn: gridCol,
+                  gridRow: row + 1
+                }}
+                className="flex justify-center"
+              >
+                <RDMNode
+                  ref={(el) => (nodeRefs.current[index] = el)}
+                  rdm={rdm}
+                  color={productLine.color}
+                  isFirst={index === 0}
+                  isLast={index === productLine.rdms.length - 1}
+                />
               </div>
-            </div>
-
-            {/* SVG Lines connecting logo to products */}
-            <svg className="absolute inset-0 w-full h-full pointer-events-none" style={{ zIndex: 1 }}>
-              {/* Horizontal line from logo */}
-              <line
-                x1="10%"
-                y1="22%"
-                x2="90%"
-                y2="22%"
-                stroke="hsl(var(--border))"
-                strokeWidth="2"
-                className="animate-fade-in"
-              />
-              
-              {/* Vertical lines from horizontal to each product */}
-              {products.map((_, index) => {
-                const cols = 8; // lg:grid-cols-8
-                const productX = ((index + 0.5) / cols) * 80 + 10; // 10% offset from left
-                
-                return (
-                  <line
-                    key={index}
-                    x1={`${productX}%`}
-                    y1="22%"
-                    x2={`${productX}%`}
-                    y2="52%"
-                    stroke="hsl(var(--border))"
-                    strokeWidth="2"
-                    className="animate-fade-in"
-                    style={{ animationDelay: `${index * 0.05}s` }}
-                  />
-                );
-              })}
-            </svg>
-
-            {/* 8 Product Color Squares */}
-            <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-4 relative z-10 mt-16">
-              {products.map((product, index) => (
-                <div 
-                  key={index} 
-                  className="flex flex-col items-center animate-fade-in"
-                  style={{ animationDelay: `${index * 0.1}s` }}
-                >
-                  <div 
-                    className={`w-full aspect-square rounded-lg ${product.bgColor} ${product.border ? 'border-2 border-gray-300' : ''} flex flex-col items-center justify-center p-4 shadow-md hover:shadow-lg transition-all hover:-translate-y-1`}
-                  >
-                    <span className={`text-xs font-bold ${product.textColor} text-center mb-2`}>
-                      {product.name}
-                    </span>
-                    <span className={`text-[10px] ${product.textColor} opacity-80 text-center`}>
-                      RGB {product.rgb}
-                    </span>
-                    <span className={`text-[10px] ${product.textColor} opacity-80 text-center mt-1`}>
-                      HEX {product.hex}
-                    </span>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
+            );
+          })}
         </div>
       </div>
 
-      {/* Rest of Dashboard */}
-      <div className="container mx-auto px-6 py-6">
-        <div className="flex items-center justify-between mb-6">
-          <div>
-            <h2 className="text-2xl font-bold">Gestão de RDMs</h2>
-            <p className="text-sm text-muted-foreground mt-1 flex items-center gap-2">
-              <Calendar className="w-4 h-4" />
-              Relatório do dia {yesterday.toLocaleDateString('pt-BR')}
-            </p>
-          </div>
-        </div>
-
-        {/* Quick Stats */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-          <Card className="p-4">
-            <div className="text-sm text-muted-foreground">Total de RDMs</div>
-            <div className="text-2xl font-bold mt-1">{totalRDMs}</div>
-          </Card>
-          <Card className="p-4">
-            <div className="text-sm text-muted-foreground">Executadas</div>
-            <div className="text-2xl font-bold mt-1 text-success">{executedRDMs}</div>
-          </Card>
-          <Card className="p-4">
-            <div className="text-sm text-muted-foreground">Falhas</div>
-            <div className="text-2xl font-bold mt-1 text-destructive">{failedRDMs}</div>
-          </Card>
-        </div>
-
-        {/* Legend */}
-        <Card className="p-4 mb-6 shadow-sm">
-          <h3 className="text-sm font-semibold mb-3">Legenda</h3>
-          <div className="flex flex-wrap gap-6">
-            <div className="flex items-center gap-2">
-              <div className="w-8 h-8 rounded-full border-4 border-success/30 bg-success/10 flex items-center justify-center">
-                <CheckCircle2 className="w-4 h-4 text-success" />
-              </div>
-              <span className="text-sm">Executada</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <div className="w-8 h-8 rounded-full border-4 border-destructive/30 bg-destructive/10 flex items-center justify-center">
-                <XCircle className="w-4 h-4 text-destructive" />
-              </div>
-              <span className="text-sm">Falha</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <div className="w-8 h-8 rounded-full border-4 border-muted-foreground/30 bg-muted flex items-center justify-center">
-                <Clock className="w-4 h-4 text-muted-foreground" />
-              </div>
-              <span className="text-sm">Pendente</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <div className="w-8 h-8 rounded-full border-4 border-warning/30 bg-warning/10 flex items-center justify-center">
-                <Loader className="w-4 h-4 text-warning" />
-              </div>
-              <span className="text-sm">Em Andamento</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <div className="w-8 h-8 rounded-full border-4 border-muted-foreground/20 bg-muted/50 flex items-center justify-center">
-                <Ban className="w-4 h-4 text-muted-foreground" />
-              </div>
-              <span className="text-sm">Cancelada</span>
-            </div>
-          </div>
-        </Card>
-
-        {/* Timeline Section */}
-        <section>
-          <h2 className="text-xl font-semibold mb-6">Linha do Tempo das RDMs por Produto</h2>
-          <div className="space-y-6">
-            {mockProductLines.map((productLine) => (
-              <Card key={productLine.id} className="p-4 shadow-sm hover:shadow-md transition-shadow">
-                <RDMTimeline productLine={productLine} />
-              </Card>
-            ))}
-          </div>
-        </section>
-      </div>
+      {/* Status Final do Produto */}
+      <ProductSummary productLine={productLine} />
     </div>
   );
 };
