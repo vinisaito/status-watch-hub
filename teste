@@ -1,189 +1,55 @@
-import { MetricCard } from "@/components/MetricCard";
-import { AreaReport } from "@/components/AreaReport";
-import { TrendingUp, Users, DollarSign, Target, BarChart3 } from "lucide-react";
-import { useState, useMemo } from "react";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
-import Timeline from "@/components/Timeline";
+import { useState } from "react";
+import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
+import { RoadmapTimeline } from "@/components/RoadmapTimeline";
+import { Map } from "lucide-react";
 
 const Index = () => {
-  const metrics = [
-    {
-      title: "Receita Total",
-      value: "R$ 45.2M",
-      change: "+12.5% vs mês anterior",
-      trend: "up" as const,
-      icon: DollarSign,
-    },
-    {
-      title: "Clientes Ativos",
-      value: "32.4K",
-      change: "+8.2% vs mês anterior",
-      trend: "up" as const,
-      icon: Users,
-    },
-    {
-      title: "Taxa de Conversão",
-      value: "24.8%",
-      change: "+2.1% vs mês anterior",
-      trend: "up" as const,
-      icon: Target,
-    },
-    {
-      title: "Performance Geral",
-      value: "87.3%",
-      change: "-1.2% vs mês anterior",
-      trend: "down" as const,
-      icon: TrendingUp,
-    },
-  ];
-
   const [open, setOpen] = useState(false);
-  const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
-
-  const areaReports = [
-    {
-      area: "Porto Seguro",
-      manager: "Ana Silva",
-      performance: 92,
-      revenue: "R$ 12.5M",
-      status: "excellent" as const,
-    },
-    {
-      area: "Porto Serviço",
-      manager: "Carlos Oliveira",
-      performance: 85,
-      revenue: "R$ 10.8M",
-      status: "good" as const,
-    },
-    {
-      area: "Porto Bank",
-      manager: "Mariana Costa",
-      performance: 88,
-      revenue: "R$ 15.2M",
-      status: "excellent" as const,
-    },
-    {
-      area: "Porto Saúde",
-      manager: "Roberto Santos",
-      performance: 72,
-      revenue: "R$ 6.7M",
-      status: "attention" as const,
-    },
-    {
-      area: "Desenvolvimento Digital",
-      manager: "Juliana Mendes",
-      performance: 95,
-      revenue: "R$ 8.4M",
-      status: "excellent" as const,
-    },
-    {
-      area: "Atendimento ao Cliente",
-      manager: "Fernando Lima",
-      performance: 68,
-      revenue: "R$ 5.1M",
-      status: "attention" as const,
-    },
-    {
-      area: "Operações",
-      manager: "Luiz Ferreira",
-      performance: 81,
-      revenue: "R$ 9.3M",
-      status: "good" as const,
-    },
-    {
-      area: "Recursos Humanos",
-      manager: "Patrícia Almeida",
-      performance: 74,
-      revenue: "R$ 2.1M",
-      status: "attention" as const,
-    },
-  ];
 
   return (
-    <div className="min-h-screen bg-background">
-      {/* Header */}
-      <header className="bg-gradient-to-r from-primary to-secondary text-primary-foreground py-8 px-6 shadow-lg">
-        <div className="max-w-7xl mx-auto">
-          <div className="flex items-center gap-3 mb-2">
-            <BarChart3 className="h-8 w-8" />
-            <h1 className="text-3xl font-bold">Dashboard Executivo</h1>
-          </div>
+    <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-background to-secondary p-4">
+      <div className="text-center space-y-6">
+        <div className="space-y-3">
+          <h1 className="text-4xl md:text-5xl lg:text-6xl font-bold text-foreground">
+            Project Roadmap
+          </h1>
+          <p className="text-lg md:text-xl text-muted-foreground max-w-2xl mx-auto">
+            View our comprehensive timeline and development stages
+          </p>
         </div>
-      </header>
 
-      <main className="max-w-7xl mx-auto px-6 py-8">
-        {/* Metrics Section */}
-        <section className="mb-10">
-          <h2 className="text-2xl font-bold text-foreground mb-6">Indicadores Principais</h2>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-            {metrics.map((metric, index) => (
-              <MetricCard key={index} {...metric} />
-            ))}
-          </div>
-        </section>
-
-        {/* Area Reports Section */}
-        <section>
-          <h2 className="text-2xl font-bold text-foreground mb-6">Performance por Área</h2>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-            {areaReports.map((report, index) => (
-              <div
-                key={index}
-                role="button"
-                tabIndex={0}
-                onClick={() => { setSelectedIndex(index); setOpen(true); }}
-                onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setSelectedIndex(index); setOpen(true); } }}
-                className="cursor-pointer focus:outline-none focus:ring-2 focus:ring-primary rounded-lg"
-              >
-                <AreaReport {...report} />
-              </div>
-            ))}
-          </div>
-        </section>
         <Dialog open={open} onOpenChange={setOpen}>
-          <DialogContent className="max-w-[90vw] w-[90vw] md:max-w-5xl">
-            {selectedIndex !== null && (
-              <div className="space-y-4">
-                <DialogHeader>
-                  <DialogTitle>{areaReports[selectedIndex].area}</DialogTitle>
-                  <DialogDescription>
-                    Gestor: {areaReports[selectedIndex].manager} • Performance: {areaReports[selectedIndex].performance}% • Receita: {areaReports[selectedIndex].revenue}
-                  </DialogDescription>
-                </DialogHeader>
-                <Timeline
-                  items={[
-                    { year: 1972, title: "Família Garfinkel assume o controle" },
-                    { year: 1987, title: "Lançamento do \"Brase Light\"" },
-                    { year: 1991, title: "Lançamento da Porto Socorro" },
-                    { year: 1994, title: "Oferecimento do Kit lanche" },
-                    { year: 1997, title: "Implementação dos serviços residenciais" },
-                    { year: 2003, title: "Aquisição Azul Seguros" },
-                    { year: 2004, title: "Abertura de capital" },
-                    { year: 2009, title: "Criação do Transeguent" },
-                    { year: 2014, title: "Lançamento do Porta Faz" },
-                    { year: 2015, title: "Lançamento da Health for Pet" },
-                    { year: 2015.1, title: "Lançamento da Oxigênio" },
-                    { year: 2016, title: "Lançamento do Carro Fácil" },
-                    { year: 2017, title: "Lançamento Frota Elétrica" },
-                    { year: 2019, title: "Bruno Garfinkel assume a Presidência" },
-                    { year: 2020, title: "Lançamento do projeto Meu Porto Seguro" },
-                    { year: 2021, title: "Lançamento Porto Saúde e Porto Seguro" },
-                    { year: 2022, title: "Rebranding da marca" },
-                    { year: 2023, title: "Lançamento da marca Porto Serviço" },
-                  ]}
-                />
-              </div>
-            )}
+          <DialogTrigger asChild>
+            <Button size="lg" className="gap-2">
+              <Map className="w-5 h-5" />
+              View Roadmap Timeline
+            </Button>
+          </DialogTrigger>
+          <DialogContent className="max-w-[95vw] w-full lg:max-w-7xl max-h-[90vh] overflow-y-auto bg-roadmap-bg p-6 md:p-8 lg:p-12">
+            <DialogHeader className="sr-only">
+              <DialogTitle>Roadmap Timeline</DialogTitle>
+              <DialogDescription>
+                View the project roadmap with all development stages
+              </DialogDescription>
+            </DialogHeader>
+            <RoadmapTimeline />
           </DialogContent>
         </Dialog>
-      </main>
 
-      {/* Footer */}
-      <footer className="mt-12 py-6 px-6 bg-card border-t border-border">
-        <div className="max-w-7xl mx-auto text-center text-sm text-muted-foreground">
-          <p>Última atualização: {new Date().toLocaleDateString('pt-BR', { day: '2-digit', month: 'long', year: 'numeric' })}</p>
+        <div className="pt-8 space-y-2">
+          <p className="text-sm text-muted-foreground">
+            Click the button above to explore the interactive timeline
+          </p>
         </div>
-      </footer>
+      </div>
     </div>
   );
 };
