@@ -1,153 +1,178 @@
-import React from "react";
+import { MetricCard } from "@/components/MetricCard";
+import { AreaReport } from "@/components/AreaReport";
+import { TrendingUp, Users, DollarSign, Target, BarChart3 } from "lucide-react";
+import { useState } from "react";
+import Timeline from "@/components/Timeline";
 
-export type TimelineItem = {
-  year: number | string;
-  title?: string;
-};
+const Index = () => {
+  const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
+  const metrics = [
+    {
+      title: "Receita Total",
+      value: "R$ 45.2M",
+      change: "+12.5% vs mês anterior",
+      trend: "up" as const,
+      icon: DollarSign,
+    },
+    {
+      title: "Clientes Ativos",
+      value: "32.4K",
+      change: "+8.2% vs mês anterior",
+      trend: "up" as const,
+      icon: Users,
+    },
+    {
+      title: "Taxa de Conversão",
+      value: "24.8%",
+      change: "+2.1% vs mês anterior",
+      trend: "up" as const,
+      icon: Target,
+    },
+    {
+      title: "Performance Geral",
+      value: "87.3%",
+      change: "-1.2% vs mês anterior",
+      trend: "down" as const,
+      icon: TrendingUp,
+    },
+  ];
 
-interface TimelineProps {
-  items: TimelineItem[];
-  className?: string;
-}
+  
 
-export const Timeline: React.FC<TimelineProps> = ({ items, className }) => {
-  const sorted = [...items].sort((a, b) => Number(a.year) - Number(b.year));
-
-  // Responsive proportions
-  const VB_WIDTH = 1200;
-  const VB_HEIGHT = 280;
-  const PADDING_X = 60;
-  const TOP_Y = 100;
-  const BOTTOM_Y = 200;
-  const R = BOTTOM_Y - TOP_Y; // Perfect quarter-arc radius
-  const RIGHT_X = VB_WIDTH - PADDING_X;
-
-  const half = Math.ceil(sorted.length / 2);
-  const topItems = sorted.slice(0, half);
-  const bottomItems = sorted.slice(half);
-
-  const xTop = (i: number, total: number) => {
-    if (total <= 1) return (PADDING_X + RIGHT_X) / 2;
-    // Distribute until before the arc starts, leaving space for the curve
-    const topLineEnd = RIGHT_X - R;
-    return PADDING_X + (i * (topLineEnd - PADDING_X)) / (total - 1);
-  };
-
-  const BOTTOM_RIGHT_X = RIGHT_X - R;
-  const xBottom = (i: number, total: number) => {
-    if (total <= 1) return (PADDING_X + BOTTOM_RIGHT_X) / 2;
-    // Start from after the arc ends, leaving space for the curve
-    const bottomLineStart = RIGHT_X - 12;
-    return bottomLineStart - (i * (bottomLineStart - PADDING_X)) / (total - 1);
-  };
-
-  // Improved path with smoother curve
-  const pathD = [
-    `M ${PADDING_X} ${TOP_Y}`,
-    `H ${RIGHT_X - R}`,
-    `A ${R} ${R} 0 0 1 ${RIGHT_X} ${BOTTOM_Y}`,
-    `H ${PADDING_X}`,
-  ].join(" ");
+  const areaReports = [
+    {
+      area: "Porto Seguro",
+      manager: "Ana Silva",
+      performance: 92,
+      revenue: "R$ 12.5M",
+      status: "excellent" as const,
+    },
+    {
+      area: "Porto Serviço",
+      manager: "Carlos Oliveira",
+      performance: 85,
+      revenue: "R$ 10.8M",
+      status: "good" as const,
+    },
+    {
+      area: "Porto Bank",
+      manager: "Mariana Costa",
+      performance: 88,
+      revenue: "R$ 15.2M",
+      status: "excellent" as const,
+    },
+    {
+      area: "Porto Saúde",
+      manager: "Roberto Santos",
+      performance: 72,
+      revenue: "R$ 6.7M",
+      status: "attention" as const,
+    },
+    {
+      area: "Desenvolvimento Digital",
+      manager: "Juliana Mendes",
+      performance: 95,
+      revenue: "R$ 8.4M",
+      status: "excellent" as const,
+    },
+    {
+      area: "Atendimento ao Cliente",
+      manager: "Fernando Lima",
+      performance: 68,
+      revenue: "R$ 5.1M",
+      status: "attention" as const,
+    },
+    {
+      area: "Operações",
+      manager: "Luiz Ferreira",
+      performance: 81,
+      revenue: "R$ 9.3M",
+      status: "good" as const,
+    },
+    {
+      area: "Recursos Humanos",
+      manager: "Patrícia Almeida",
+      performance: 74,
+      revenue: "R$ 2.1M",
+      status: "attention" as const,
+    },
+  ];
 
   return (
-    <div className={className}>
-      <div className="relative w-full px-2 sm:px-4 md:px-6">
-        <svg
-          viewBox={`0 0 ${VB_WIDTH} ${VB_HEIGHT}`}
-          className="w-full h-auto text-blue-500"
-          preserveAspectRatio="xMidYMid meet"
-          role="img"
-          aria-label="Linha do tempo"
-        >
-          {/* Main path */}
-          <path 
-            d={pathD} 
-            fill="none" 
-            stroke="currentColor" 
-            strokeWidth={3} 
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          />
+    <div className="min-h-screen bg-background">
+      {/* Header */}
+      <header className="bg-gradient-to-r from-primary to-secondary text-primary-foreground py-8 px-6 shadow-lg">
+        <div className="max-w-7xl mx-auto">
+          <div className="flex items-center gap-3 mb-2">
+            <BarChart3 className="h-8 w-8" />
+            <h1 className="text-3xl font-bold">Dashboard Executivo</h1>
+          </div>
+        </div>
+      </header>
 
-          {/* Top row markers */}
-          {topItems.map((it, i) => {
-            const x = xTop(i, topItems.length);
-            const y = TOP_Y;
-            return (
-              <g key={`t-${i}`}>
-                <circle 
-                  cx={x} 
-                  cy={y} 
-                  r={10} 
-                  fill="white" 
-                  stroke="currentColor" 
-                  strokeWidth={3}
-                  className="drop-shadow-sm"
-                />
-                <circle cx={x} cy={y} r={4} className="fill-blue-500" />
-                <text 
-                  x={x} 
-                  y={y - 20} 
-                  textAnchor="middle" 
-                  className="fill-foreground font-semibold text-[14px] sm:text-[16px]"
-                >
-                  {String(it.year)}
-                </text>
-                {it.title && (
-                  <text 
-                    x={x} 
-                    y={y - 4} 
-                    textAnchor="middle" 
-                    className="fill-muted-foreground text-[11px] sm:text-[13px]"
-                  >
-                    {it.title}
-                  </text>
-                )}
-              </g>
-            );
-          })}
+      <main className="max-w-7xl mx-auto px-6 py-8">
+        {/* Metrics Section */}
+        <section className="mb-10">
+          <h2 className="text-2xl font-bold text-foreground mb-6">Indicadores Principais</h2>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+            {metrics.map((metric, index) => (
+              <MetricCard key={index} {...metric} />
+            ))}
+          </div>
+        </section>
 
-          {/* Bottom row markers */}
-          {bottomItems.map((it, i) => {
-            const x = xBottom(i, bottomItems.length);
-            const y = BOTTOM_Y;
-            return (
-              <g key={`b-${i}`}>
-                <circle 
-                  cx={x} 
-                  cy={y} 
-                  r={10} 
-                  fill="white" 
-                  stroke="currentColor" 
-                  strokeWidth={3}
-                  className="drop-shadow-sm"
-                />
-                <circle cx={x} cy={y} r={4} className="fill-blue-500" />
-                <text 
-                  x={x} 
-                  y={y + 32} 
-                  textAnchor="middle" 
-                  className="fill-foreground font-semibold text-[14px] sm:text-[16px]"
+        {/* Area Reports Section */}
+        <section>
+          <h2 className="text-2xl font-bold text-foreground mb-6">Performance por Área</h2>
+          {selectedIndex === null ? (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+              {areaReports.map((report, index) => (
+                <div
+                  key={index}
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => setSelectedIndex(index)}
+                  onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setSelectedIndex(index); } }}
+                  className="cursor-pointer focus:outline-none focus:ring-2 focus:ring-primary rounded-lg"
                 >
-                  {String(it.year)}
-                </text>
-                {it.title && (
-                  <text 
-                    x={x} 
-                    y={y + 48} 
-                    textAnchor="middle" 
-                    className="fill-muted-foreground text-[11px] sm:text-[13px]"
-                  >
-                    {it.title}
-                  </text>
-                )}
-              </g>
-            );
-          })}
-        </svg>
-      </div>
+                  <AreaReport {...report} />
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="space-y-6">
+              <div className="flex items-center justify-between">
+                <div className="text-sm text-muted-foreground">Mostrando detalhes de</div>
+                <button
+                  onClick={() => setSelectedIndex(null)}
+                  className="text-sm px-3 py-1.5 rounded-md border border-border hover:bg-accent transition-colors"
+                >
+                  Mostrar todas as áreas
+                </button>
+              </div>
+              <AreaReport {...areaReports[selectedIndex]} />
+              <div className="rounded-lg border p-4">
+                <Timeline
+                  items={[
+                    { year: 1972, title: "Controle da Família" },
+                    { year: 1987, title: "Brase Light" },
+                    { year: 1991, title: "Porto Socorro" },
+                    { year: 2003, title: "Azul Seguros" },
+                    { year: 2004, title: "IPO" },
+                    { year: 2016, title: "Carro Fácil" },
+                    { year: 2019, title: "Nova Presidência" },
+                    { year: 2022, title: "Rebranding" },
+                  ]}
+                />
+              </div>
+            </div>
+          )}
+        </section>
+      </main>
+
+      {/* Footer removed as requested */}
     </div>
   );
 };
 
-export default Timeline;
+export default Index;
