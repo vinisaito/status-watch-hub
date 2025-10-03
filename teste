@@ -1,8 +1,7 @@
 import { MetricCard } from "@/components/MetricCard";
 import { AreaReport } from "@/components/AreaReport";
-import { RotateCcw, Timer, Check, Target } from "lucide-react"; // removed BarChart3
+import { RotateCcw, Timer, Check, Target } from "lucide-react";
 import { useState, useRef, useEffect } from "react";
-import Timeline from "@/components/Timeline";
 import { SnakeLine } from "@/components/SnakeLine";
 import RDMTimeline from "@/components/RDMTimeline";
 import type { ProductLine, RDM } from "@/types/rdm";
@@ -16,39 +15,31 @@ const Index = () => {
   const metrics = [
     {
       title: "Concluídas",
-      value: "R$ 45.2M",
-      change: "+12.5% vs mês anterior",
-      trend: "up" as const,
+      value: "142",
       icon: Check,
+      variant: "success" as const,
       performance: 92,
-      color: "text-emerald-600 bg-emerald-100",
     },
     {
       title: "Em Andamento",
-      value: "32.4K",
-      change: "+8.2% vs mês anterior",
-      trend: "up" as const,
+      value: "28",
       icon: Timer,
+      variant: "warning" as const,
       performance: 78,
-      color: "text-amber-600 bg-amber-100",
     },
     {
       title: "Abertas",
-      value: "24.8%",
-      change: "+2.1% vs mês anterior",
-      trend: "up" as const,
+      value: "37",
       icon: Target,
+      variant: "primary" as const,
       performance: 64,
-      color: "text-blue-600 bg-blue-100",
     },
     {
       title: "Rollback",
-      value: "87.3%",
-      change: "-1.2% vs mês anterior",
-      trend: "down" as const,
+      value: "5",
       icon: RotateCcw,
+      variant: "accent" as const,
       performance: 55,
-      color: "text-rose-600 bg-rose-100",
     },
   ];
 
@@ -73,10 +64,7 @@ const Index = () => {
       }
     };
 
-    // Initial calculation (after layout)
     const raf = requestAnimationFrame(updateCoords);
-
-    // Update on resize and scroll to keep the line aligned
     window.addEventListener("resize", updateCoords);
     window.addEventListener("scroll", updateCoords, { passive: true });
 
@@ -154,20 +142,13 @@ const Index = () => {
     },
   ];
 
-  // Build a sample ProductLine with RDMs for the selected area
   const buildProductLine = (areaName: string, idx: number): ProductLine => {
     const colors = [
-      "#3b82f6", // blue-500
-      "#10b981", // emerald-500
-      "#f59e0b", // amber-500
-      "#ef4444", // red-500
-      "#8b5cf6", // violet-500
-      "#14b8a6", // teal-500
-      "#eab308", // yellow-500
-      "#06b6d4", // cyan-500
+      "#3b82f6", "#10b981", "#f59e0b", "#ef4444",
+      "#8b5cf6", "#14b8a6", "#eab308", "#06b6d4",
     ];
 
-    const rdmCount = 16; // show 2 rows (8 per row)
+    const rdmCount = 16;
     const rdms: RDM[] = Array.from({ length: rdmCount }).map((_, i) => {
       const num = (i + 1).toString().padStart(3, "0");
       const hour = 8 + Math.floor(i / 2);
@@ -195,30 +176,54 @@ const Index = () => {
   };
 
   return (
-    <div className="min-h-screen bg-[#eff4ef]">
+    <div className="min-h-screen bg-gradient-to-br from-[hsl(var(--background))] via-[hsl(var(--neutral-50))] to-[hsl(var(--blue-soft))]">
       {/* Header */}
-      <header className="bg-white py-2 px-6 shadow-sm">
+      <header className="bg-white/80 backdrop-blur-sm py-4 px-6 shadow-sm sticky top-0 z-20 border-b border-[hsl(var(--border))]">
         <div className="max-w-7xl mx-auto">
-          <div className="flex justify-center">
-            <img src="/logo.png" alt="Logo" className="h-20 md:h-24 w-auto" />
+          <div className="flex items-center justify-between">
+            <div>
+              <h1 className="text-2xl md:text-3xl font-bold bg-gradient-to-r from-[hsl(var(--blue-medium))] to-[hsl(var(--blue-accent))] bg-clip-text text-transparent">
+                Dashboard Executivo
+              </h1>
+              <p className="text-sm text-muted-foreground">Monitoramento em tempo real</p>
+            </div>
           </div>
         </div>
       </header>
 
       <main className="max-w-7xl mx-auto px-6 py-8">
         {/* Metrics Section */}
-        <section className="mb-10">
-          <h2 className="text-2xl font-bold text-foreground mb-6 text-center">Indicadores Principais</h2>
+        <section className="mb-12">
+          <div className="mb-8 text-center">
+            <h2 className="text-3xl md:text-4xl font-bold text-foreground mb-2 tracking-tight">
+              Mudanças no Ambiente de TI
+            </h2>
+            <p className="text-lg text-muted-foreground">
+              Visão consolidada dos indicadores principais
+            </p>
+          </div>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
             {metrics.map((metric, index) => (
-              <MetricCard key={index} {...metric} />
+              <div key={index} className="animate-fade-in" style={{ animationDelay: `${index * 100}ms` }}>
+                <MetricCard {...metric} />
+              </div>
             ))}
           </div>
         </section>
 
         {/* Area Reports Section */}
         <section>
-          <h2 className="text-2xl font-bold text-foreground mb-6 text-center">Performance por Área</h2>
+          <div className="mb-8 text-center">
+            <h2 className="text-3xl md:text-4xl font-bold text-foreground mb-2 tracking-tight">
+              Performance por Área
+            </h2>
+            <p className="text-lg text-muted-foreground">
+              {selectedIndex === null 
+                ? "Selecione uma área para ver detalhes das RDMs"
+                : "Detalhamento das requisições de mudança"}
+            </p>
+          </div>
+          
           {selectedIndex === null ? (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
               {areaReports.map((report, index) => (
@@ -228,31 +233,36 @@ const Index = () => {
                   role="button"
                   tabIndex={0}
                   onClick={() => setSelectedIndex(index)}
-                  onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setSelectedIndex(index); } }}
-                  className="cursor-pointer focus:outline-none focus:ring-2 focus:ring-primary rounded-lg"
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      setSelectedIndex(index);
+                    }
+                  }}
+                  className="cursor-pointer focus:outline-none focus:ring-2 focus:ring-primary rounded-lg animate-fade-in"
+                  style={{ animationDelay: `${index * 80}ms` }}
                 >
                   <AreaReport {...report} />
                 </div>
               ))}
             </div>
           ) : (
-            <div className="space-y-6">
-              <div className="flex items-center justify-between">
-                <div className="text-sm text-muted-foreground">Mostrando detalhes de</div>
+            <div className="space-y-6 animate-fade-in">
+              <div className="flex items-center justify-between bg-white/50 backdrop-blur-sm p-4 rounded-lg border border-[hsl(var(--border))]">
+                <div className="text-sm font-medium text-foreground">
+                  Mostrando detalhes de <span className="font-bold text-[hsl(var(--blue-medium))]">{areaReports[selectedIndex].area}</span>
+                </div>
                 <button
                   onClick={() => setSelectedIndex(null)}
-                  className="text-sm px-3 py-1.5 rounded-md border border-border hover:bg-accent transition-colors"
+                  className="text-sm font-medium px-4 py-2 rounded-lg border border-[hsl(var(--border))] bg-white hover:bg-[hsl(var(--blue-soft))] hover:border-[hsl(var(--blue-medium))] transition-all duration-300 shadow-sm hover:shadow-md"
                 >
-                  Mostrar todas as áreas
+                  ← Voltar para todas as áreas
                 </button>
               </div>
-              <div 
-                ref={(el) => (cardRefs.current[selectedIndex] = el)}
-                className="mb-6"
-              >
+              <div ref={(el) => (cardRefs.current[selectedIndex] = el)} className="mb-6">
                 <AreaReport {...areaReports[selectedIndex]} />
               </div>
-              <div ref={timelineRef} className="rounded-lg border p-4">
+              <div ref={timelineRef} className="rounded-lg border border-[hsl(var(--border))] bg-white/50 backdrop-blur-sm p-6 shadow-lg">
                 <RDMTimeline
                   productLine={buildProductLine(
                     areaReports[selectedIndex].area,
