@@ -1,81 +1,403 @@
+AreaReport:
 import { Card } from "@/components/ui/card";
-import type { ProductLine, RDM } from "@/types/rdm";
-import { CheckCircle2, Clock, XCircle } from "lucide-react";
+import { Progress } from "@/components/ui/progress";
 import { cn } from "@/lib/utils";
+import { TrendingUp, CheckCircle2, Clock, AlertCircle, RotateCcw } from "lucide-react";
 
-interface RDMTimelineProps {
-  productLine: ProductLine;
+interface AreaReportProps {
+  area: string;
+  manager: string;
+  performance: number;
+  revenue: string;
+  status: "excellent" | "good" | "attention";
+  rdmStats: {
+    concluidas: number;
+    emAndamento: number;
+    abertas: number;
+    rollback: number;
+  };
 }
 
 const statusConfig = {
-  executed: {
-    icon: CheckCircle2,
+  excellent: {
     color: "text-[hsl(var(--success))]",
     bgColor: "bg-[hsl(var(--success-light))]",
-    label: "Executada",
+    label: "Excelente",
   },
-  pending: {
-    icon: Clock,
+  good: {
+    color: "text-[hsl(var(--blue-accent))]",
+    bgColor: "bg-[hsl(var(--blue-soft))]",
+    label: "Bom",
+  },
+  attention: {
     color: "text-[hsl(var(--warning))]",
     bgColor: "bg-[hsl(var(--warning-light))]",
-    label: "Pendente",
-  },
-  failed: {
-    icon: XCircle,
-    color: "text-[hsl(var(--destructive))]",
-    bgColor: "bg-red-50",
-    label: "Falhou",
+    label: "Atenção",
   },
 };
 
-const RDMTimeline = ({ productLine }: RDMTimelineProps) => {
+export const AreaReport = ({ area, manager, performance, revenue, status, rdmStats }: AreaReportProps) => {
+  const statusStyle = statusConfig[status];
+
   return (
-    <div className="space-y-4">
-      <div className="flex items-center gap-3 mb-6">
-        <div
-          className="w-4 h-4 rounded-full"
-          style={{ backgroundColor: productLine.color }}
-        />
-        <h3 className="text-xl font-bold text-foreground">{productLine.name}</h3>
+    <Card className="group relative overflow-hidden border-[hsl(var(--border))] bg-card transition-all duration-300 hover:shadow-[var(--shadow-lg)] hover:-translate-y-1">
+      <div className="absolute inset-0 bg-gradient-to-br from-transparent via-transparent to-[hsl(var(--blue-soft))]/30 opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
+      
+      <div className="relative p-5">
+        {/* Header */}
+        <div className="flex items-start justify-between mb-4">
+          <div>
+            <h3 className="text-lg font-bold text-foreground mb-1">{area}</h3>
+            <p className="text-sm text-muted-foreground">{manager}</p>
+          </div>
+          <div className={cn("px-3 py-1 rounded-full text-xs font-semibold", statusStyle.bgColor, statusStyle.color)}>
+            {statusStyle.label}
+          </div>
+        </div>
+
+        {/* Revenue */}
+        <div className="mb-4">
+          <p className="text-2xl font-bold text-foreground">{revenue}</p>
+          <p className="text-xs text-muted-foreground uppercase tracking-wide">Receita</p>
+        </div>
+
+        {/* Performance */}
+        <div className="mb-4">
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+              Performance
+            </span>
+            <span className="text-sm font-bold text-[hsl(var(--blue-medium))]">
+              {performance}%
+            </span>
+          </div>
+          <div className="relative h-2 bg-[hsl(var(--neutral-100))] rounded-full overflow-hidden">
+            <div
+              className="h-full rounded-full bg-[hsl(var(--blue-medium))] transition-all duration-1000 ease-out"
+              style={{ width: `${performance}%` }}
+            />
+          </div>
+        </div>
+
+        {/* RDM Stats */}
+        <div className="grid grid-cols-2 gap-3 pt-4 border-t border-[hsl(var(--border))]">
+          <div className="flex items-center gap-2">
+            <CheckCircle2 className="h-4 w-4 text-[hsl(var(--success))]" />
+            <div>
+              <p className="text-sm font-bold text-foreground">{rdmStats.concluidas}</p>
+              <p className="text-xs text-muted-foreground">Concluídas</p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <Clock className="h-4 w-4 text-[hsl(var(--warning))]" />
+            <div>
+              <p className="text-sm font-bold text-foreground">{rdmStats.emAndamento}</p>
+              <p className="text-xs text-muted-foreground">Em Andamento</p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <AlertCircle className="h-4 w-4 text-[hsl(var(--blue-accent))]" />
+            <div>
+              <p className="text-sm font-bold text-foreground">{rdmStats.abertas}</p>
+              <p className="text-xs text-muted-foreground">Abertas</p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <RotateCcw className="h-4 w-4 text-[hsl(var(--destructive))]" />
+            <div>
+              <p className="text-sm font-bold text-foreground">{rdmStats.rollback}</p>
+              <p className="text-xs text-muted-foreground">Rollback</p>
+            </div>
+          </div>
+        </div>
       </div>
+    </Card>
+  );
+};
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-        {productLine.rdms.map((rdm) => {
-          const config = statusConfig[rdm.status];
-          const Icon = config.icon;
 
-          return (
-            <Card
-              key={rdm.id}
-              className={cn(
-                "p-4 border-l-4 transition-all duration-300 hover:shadow-md hover:-translate-y-0.5",
-                config.bgColor
-              )}
-              style={{ borderLeftColor: productLine.color }}
-            >
-              <div className="flex items-start justify-between mb-2">
-                <div className="flex items-center gap-2">
-                  <Icon className={cn("h-5 w-5", config.color)} />
-                  <span className="font-bold text-foreground">RDM {rdm.number}</span>
+Index:
+import { MetricCard } from "@/components/MetricCard";
+import { AreaReport } from "@/components/AreaReport";
+import { RotateCcw, Clock, CheckCircle2, AlertCircle } from "lucide-react";
+import { useState, useRef, useEffect } from "react";
+import { SnakeLine } from "@/components/SnakeLine";
+import RDMTimeline from "@/components/RDMTimeline";
+import type { ProductLine, RDM } from "@/types/rdm";
+
+const Index = () => {
+  const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
+  const [lineCoords, setLineCoords] = useState<{ startX: number; startY: number; endX: number; endY: number } | null>(null);
+  const cardRefs = useRef<(HTMLDivElement | null)[]>([]);
+  const timelineRef = useRef<HTMLDivElement>(null);
+
+  const metrics = [
+    {
+      title: "Concluídas",
+      value: "142",
+      icon: CheckCircle2,
+      variant: "success" as const,
+      performance: 92,
+    },
+    {
+      title: "Em Andamento",
+      value: "28",
+      icon: Clock,
+      variant: "warning" as const,
+      performance: 78,
+    },
+    {
+      title: "Abertas",
+      value: "37",
+      icon: AlertCircle,
+      variant: "primary" as const,
+      performance: 64,
+    },
+    {
+      title: "Rollback",
+      value: "5",
+      icon: RotateCcw,
+      variant: "accent" as const,
+      performance: 55,
+    },
+  ];
+
+  useEffect(() => {
+    const updateCoords = () => {
+      if (selectedIndex !== null && cardRefs.current[selectedIndex] && timelineRef.current) {
+        const cardRect = cardRefs.current[selectedIndex]!.getBoundingClientRect();
+        const timelineRect = timelineRef.current.getBoundingClientRect();
+
+        const clamp = (val: number, min: number, max: number) => Math.min(Math.max(val, min), max);
+        const vw = window.innerWidth;
+        const vh = window.innerHeight;
+
+        setLineCoords({
+          startX: clamp(cardRect.left + cardRect.width / 2, 0, vw),
+          startY: clamp(cardRect.top + cardRect.height, 0, vh),
+          endX: clamp(timelineRect.left + timelineRect.width / 2, 0, vw),
+          endY: clamp(timelineRect.top, 0, vh),
+        });
+      } else {
+        setLineCoords(null);
+      }
+    };
+
+    const raf = requestAnimationFrame(updateCoords);
+    window.addEventListener("resize", updateCoords);
+    window.addEventListener("scroll", updateCoords, { passive: true });
+
+    return () => {
+      cancelAnimationFrame(raf);
+      window.removeEventListener("resize", updateCoords);
+      window.removeEventListener("scroll", updateCoords);
+    };
+  }, [selectedIndex]);
+
+  const areaReports = [
+    {
+      area: "Porto Seguro",
+      manager: "Ana Silva",
+      performance: 92,
+      revenue: "R$ 12.5M",
+      status: "excellent" as const,
+      rdmStats: { concluidas: 120, emAndamento: 18, abertas: 10, rollback: 4 },
+    },
+    {
+      area: "Porto Serviço",
+      manager: "Carlos Oliveira",
+      performance: 85,
+      revenue: "R$ 10.8M",
+      status: "good" as const,
+      rdmStats: { concluidas: 95, emAndamento: 22, abertas: 14, rollback: 6 },
+    },
+    {
+      area: "Porto Bank",
+      manager: "Mariana Costa",
+      performance: 88,
+      revenue: "R$ 15.2M",
+      status: "excellent" as const,
+      rdmStats: { concluidas: 140, emAndamento: 12, abertas: 8, rollback: 3 },
+    },
+    {
+      area: "Porto Saúde",
+      manager: "Roberto Santos",
+      performance: 72,
+      revenue: "R$ 6.7M",
+      status: "attention" as const,
+      rdmStats: { concluidas: 60, emAndamento: 28, abertas: 20, rollback: 9 },
+    },
+    {
+      area: "Canais Digitais",
+      manager: "Juliana Mendes",
+      performance: 95,
+      revenue: "R$ 8.4M",
+      status: "excellent" as const,
+      rdmStats: { concluidas: 160, emAndamento: 10, abertas: 5, rollback: 2 },
+    },
+    {
+      area: "Infraestrutura",
+      manager: "Fernando Lima",
+      performance: 68,
+      revenue: "R$ 5.1M",
+      status: "attention" as const,
+      rdmStats: { concluidas: 55, emAndamento: 24, abertas: 18, rollback: 7 },
+    },
+    {
+      area: "Atendimento",
+      manager: "Luiz Ferreira",
+      performance: 81,
+      revenue: "R$ 9.3M",
+      status: "good" as const,
+      rdmStats: { concluidas: 100, emAndamento: 20, abertas: 12, rollback: 5 },
+    },
+    {
+      area: "Arquitetura",
+      manager: "Patrícia Almeida",
+      performance: 74,
+      revenue: "R$ 2.1M",
+      status: "attention" as const,
+      rdmStats: { concluidas: 70, emAndamento: 15, abertas: 11, rollback: 4 },
+    },
+  ];
+
+  const buildProductLine = (areaName: string, idx: number): ProductLine => {
+    const colors = [
+      "#3b82f6", "#10b981", "#f59e0b", "#ef4444",
+      "#8b5cf6", "#14b8a6", "#eab308", "#06b6d4",
+    ];
+
+    const rdmCount = 16;
+    const rdmsAll: RDM[] = Array.from({ length: rdmCount }).map((_, i) => {
+      const num = (i + 1).toString().padStart(3, "0");
+      const hour = 8 + Math.floor(i / 2);
+      const minute = (i % 2) * 30;
+      const time = `${hour.toString().padStart(2, "0")}:${minute.toString().padStart(2, "0")}`;
+      const status: RDM["status"] = i % 7 === 0 ? "failed" : i % 3 === 0 ? "pending" : "executed";
+      return {
+        id: `${areaName}-${num}`,
+        number: num,
+        time,
+        status,
+        description:
+          i % 5 === 0
+            ? "Atividade"
+            : undefined,
+      };
+    });
+    const rdms = rdmsAll.filter((r) => r.time !== "11:30" && r.time !== "15:30");
+
+    return {
+      id: `produto-${idx + 1}`,
+      name: `RDMS - ${areaName}`,
+      color: colors[idx % colors.length],
+      rdms,
+    };
+  };
+
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-[hsl(var(--background))] via-[hsl(var(--neutral-50))] to-[hsl(var(--blue-soft))]">
+      {/* Header */}
+      <header className="bg-white/80 backdrop-blur-sm py-2 px-6 shadow-sm sticky top-0 z-20 border-b border-[hsl(var(--border))]">
+        <div className="max-w-7xl mx-auto">
+          <div className="flex justify-center">
+            <img src="/logo.png" alt="Logo" className="h-12 md:h-16 w-auto" />
+          </div>
+        </div>
+      </header>
+
+      <main className="max-w-7xl mx-auto px-6 py-8">
+        {/* Metrics Section */}
+        <section className="mb-12">
+          <div className="mb-8 text-center">
+            <h2 className="text-2xl md:text-3xl font-bold text-foreground mb-2 tracking-tight">
+              Requisições de Mudanças das Últimas 24 horas
+            </h2>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+            {metrics.map((metric, index) => (
+              <div key={index} className="animate-fade-in" style={{ animationDelay: `${index * 100}ms` }}>
+                <MetricCard {...metric} />
+              </div>
+            ))}
+          </div>
+        </section>
+
+        {/* Area Reports Section */}
+        <section>
+          <div className="mb-8 text-center">
+            <h2 className="text-3xl md:text-4xl font-bold text-foreground mb-2 tracking-tight">
+              Status por Área
+            </h2>
+            <p className="text-lg text-muted-foreground">
+              {selectedIndex === null 
+                ? "Selecione uma área para ver detalhes das RDMs"
+                : "Detalhamento das requisições de mudança"}
+            </p>
+          </div>
+          
+          {selectedIndex === null ? (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+              {areaReports.map((report, index) => (
+                <div
+                  key={index}
+                  ref={(el) => (cardRefs.current[index] = el)}
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => setSelectedIndex(index)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      setSelectedIndex(index);
+                    }
+                  }}
+                  className="cursor-pointer focus:outline-none focus:ring-2 focus:ring-primary rounded-lg animate-fade-in"
+                  style={{ animationDelay: `${index * 80}ms` }}
+                >
+                  <AreaReport {...report} />
                 </div>
-                <span className="text-xs text-muted-foreground font-medium">{rdm.time}</span>
+              ))}
+            </div>
+          ) : (
+            <div className="space-y-6 animate-fade-in">
+              <div className="flex items-center justify-between bg-white/50 backdrop-blur-sm p-4 rounded-lg border border-[hsl(var(--border))]">
+                <div className="text-sm font-medium text-foreground">
+                  Mostrando detalhes de <span className="font-bold text-[hsl(var(--blue-medium))]">{areaReports[selectedIndex].area}</span>
+                </div>
+                <button
+                  onClick={() => setSelectedIndex(null)}
+                  className="text-sm font-medium px-4 py-2 rounded-lg border border-[hsl(var(--border))] bg-white hover:bg-[hsl(var(--blue-soft))] hover:border-[hsl(var(--blue-medium))] transition-all duration-300 shadow-sm hover:shadow-md"
+                >
+                  ← Voltar para todas as áreas
+                </button>
               </div>
-              
-              <div className={cn("text-xs font-semibold mb-2", config.color)}>
-                {config.label}
+              <div ref={(el) => (cardRefs.current[selectedIndex] = el)} className="mb-6">
+                <AreaReport {...areaReports[selectedIndex]} />
               </div>
-              
-              {rdm.description && (
-                <p className="text-xs text-muted-foreground leading-relaxed">
-                  {rdm.description}
-                </p>
-              )}
-            </Card>
-          );
-        })}
-      </div>
+              <div className="rounded-lg border border-[hsl(var(--border))] bg-white/50 backdrop-blur-sm p-6 shadow-lg">
+                <RDMTimeline
+                  productLine={buildProductLine(
+                    areaReports[selectedIndex].area,
+                    selectedIndex
+                  )}
+                />
+              </div>
+            </div>
+          )}
+        </section>
+      </main>
+
+      {/* Snake Line Animation */}
+      {lineCoords && (
+        <SnakeLine
+          startX={lineCoords.startX}
+          startY={lineCoords.startY}
+          endX={lineCoords.endX}
+          endY={lineCoords.endY}
+        />
+      )}
     </div>
   );
 };
 
-export default RDMTimeline;
+export default Index;
