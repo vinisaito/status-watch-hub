@@ -1,115 +1,81 @@
 import { Card } from "@/components/ui/card";
-import { Progress } from "@/components/ui/progress";
+import type { ProductLine, RDM } from "@/types/rdm";
+import { CheckCircle2, Clock, XCircle } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { TrendingUp, CheckCircle2, Clock, AlertCircle, RotateCcw } from "lucide-react";
 
-interface AreaReportProps {
-  area: string;
-  manager: string;
-  performance: number;
-  revenue: string;
-  status: "excellent" | "good" | "attention";
-  rdmStats: {
-    concluidas: number;
-    emAndamento: number;
-    abertas: number;
-    rollback: number;
-  };
+interface RDMTimelineProps {
+  productLine: ProductLine;
 }
 
 const statusConfig = {
-  excellent: {
+  executed: {
+    icon: CheckCircle2,
     color: "text-[hsl(var(--success))]",
     bgColor: "bg-[hsl(var(--success-light))]",
-    label: "Excelente",
+    label: "Executada",
   },
-  good: {
-    color: "text-[hsl(var(--blue-accent))]",
-    bgColor: "bg-[hsl(var(--blue-soft))]",
-    label: "Bom",
-  },
-  attention: {
+  pending: {
+    icon: Clock,
     color: "text-[hsl(var(--warning))]",
     bgColor: "bg-[hsl(var(--warning-light))]",
-    label: "Atenção",
+    label: "Pendente",
+  },
+  failed: {
+    icon: XCircle,
+    color: "text-[hsl(var(--destructive))]",
+    bgColor: "bg-red-50",
+    label: "Falhou",
   },
 };
 
-export const AreaReport = ({ area, manager, performance, revenue, status, rdmStats }: AreaReportProps) => {
-  const statusStyle = statusConfig[status];
-
+const RDMTimeline = ({ productLine }: RDMTimelineProps) => {
   return (
-    <Card className="group relative overflow-hidden border-[hsl(var(--border))] bg-card transition-all duration-300 hover:shadow-[var(--shadow-lg)] hover:-translate-y-1">
-      <div className="absolute inset-0 bg-gradient-to-br from-transparent via-transparent to-[hsl(var(--blue-soft))]/30 opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
-      
-      <div className="relative p-5">
-        {/* Header */}
-        <div className="flex items-start justify-between mb-4">
-          <div>
-            <h3 className="text-lg font-bold text-foreground mb-1">{area}</h3>
-            <p className="text-sm text-muted-foreground">{manager}</p>
-          </div>
-          <div className={cn("px-3 py-1 rounded-full text-xs font-semibold", statusStyle.bgColor, statusStyle.color)}>
-            {statusStyle.label}
-          </div>
-        </div>
-
-        {/* Revenue */}
-        <div className="mb-4">
-          <p className="text-2xl font-bold text-foreground">{revenue}</p>
-          <p className="text-xs text-muted-foreground uppercase tracking-wide">Receita</p>
-        </div>
-
-        {/* Performance */}
-        <div className="mb-4">
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
-              Performance
-            </span>
-            <span className="text-sm font-bold text-[hsl(var(--blue-medium))]">
-              {performance}%
-            </span>
-          </div>
-          <div className="relative h-2 bg-[hsl(var(--neutral-100))] rounded-full overflow-hidden">
-            <div
-              className="h-full rounded-full bg-[hsl(var(--blue-medium))] transition-all duration-1000 ease-out"
-              style={{ width: `${performance}%` }}
-            />
-          </div>
-        </div>
-
-        {/* RDM Stats */}
-        <div className="grid grid-cols-2 gap-3 pt-4 border-t border-[hsl(var(--border))]">
-          <div className="flex items-center gap-2">
-            <CheckCircle2 className="h-4 w-4 text-[hsl(var(--success))]" />
-            <div>
-              <p className="text-sm font-bold text-foreground">{rdmStats.concluidas}</p>
-              <p className="text-xs text-muted-foreground">Concluídas</p>
-            </div>
-          </div>
-          <div className="flex items-center gap-2">
-            <Clock className="h-4 w-4 text-[hsl(var(--warning))]" />
-            <div>
-              <p className="text-sm font-bold text-foreground">{rdmStats.emAndamento}</p>
-              <p className="text-xs text-muted-foreground">Em Andamento</p>
-            </div>
-          </div>
-          <div className="flex items-center gap-2">
-            <AlertCircle className="h-4 w-4 text-[hsl(var(--blue-accent))]" />
-            <div>
-              <p className="text-sm font-bold text-foreground">{rdmStats.abertas}</p>
-              <p className="text-xs text-muted-foreground">Abertas</p>
-            </div>
-          </div>
-          <div className="flex items-center gap-2">
-            <RotateCcw className="h-4 w-4 text-[hsl(var(--destructive))]" />
-            <div>
-              <p className="text-sm font-bold text-foreground">{rdmStats.rollback}</p>
-              <p className="text-xs text-muted-foreground">Rollback</p>
-            </div>
-          </div>
-        </div>
+    <div className="space-y-4">
+      <div className="flex items-center gap-3 mb-6">
+        <div
+          className="w-4 h-4 rounded-full"
+          style={{ backgroundColor: productLine.color }}
+        />
+        <h3 className="text-xl font-bold text-foreground">{productLine.name}</h3>
       </div>
-    </Card>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+        {productLine.rdms.map((rdm) => {
+          const config = statusConfig[rdm.status];
+          const Icon = config.icon;
+
+          return (
+            <Card
+              key={rdm.id}
+              className={cn(
+                "p-4 border-l-4 transition-all duration-300 hover:shadow-md hover:-translate-y-0.5",
+                config.bgColor
+              )}
+              style={{ borderLeftColor: productLine.color }}
+            >
+              <div className="flex items-start justify-between mb-2">
+                <div className="flex items-center gap-2">
+                  <Icon className={cn("h-5 w-5", config.color)} />
+                  <span className="font-bold text-foreground">RDM {rdm.number}</span>
+                </div>
+                <span className="text-xs text-muted-foreground font-medium">{rdm.time}</span>
+              </div>
+              
+              <div className={cn("text-xs font-semibold mb-2", config.color)}>
+                {config.label}
+              </div>
+              
+              {rdm.description && (
+                <p className="text-xs text-muted-foreground leading-relaxed">
+                  {rdm.description}
+                </p>
+              )}
+            </Card>
+          );
+        })}
+      </div>
+    </div>
   );
 };
+
+export default RDMTimeline;
