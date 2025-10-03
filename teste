@@ -1,178 +1,217 @@
-import { MetricCard } from "@/components/MetricCard";
-import { AreaReport } from "@/components/AreaReport";
-import { TrendingUp, Users, DollarSign, Target, BarChart3 } from "lucide-react";
-import { useState } from "react";
-import Timeline from "@/components/Timeline";
+import React, { useLayoutEffect, useRef, useState, forwardRef } from "react";
+import type { ProductLine, RDM } from "@/types/rdm";
+import { CheckCircle2, XCircle, Clock } from "lucide-react";
+import { cn } from "@/lib/utils";
+import { ProductSummary } from "./ProductSummary";
 
-const Index = () => {
-  const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
-  const metrics = [
-    {
-      title: "Receita Total",
-      value: "R$ 45.2M",
-      change: "+12.5% vs mês anterior",
-      trend: "up" as const,
-      icon: DollarSign,
-    },
-    {
-      title: "Clientes Ativos",
-      value: "32.4K",
-      change: "+8.2% vs mês anterior",
-      trend: "up" as const,
-      icon: Users,
-    },
-    {
-      title: "Taxa de Conversão",
-      value: "24.8%",
-      change: "+2.1% vs mês anterior",
-      trend: "up" as const,
-      icon: Target,
-    },
-    {
-      title: "Performance Geral",
-      value: "87.3%",
-      change: "-1.2% vs mês anterior",
-      trend: "down" as const,
-      icon: TrendingUp,
-    },
-  ];
+interface RDMTimelineProps {
+  productLine: ProductLine;
+}
 
-  
+// Local RDMNode component (inlined from ./RDMNode)
+interface RDMNodeProps {
+  rdm: RDM;
+  color: string;
+  isFirst?: boolean;
+  isLast?: boolean;
+  productLineId?: string;
+}
 
-  const areaReports = [
-    {
-      area: "Porto Seguro",
-      manager: "Ana Silva",
-      performance: 92,
-      revenue: "R$ 12.5M",
-      status: "excellent" as const,
-    },
-    {
-      area: "Porto Serviço",
-      manager: "Carlos Oliveira",
-      performance: 85,
-      revenue: "R$ 10.8M",
-      status: "good" as const,
-    },
-    {
-      area: "Porto Bank",
-      manager: "Mariana Costa",
-      performance: 88,
-      revenue: "R$ 15.2M",
-      status: "excellent" as const,
-    },
-    {
-      area: "Porto Saúde",
-      manager: "Roberto Santos",
-      performance: 72,
-      revenue: "R$ 6.7M",
-      status: "attention" as const,
-    },
-    {
-      area: "Desenvolvimento Digital",
-      manager: "Juliana Mendes",
-      performance: 95,
-      revenue: "R$ 8.4M",
-      status: "excellent" as const,
-    },
-    {
-      area: "Atendimento ao Cliente",
-      manager: "Fernando Lima",
-      performance: 68,
-      revenue: "R$ 5.1M",
-      status: "attention" as const,
-    },
-    {
-      area: "Operações",
-      manager: "Luiz Ferreira",
-      performance: 81,
-      revenue: "R$ 9.3M",
-      status: "good" as const,
-    },
-    {
-      area: "Recursos Humanos",
-      manager: "Patrícia Almeida",
-      performance: 74,
-      revenue: "R$ 2.1M",
-      status: "attention" as const,
-    },
-  ];
+const RDMNode = forwardRef<HTMLDivElement, RDMNodeProps>(
+  ({ rdm, color, isFirst, isLast, productLineId }: RDMNodeProps, ref) => {
+    const isEpsilon = productLineId === "produto-5";
+    const showSideInfo =
+      rdm.number === "008" ||
+      rdm.number === "016" ||
+      (isEpsilon && rdm.number === "024");
+    const sideIsLeft = rdm.number === "016";
+    const sideIsRight = rdm.number === "008" || (isEpsilon && rdm.number === "024");
 
-  return (
-    <div className="min-h-screen bg-background">
-      {/* Header */}
-      <header className="bg-gradient-to-r from-primary to-secondary text-primary-foreground py-8 px-6 shadow-lg">
-        <div className="max-w-7xl mx-auto">
-          <div className="flex items-center gap-3 mb-2">
-            <BarChart3 className="h-8 w-8" />
-            <h1 className="text-3xl font-bold">Dashboard Executivo</h1>
+    const getStatusIcon = () => {
+      switch (rdm.status) {
+        case "executed":
+          return <CheckCircle2 className="w-4 h-4" />;
+        case "failed":
+          return <XCircle className="w-4 h-4" />;
+        case "pending":
+          return <Clock className="w-4 h-4" />;
+      }
+    };
+
+    const getStatusColor = () => {
+      switch (rdm.status) {
+        case "executed":
+          return "bg-green-100 border-green-300 text-green-600";
+        case "failed":
+          return "bg-red-100 border-red-300 text-red-600";
+        case "pending":
+          return "bg-background border-muted-foreground text-muted-foreground";
+      }
+    };
+
+    return (
+      <div className="relative flex flex-col items-center gap-2 group">
+        <div className="relative z-10" ref={ref}>
+          <div
+            className={cn(
+              "w-10 h-10 rounded-full border-[3px] flex items-center justify-center",
+              "transition-all duration-300 cursor-pointer",
+              "hover:scale-110 hover:shadow-lg",
+              getStatusColor()
+            )}
+            style={{
+              borderColor: rdm.status === "pending" ? color : undefined,
+              boxShadow:
+                rdm.status === "executed"
+                  ? `0 4px 12px rgba(34, 197, 94, 0.2)`
+                  : rdm.status === "failed"
+                  ? `0 4px 12px rgba(239, 68, 68, 0.2)`
+                  : undefined,
+            }}
+          >
+            {getStatusIcon()}
           </div>
         </div>
-      </header>
 
-      <main className="max-w-7xl mx-auto px-6 py-8">
-        {/* Metrics Section */}
-        <section className="mb-10">
-          <h2 className="text-2xl font-bold text-foreground mb-6">Indicadores Principais</h2>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-            {metrics.map((metric, index) => (
-              <MetricCard key={index} {...metric} />
-            ))}
+        <div
+          className={cn(
+            "flex flex-col items-center gap-1 mt-2",
+            showSideInfo && "absolute top-1/2 -translate-y-1/2 z-10 mt-0",
+            showSideInfo && sideIsRight && "left-full ml-3 items-start",
+            showSideInfo && sideIsLeft && "right-full mr-3 items-end"
+          )}
+        >
+          <div
+            className="font-bold text-xs px-2 py-1 rounded-full whitespace-nowrap shadow-sm"
+            style={{
+              backgroundColor: `${color}25`,
+              color: color,
+            }}
+          >
+            {rdm.number}
           </div>
-        </section>
+          <div className="text-xs font-medium text-muted-foreground bg-card px-2 py-0.5 rounded border border-border shadow-sm">
+            {rdm.time}
+          </div>
+        </div>
 
-        {/* Area Reports Section */}
-        <section>
-          <h2 className="text-2xl font-bold text-foreground mb-6">Performance por Área</h2>
-          {selectedIndex === null ? (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-              {areaReports.map((report, index) => (
-                <div
-                  key={index}
-                  role="button"
-                  tabIndex={0}
-                  onClick={() => setSelectedIndex(index)}
-                  onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setSelectedIndex(index); } }}
-                  className="cursor-pointer focus:outline-none focus:ring-2 focus:ring-primary rounded-lg"
-                >
-                  <AreaReport {...report} />
-                </div>
-              ))}
+        {rdm.description && (
+          <div className="absolute top-full mt-20 opacity-0 group-hover:opacity-100 transition-opacity duration-200 z-20 pointer-events-none group-hover:pointer-events-auto">
+            <div className="bg-card border border-border rounded-lg p-3 shadow-lg min-w-[180px] max-w-[250px]">
+              <p className="text-xs text-foreground">{rdm.description}</p>
             </div>
-          ) : (
-            <div className="space-y-6">
-              <div className="flex items-center justify-between">
-                <div className="text-sm text-muted-foreground">Mostrando detalhes de</div>
-                <button
-                  onClick={() => setSelectedIndex(null)}
-                  className="text-sm px-3 py-1.5 rounded-md border border-border hover:bg-accent transition-colors"
-                >
-                  Mostrar todas as áreas
-                </button>
-              </div>
-              <AreaReport {...areaReports[selectedIndex]} />
-              <div className="rounded-lg border p-4">
-                <Timeline
-                  items={[
-                    { year: 1972, title: "Controle da Família" },
-                    { year: 1987, title: "Brase Light" },
-                    { year: 1991, title: "Porto Socorro" },
-                    { year: 2003, title: "Azul Seguros" },
-                    { year: 2004, title: "IPO" },
-                    { year: 2016, title: "Carro Fácil" },
-                    { year: 2019, title: "Nova Presidência" },
-                    { year: 2022, title: "Rebranding" },
-                  ]}
+          </div>
+        )}
+      </div>
+    );
+  }
+);
+
+RDMNode.displayName = "RDMNode";
+
+export const RDMTimeline: React.FC<RDMTimelineProps> = ({ productLine }) => {
+  const nodesPerRow = 8;
+  const rows = Math.ceil(productLine.rdms.length / nodesPerRow);
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const nodeRefs = useRef<Array<HTMLDivElement | null>>([]);
+  const [linePositions, setLinePositions] = useState<
+    Array<{ x1: number; y1: number; x2: number; y2: number }>
+  >([]);
+
+  if (nodeRefs.current.length !== productLine.rdms.length) {
+    nodeRefs.current = Array(productLine.rdms.length).fill(null);
+  }
+
+  const recalcPositions = () => {
+    if (!containerRef.current) return;
+    const containerRect = containerRef.current.getBoundingClientRect();
+    const positions: Array<{ x: number; y: number; ok: boolean }> = nodeRefs.current.map((el) => {
+      if (!el) return { x: 0, y: 0, ok: false };
+      const rect = el.getBoundingClientRect();
+      return {
+        x: rect.left - containerRect.left + rect.width / 2,
+        y: rect.top - containerRect.top + rect.height / 2,
+        ok: rect.width > 0 && rect.height > 0,
+      };
+    });
+
+    const lines: Array<{ x1: number; y1: number; x2: number; y2: number }> = [];
+    for (let i = 0; i < positions.length - 1; i++) {
+      const p1 = positions[i];
+      const p2 = positions[i + 1];
+      if (p1.ok && p2.ok) {
+        lines.push({ x1: p1.x, y1: p1.y, x2: p2.x, y2: p2.y });
+      }
+    }
+    setLinePositions(lines);
+  };
+
+  useLayoutEffect(() => {
+    recalcPositions();
+    const onResize = () => recalcPositions();
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, [productLine.rdms.length, nodesPerRow]);
+
+  return (
+    <div className="mb-12 last:mb-0">
+      <div className="mb-6">
+        <h3 className="text-lg font-semibold text-foreground">{productLine.name}</h3>
+      </div>
+
+      <div className="relative w-full mb-4" ref={containerRef}>
+        <svg className="absolute inset-0 w-full h-full pointer-events-none" style={{ zIndex: 0 }}>
+          {linePositions.map((pos, index) => (
+            <line
+              key={`line-${index}`}
+              x1={pos.x1}
+              y1={pos.y1}
+              x2={pos.x2}
+              y2={pos.y2}
+              stroke={productLine.color}
+              strokeWidth={2}
+              strokeLinecap="round"
+            />
+          ))}
+        </svg>
+
+        <div
+          className="relative grid gap-x-4 gap-y-8 py-8"
+          style={{
+            gridTemplateColumns: `repeat(${nodesPerRow}, 1fr)`,
+            minHeight: `${rows * 140}px`,
+            zIndex: 1,
+          }}
+        >
+          {productLine.rdms.map((rdm, index) => {
+            const row = Math.floor(index / nodesPerRow);
+            const col = index % nodesPerRow;
+            const isRightToLeft = row % 2 === 1;
+            const gridCol = isRightToLeft ? nodesPerRow - col : col + 1;
+
+            return (
+              <div
+                key={rdm.id}
+                style={{ gridColumn: gridCol, gridRow: row + 1 }}
+                className="flex justify-center"
+              >
+                <RDMNode
+                  ref={(el) => (nodeRefs.current[index] = el)}
+                  rdm={rdm}
+                  color={productLine.color}
+                  isFirst={index === 0}
+                  isLast={index === productLine.rdms.length - 1}
+                  productLineId={productLine.id}
                 />
               </div>
-            </div>
-          )}
-        </section>
-      </main>
+            );
+          })}
+        </div>
+      </div>
 
-      {/* Footer removed as requested */}
+      <ProductSummary productLine={productLine} />
     </div>
   );
 };
 
-export default Index;
+export default RDMTimeline;
