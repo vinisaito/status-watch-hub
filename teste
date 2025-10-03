@@ -9,106 +9,37 @@ interface MetricCardProps {
   value: string;
   trend: "up" | "down";
   icon: LucideIcon;
-  color?: string;
-  performance?: number;
+  color?: string; // tailwind class for text/bg e.g., 'text-blue-600 bg-blue-100'
+  performance?: number; // optional percentage to render a progress bar
 }
 
-export const MetricCard = ({ 
-  title, 
-  value, 
-  trend, 
-  icon: Icon, 
-  color, 
-  performance 
-}: MetricCardProps) => {
-  // Map color classes to design system tokens
-  const colorMap: Record<string, { text: string; bg: string; indicator: string; trendBg: string }> = {
-    "text-emerald-600 bg-emerald-100": {
-      text: "text-[hsl(var(--metric-success))]",
-      bg: "bg-[hsl(var(--metric-success-light))]",
-      indicator: "bg-[hsl(var(--metric-success))]",
-      trendBg: "bg-[hsl(var(--metric-success))]/10",
-    },
-    "text-amber-600 bg-amber-100": {
-      text: "text-[hsl(var(--metric-warning))]",
-      bg: "bg-[hsl(var(--metric-warning-light))]",
-      indicator: "bg-[hsl(var(--metric-warning))]",
-      trendBg: "bg-[hsl(var(--metric-warning))]/10",
-    },
-    "text-blue-600 bg-blue-100": {
-      text: "text-[hsl(var(--metric-info))]",
-      bg: "bg-[hsl(var(--metric-info-light))]",
-      indicator: "bg-[hsl(var(--metric-info))]",
-      trendBg: "bg-[hsl(var(--metric-info))]/10",
-    },
-    "text-rose-600 bg-rose-100": {
-      text: "text-[hsl(var(--metric-danger))]",
-      bg: "bg-[hsl(var(--metric-danger-light))]",
-      indicator: "bg-[hsl(var(--metric-danger))]",
-      trendBg: "bg-[hsl(var(--metric-danger))]/10",
-    },
-  };
-
-  const colors = color ? colorMap[color] : {
-    text: "text-primary",
-    bg: "bg-primary/10",
-    indicator: "bg-primary",
-    trendBg: "bg-primary/10",
-  };
-
-  const TrendIcon = trend === "up" ? ArrowUp : ArrowDown;
-  const trendColor = trend === "up" 
-    ? "text-[hsl(var(--metric-success))] bg-[hsl(var(--metric-success))]/10" 
-    : "text-[hsl(var(--metric-danger))] bg-[hsl(var(--metric-danger))]/10";
+export const MetricCard = ({ title, value, trend, icon: Icon, color, performance }: MetricCardProps) => {
+  const iconColor = color?.includes("text-") ? color : undefined;
+  const bgTint = color?.includes("bg-") ? color : undefined;
+  // Derive indicator color class from text color if provided (fallback to primary)
+  // Expecting classes like 'text-blue-600' -> map to 'bg-blue-600'
+  const indicatorClass = iconColor
+    ? iconColor.replace("text-", "bg-")
+    : "bg-primary";
 
   return (
-    <Card className="metric-card relative overflow-hidden metric-card-hover border-0 shadow-md">
-      {/* Subtle gradient background */}
-      <div className="absolute inset-0 bg-gradient-to-br from-card via-card to-accent/30 opacity-50" />
-      
-      <div className="relative p-6">
-        {/* Header with icon and trend */}
-        <div className="flex items-start justify-between mb-6">
-          <div className={cn("p-3 rounded-xl", colors.bg)}>
-            <Icon className={cn("h-7 w-7 metric-icon-glow", colors.text)} strokeWidth={2.5} />
-          </div>
-          <div className={cn("flex items-center gap-1 px-2.5 py-1.5 rounded-full text-xs font-semibold", trendColor)}>
-            <TrendIcon className="h-3.5 w-3.5" strokeWidth={3} />
-          </div>
+    <Card className="p-6 hover:shadow-lg transition-shadow">
+      <div className="flex items-start justify-between mb-4">
+        <div className={cn("p-2 rounded-lg", bgTint ? bgTint : "bg-primary/10") }>
+          <Icon className={cn("h-6 w-6", iconColor ? iconColor : "text-primary")} />
         </div>
-
-        {/* Title */}
-        <h3 className="text-sm font-semibold text-muted-foreground mb-3 tracking-wide uppercase">
-          {title}
-        </h3>
-
-        {/* Value */}
-        <p className="text-4xl font-bold text-foreground mb-6 tracking-tight">
-          {value}
-        </p>
-
-        {/* Performance bar */}
-        {typeof performance === 'number' && (
-          <div className="space-y-3">
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
-                Performance
-              </span>
-              <span className={cn("text-sm font-bold tabular-nums", colors.text)}>
-                {Math.round(performance)}%
-              </span>
-            </div>
-            <div className="relative h-2.5 bg-muted rounded-full overflow-hidden">
-              <div 
-                className={cn("h-full rounded-full transition-all duration-500 ease-out", colors.indicator)}
-                style={{ width: `${performance}%` }}
-              >
-                <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/20 to-transparent animate-shimmer" />
-              </div>
-            </div>
-          </div>
-        )}
       </div>
+      <h3 className="text-sm font-medium text-muted-foreground mb-2">{title}</h3>
+      <p className="text-3xl font-bold text-foreground mb-2">{value}</p>
+      {typeof performance === 'number' && (
+        <div className="mt-3">
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-sm font-medium text-foreground">Performance</span>
+            <span className="text-sm font-bold text-foreground">{Math.round(performance)}%</span>
+          </div>
+          <Progress value={performance} className="h-2" indicatorClassName={indicatorClass} />
+        </div>
+      )}
     </Card>
   );
 };
