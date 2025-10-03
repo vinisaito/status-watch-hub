@@ -29,7 +29,7 @@ export const Timeline: React.FC<TimelineProps> = ({ items, className }) => {
   const xTop = (i: number, total: number) => {
     if (total <= 1) return (PADDING_X + RIGHT_X) / 2;
     // Distribute until before the arc starts, leaving space for the curve
-    const topLineEnd = RIGHT_X - R * 0.3;
+    const topLineEnd = RIGHT_X - R;
     return PADDING_X + (i * (topLineEnd - PADDING_X)) / (total - 1);
   };
 
@@ -37,15 +37,15 @@ export const Timeline: React.FC<TimelineProps> = ({ items, className }) => {
   const xBottom = (i: number, total: number) => {
     if (total <= 1) return (PADDING_X + BOTTOM_RIGHT_X) / 2;
     // Start from after the arc ends, leaving space for the curve
-    const bottomLineStart = BOTTOM_RIGHT_X + R * 0.3;
+    const bottomLineStart = RIGHT_X - 12;
     return bottomLineStart - (i * (bottomLineStart - PADDING_X)) / (total - 1);
   };
 
   // Improved path with smoother curve
   const pathD = [
     `M ${PADDING_X} ${TOP_Y}`,
-    `H ${RIGHT_X}`,
-    `A ${R} ${R} 0 0 1 ${RIGHT_X - R} ${BOTTOM_Y}`,
+    `H ${RIGHT_X - R}`,
+    `A ${R} ${R} 0 0 1 ${RIGHT_X} ${BOTTOM_Y}`,
     `H ${PADDING_X}`,
   ].join(" ");
 
