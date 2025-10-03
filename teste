@@ -1,212 +1,292 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+import { MetricCard } from "@/components/MetricCard";
+import { AreaReport } from "@/components/AreaReport";
+import { RotateCcw, Clock, CheckCircle2, AlertCircle } from "lucide-react";
+import { useState, useRef, useEffect } from "react";
+import { SnakeLine } from "@/components/SnakeLine";
+import RDMTimeline from "@/components/RDMTimeline";
+import type { ProductLine, RDM } from "@/types/rdm";
 
-/* Definition of the design system. All colors, gradients, fonts, etc should be defined here. 
-All colors MUST be HSL.
-*/
+const Index = () => {
+  const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
+  const [lineCoords, setLineCoords] = useState<{ startX: number; startY: number; endX: number; endY: number } | null>(null);
+  const cardRefs = useRef<(HTMLDivElement | null)[]>([]);
+  const timelineRef = useRef<HTMLDivElement>(null);
 
-@layer base {
-  :root {
-    --background: 0 0% 100%;
-    --foreground: 222.2 84% 4.9%;
+  const metrics = [
+    {
+      title: "Concluídas",
+      value: "142",
+      icon: CheckCircle2,
+      variant: "success" as const,
+      performance: 92,
+    },
+    {
+      title: "Em Andamento",
+      value: "28",
+      icon: Clock,
+      variant: "warning" as const,
+      performance: 78,
+    },
+    {
+      title: "Abertas",
+      value: "37",
+      icon: AlertCircle,
+      variant: "primary" as const,
+      performance: 64,
+    },
+    {
+      title: "Rollback",
+      value: "5",
+      icon: RotateCcw,
+      variant: "accent" as const,
+      performance: 55,
+    },
+  ];
 
-    --card: 0 0% 100%;
-    --card-foreground: 222.2 84% 4.9%;
+  useEffect(() => {
+    const updateCoords = () => {
+      if (selectedIndex !== null && cardRefs.current[selectedIndex] && timelineRef.current) {
+        const cardRect = cardRefs.current[selectedIndex]!.getBoundingClientRect();
+        const timelineRect = timelineRef.current.getBoundingClientRect();
 
-    --popover: 0 0% 100%;
-    --popover-foreground: 222.2 84% 4.9%;
+        const clamp = (val: number, min: number, max: number) => Math.min(Math.max(val, min), max);
+        const vw = window.innerWidth;
+        const vh = window.innerHeight;
 
-    --primary: 222.2 47.4% 11.2%;
-    --primary-foreground: 210 40% 98%;
+        setLineCoords({
+          startX: clamp(cardRect.left + cardRect.width / 2, 0, vw),
+          startY: clamp(cardRect.top + cardRect.height, 0, vh),
+          endX: clamp(timelineRect.left + timelineRect.width / 2, 0, vw),
+          endY: clamp(timelineRect.top, 0, vh),
+        });
+      } else {
+        setLineCoords(null);
+      }
+    };
 
-    --secondary: 210 40% 96.1%;
-    --secondary-foreground: 222.2 47.4% 11.2%;
+    const raf = requestAnimationFrame(updateCoords);
+    window.addEventListener("resize", updateCoords);
+    window.addEventListener("scroll", updateCoords, { passive: true });
 
-    --muted: 210 40% 96.1%;
-    --muted-foreground: 215.4 16.3% 46.9%;
+    return () => {
+      cancelAnimationFrame(raf);
+      window.removeEventListener("resize", updateCoords);
+      window.removeEventListener("scroll", updateCoords);
+    };
+  }, [selectedIndex]);
 
-    --accent: 210 40% 96.1%;
-    --accent-foreground: 222.2 47.4% 11.2%;
+  const areaReports = [
+    {
+      area: "Porto Seguro",
+      manager: "Ana Silva",
+      performance: 92,
+      revenue: "R$ 12.5M",
+      status: "excellent" as const,
+      rdmStats: { concluidas: 120, emAndamento: 18, abertas: 10, rollback: 4 },
+      areaColor: "porto-seguro",
+    },
+    {
+      area: "Porto Serviço",
+      manager: "Carlos Oliveira",
+      performance: 85,
+      revenue: "R$ 10.8M",
+      status: "good" as const,
+      rdmStats: { concluidas: 95, emAndamento: 22, abertas: 14, rollback: 6 },
+      areaColor: "porto-servico",
+    },
+    {
+      area: "Porto Bank",
+      manager: "Mariana Costa",
+      performance: 88,
+      revenue: "R$ 15.2M",
+      status: "excellent" as const,
+      rdmStats: { concluidas: 140, emAndamento: 12, abertas: 8, rollback: 3 },
+      areaColor: "porto-bank",
+    },
+    {
+      area: "Porto Saúde",
+      manager: "Roberto Santos",
+      performance: 72,
+      revenue: "R$ 6.7M",
+      status: "attention" as const,
+      rdmStats: { concluidas: 60, emAndamento: 28, abertas: 20, rollback: 9 },
+      areaColor: "porto-saude",
+    },
+    {
+      area: "Canais Digitais",
+      manager: "Juliana Mendes",
+      performance: 95,
+      revenue: "R$ 8.4M",
+      status: "excellent" as const,
+      rdmStats: { concluidas: 160, emAndamento: 10, abertas: 5, rollback: 2 },
+      areaColor: "canais-digitais",
+    },
+    {
+      area: "Infraestrutura",
+      manager: "Fernando Lima",
+      performance: 68,
+      revenue: "R$ 5.1M",
+      status: "attention" as const,
+      rdmStats: { concluidas: 55, emAndamento: 24, abertas: 18, rollback: 7 },
+      areaColor: "infraestrutura",
+    },
+    {
+      area: "Atendimento",
+      manager: "Luiz Ferreira",
+      performance: 81,
+      revenue: "R$ 9.3M",
+      status: "good" as const,
+      rdmStats: { concluidas: 100, emAndamento: 20, abertas: 12, rollback: 5 },
+      areaColor: "atendimento",
+    },
+    {
+      area: "Arquitetura",
+      manager: "Patrícia Almeida",
+      performance: 74,
+      revenue: "R$ 2.1M",
+      status: "attention" as const,
+      rdmStats: { concluidas: 70, emAndamento: 15, abertas: 11, rollback: 4 },
+      areaColor: "arquitetura",
+    },
+  ];
 
-    --destructive: 0 84.2% 60.2%;
-    --destructive-foreground: 210 40% 98%;
+  const buildProductLine = (areaName: string, idx: number): ProductLine => {
+    const colors = [
+      "#00d6fc", "#0046c0", "#001864", "#2ccc8a",
+      "#6b45ff", "#7fa8c3", "#ff5a49", "#c39fd1",
+    ];
 
-    --border: 214.3 31.8% 91.4%;
-    --input: 214.3 31.8% 91.4%;
-    --ring: 222.2 84% 4.9%;
+    const rdmCount = 16;
+    const rdmsAll: RDM[] = Array.from({ length: rdmCount }).map((_, i) => {
+      const num = (i + 1).toString().padStart(3, "0");
+      const hour = 8 + Math.floor(i / 2);
+      const minute = (i % 2) * 30;
+      const time = `${hour.toString().padStart(2, "0")}:${minute.toString().padStart(2, "0")}`;
+      const status: RDM["status"] = i % 7 === 0 ? "failed" : i % 3 === 0 ? "pending" : "executed";
+      return {
+        id: `${areaName}-${num}`,
+        number: num,
+        time,
+        status,
+        description:
+          i % 5 === 0
+            ? "Atividade"
+            : undefined,
+      };
+    });
+    const rdms = rdmsAll.filter((r) => r.time !== "11:30" && r.time !== "15:30");
 
-    --radius: 0.5rem;
+    return {
+      id: `produto-${idx + 1}`,
+      name: `RDMS - ${areaName}`,
+      color: colors[idx % colors.length],
+      rdms,
+    };
+  };
 
-    /* Status colors */
-    --success: 162 73% 46%;
-    --success-light: 162 73% 90%;
-    --warning: 43 96% 56%;
-    --warning-light: 43 96% 90%;
-    --blue-accent: 217 91% 60%;
-    --blue-soft: 217 91% 95%;
-    --blue-medium: 217 91% 60%;
-    --neutral-50: 210 20% 98%;
-    --neutral-100: 214 32% 91%;
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-[hsl(var(--background))] via-[hsl(var(--neutral-50))] to-[hsl(var(--blue-soft))]">
+      {/* Header */}
+      <header className="bg-white/80 backdrop-blur-sm py-2 px-6 shadow-sm sticky top-0 z-20 border-b border-[hsl(var(--border))]">
+        <div className="max-w-7xl mx-auto">
+          <div className="flex justify-center">
+            <img src="/logo.png" alt="Logo" className="h-12 md:h-16 w-auto" />
+          </div>
+        </div>
+      </header>
 
-    --sidebar-background: 0 0% 98%;
+      <main className="max-w-7xl mx-auto px-6 py-8">
+        {/* Metrics Section */}
+        <section className="mb-12">
+          <div className="mb-8 text-center">
+            <h2 className="text-2xl md:text-3xl font-bold text-foreground mb-2 tracking-tight">
+              Requisições de Mudanças das Últimas 24 horas
+            </h2>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+            {metrics.map((metric, index) => (
+              <div key={index} className="animate-fade-in" style={{ animationDelay: `${index * 100}ms` }}>
+                <MetricCard {...metric} />
+              </div>
+            ))}
+          </div>
+        </section>
 
-    --sidebar-foreground: 240 5.3% 26.1%;
+        {/* Area Reports Section */}
+        <section>
+          <div className="mb-8 text-center">
+            <h2 className="text-3xl md:text-4xl font-bold text-foreground mb-2 tracking-tight">
+              Status por Área
+            </h2>
+            <p className="text-lg text-muted-foreground">
+              {selectedIndex === null 
+                ? "Selecione uma área para ver detalhes das RDMs"
+                : "Detalhamento das requisições de mudança"}
+            </p>
+          </div>
+          
+          {selectedIndex === null ? (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+              {areaReports.map((report, index) => (
+                <div
+                  key={index}
+                  ref={(el) => (cardRefs.current[index] = el)}
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => setSelectedIndex(index)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      setSelectedIndex(index);
+                    }
+                  }}
+                  className="cursor-pointer focus:outline-none focus:ring-2 focus:ring-primary rounded-lg animate-fade-in"
+                  style={{ animationDelay: `${index * 80}ms` }}
+                >
+                  <AreaReport {...report} />
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="space-y-6 animate-fade-in">
+              <div className="flex items-center justify-between bg-white/50 backdrop-blur-sm p-4 rounded-lg border border-[hsl(var(--border))]">
+                <div className="text-sm font-medium text-foreground">
+                  Mostrando detalhes de <span className="font-bold text-[hsl(var(--blue-medium))]">{areaReports[selectedIndex].area}</span>
+                </div>
+                <button
+                  onClick={() => setSelectedIndex(null)}
+                  className="text-sm font-medium px-4 py-2 rounded-lg border border-[hsl(var(--border))] bg-white hover:bg-[hsl(var(--blue-soft))] hover:border-[hsl(var(--blue-medium))] transition-all duration-300 shadow-sm hover:shadow-md"
+                >
+                  ← Voltar para todas as áreas
+                </button>
+              </div>
+              <div ref={(el) => (cardRefs.current[selectedIndex] = el)} className="mb-6">
+                <AreaReport {...areaReports[selectedIndex]} />
+              </div>
+              <div ref={timelineRef} className="rounded-lg border border-[hsl(var(--border))] bg-white/50 backdrop-blur-sm p-6 shadow-lg">
+                <RDMTimeline
+                  productLine={buildProductLine(
+                    areaReports[selectedIndex].area,
+                    selectedIndex
+                  )}
+                />
+              </div>
+            </div>
+          )}
+        </section>
+      </main>
 
-    --sidebar-primary: 240 5.9% 10%;
+      {/* Snake Line Animation */}
+      {lineCoords && (
+        <SnakeLine
+          startX={lineCoords.startX}
+          startY={lineCoords.startY}
+          endX={lineCoords.endX}
+          endY={lineCoords.endY}
+        />
+      )}
+    </div>
+  );
+};
 
-    --sidebar-primary-foreground: 0 0% 98%;
-
-    --sidebar-accent: 240 4.8% 95.9%;
-
-    --sidebar-accent-foreground: 240 5.9% 10%;
-
-    --sidebar-border: 220 13% 91%;
-
-    --sidebar-ring: 217.2 91.2% 59.8%;
-
-    /* Area-specific colors - Porto Seguro */
-    --porto-seguro-primary: 191 55% 65%;
-    --porto-seguro-secondary: 191 45% 75%;
-    --porto-seguro-accent: 191 50% 95%;
-
-    /* Area-specific colors - Porto Serviço */
-    --porto-servico-primary: 218 50% 60%;
-    --porto-servico-secondary: 218 40% 70%;
-    --porto-servico-accent: 218 45% 95%;
-
-    /* Area-specific colors - Porto Bank */
-    --porto-bank-primary: 220 40% 45%;
-    --porto-bank-secondary: 220 35% 60%;
-    --porto-bank-accent: 220 30% 92%;
-
-    /* Area-specific colors - Porto Saúde */
-    --porto-saude-primary: 162 45% 60%;
-    --porto-saude-secondary: 162 35% 70%;
-    --porto-saude-accent: 162 40% 95%;
-
-    /* Area-specific colors - Canais Digitais */
-    --canais-digitais-primary: 248 50% 70%;
-    --canais-digitais-secondary: 248 40% 80%;
-    --canais-digitais-accent: 248 45% 95%;
-
-    /* Area-specific colors - Infraestrutura */
-    --infraestrutura-primary: 201 40% 65%;
-    --infraestrutura-secondary: 201 35% 75%;
-    --infraestrutura-accent: 201 35% 94%;
-
-    /* Area-specific colors - Atendimento */
-    --atendimento-primary: 9 55% 70%;
-    --atendimento-secondary: 9 45% 80%;
-    --atendimento-accent: 9 50% 95%;
-
-    /* Area-specific colors - Arquitetura */
-    --arquitetura-primary: 279 45% 70%;
-    --arquitetura-secondary: 279 35% 80%;
-    --arquitetura-accent: 279 40% 95%;
-  }
-
-  .dark {
-    --background: 222.2 84% 4.9%;
-    --foreground: 210 40% 98%;
-
-    --card: 222.2 84% 4.9%;
-    --card-foreground: 210 40% 98%;
-
-    --popover: 222.2 84% 4.9%;
-    --popover-foreground: 210 40% 98%;
-
-    --primary: 210 40% 98%;
-    --primary-foreground: 222.2 47.4% 11.2%;
-
-    --secondary: 217.2 32.6% 17.5%;
-    --secondary-foreground: 210 40% 98%;
-
-    --muted: 217.2 32.6% 17.5%;
-    --muted-foreground: 215 20.2% 65.1%;
-
-    --accent: 217.2 32.6% 17.5%;
-    --accent-foreground: 210 40% 98%;
-
-    --destructive: 0 62.8% 30.6%;
-    --destructive-foreground: 210 40% 98%;
-
-    --border: 217.2 32.6% 17.5%;
-    --input: 217.2 32.6% 17.5%;
-    --ring: 212.7 26.8% 83.9%;
-    --sidebar-background: 240 5.9% 10%;
-    --sidebar-foreground: 240 4.8% 95.9%;
-    --sidebar-primary: 224.3 76.3% 48%;
-    --sidebar-primary-foreground: 0 0% 100%;
-    --sidebar-accent: 240 3.7% 15.9%;
-    --sidebar-accent-foreground: 240 4.8% 95.9%;
-    --sidebar-border: 240 3.7% 15.9%;
-    --sidebar-ring: 217.2 91.2% 59.8%;
-
-    /* Area-specific colors - Porto Seguro */
-    --porto-seguro-primary: 191 100% 49%;
-    --porto-seguro-secondary: 219 69% 47%;
-    --porto-seguro-accent: 191 100% 85%;
-
-    /* Area-specific colors - Porto Serviço */
-    --porto-servico-primary: 218 100% 38%;
-    --porto-servico-secondary: 232 70% 32%;
-    --porto-servico-accent: 218 100% 80%;
-
-    /* Area-specific colors - Porto Bank */
-    --porto-bank-primary: 220 100% 20%;
-    --porto-bank-secondary: 229 100% 13%;
-    --porto-bank-accent: 220 45% 65%;
-
-    /* Area-specific colors - Porto Saúde */
-    --porto-saude-primary: 162 64% 49%;
-    --porto-saude-secondary: 44 73% 61%;
-    --porto-saude-accent: 162 64% 85%;
-
-    /* Area-specific colors - Canais Digitais */
-    --canais-digitais-primary: 248 87% 63%;
-    --canais-digitais-secondary: 248 87% 50%;
-    --canais-digitais-accent: 248 87% 90%;
-
-    /* Area-specific colors - Infraestrutura */
-    --infraestrutura-primary: 201 47% 51%;
-    --infraestrutura-secondary: 201 47% 35%;
-    --infraestrutura-accent: 201 47% 85%;
-
-    /* Area-specific colors - Atendimento */
-    --atendimento-primary: 9 100% 65%;
-    --atendimento-secondary: 9 100% 50%;
-    --atendimento-accent: 9 100% 90%;
-
-    /* Area-specific colors - Arquitetura */
-    --arquitetura-primary: 279 64% 63%;
-    --arquitetura-secondary: 279 64% 50%;
-    --arquitetura-accent: 279 64% 90%;
-  }
-}
-
-@layer base {
-  * {
-    @apply border-border;
-  }
-
-  body {
-    @apply bg-background text-foreground;
-  }
-
-  @keyframes fade-in {
-    from {
-      opacity: 0;
-      transform: translateY(10px);
-    }
-    to {
-      opacity: 1;
-      transform: translateY(0);
-    }
-  }
-
-  .animate-fade-in {
-    animation: fade-in 0.5s ease-out forwards;
-    opacity: 0;
-  }
-}
+export default Index;
