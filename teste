@@ -1,127 +1,212 @@
-import { Card } from "@/components/ui/card";
-import { Progress } from "@/components/ui/progress";
-import { cn } from "@/lib/utils";
-import { TrendingUp, CheckCircle2, Clock, AlertCircle, RotateCcw } from "lucide-react";
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
 
-interface AreaReportProps {
-  area: string;
-  manager: string;
-  performance: number;
-  revenue: string;
-  status: "excellent" | "good" | "attention";
-  rdmStats: {
-    concluidas: number;
-    emAndamento: number;
-    abertas: number;
-    rollback: number;
-  };
-  areaColor?: string;
+/* Definition of the design system. All colors, gradients, fonts, etc should be defined here. 
+All colors MUST be HSL.
+*/
+
+@layer base {
+  :root {
+    --background: 0 0% 100%;
+    --foreground: 222.2 84% 4.9%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 222.2 84% 4.9%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 222.2 84% 4.9%;
+
+    --primary: 222.2 47.4% 11.2%;
+    --primary-foreground: 210 40% 98%;
+
+    --secondary: 210 40% 96.1%;
+    --secondary-foreground: 222.2 47.4% 11.2%;
+
+    --muted: 210 40% 96.1%;
+    --muted-foreground: 215.4 16.3% 46.9%;
+
+    --accent: 210 40% 96.1%;
+    --accent-foreground: 222.2 47.4% 11.2%;
+
+    --destructive: 0 84.2% 60.2%;
+    --destructive-foreground: 210 40% 98%;
+
+    --border: 214.3 31.8% 91.4%;
+    --input: 214.3 31.8% 91.4%;
+    --ring: 222.2 84% 4.9%;
+
+    --radius: 0.5rem;
+
+    /* Status colors */
+    --success: 162 73% 46%;
+    --success-light: 162 73% 90%;
+    --warning: 43 96% 56%;
+    --warning-light: 43 96% 90%;
+    --blue-accent: 217 91% 60%;
+    --blue-soft: 217 91% 95%;
+    --blue-medium: 217 91% 60%;
+    --neutral-50: 210 20% 98%;
+    --neutral-100: 214 32% 91%;
+
+    --sidebar-background: 0 0% 98%;
+
+    --sidebar-foreground: 240 5.3% 26.1%;
+
+    --sidebar-primary: 240 5.9% 10%;
+
+    --sidebar-primary-foreground: 0 0% 98%;
+
+    --sidebar-accent: 240 4.8% 95.9%;
+
+    --sidebar-accent-foreground: 240 5.9% 10%;
+
+    --sidebar-border: 220 13% 91%;
+
+    --sidebar-ring: 217.2 91.2% 59.8%;
+
+    /* Area-specific colors - Porto Seguro */
+    --porto-seguro-primary: 191 55% 65%;
+    --porto-seguro-secondary: 191 45% 75%;
+    --porto-seguro-accent: 191 50% 95%;
+
+    /* Area-specific colors - Porto Serviço */
+    --porto-servico-primary: 218 50% 60%;
+    --porto-servico-secondary: 218 40% 70%;
+    --porto-servico-accent: 218 45% 95%;
+
+    /* Area-specific colors - Porto Bank */
+    --porto-bank-primary: 220 40% 45%;
+    --porto-bank-secondary: 220 35% 60%;
+    --porto-bank-accent: 220 30% 92%;
+
+    /* Area-specific colors - Porto Saúde */
+    --porto-saude-primary: 162 45% 60%;
+    --porto-saude-secondary: 162 35% 70%;
+    --porto-saude-accent: 162 40% 95%;
+
+    /* Area-specific colors - Canais Digitais */
+    --canais-digitais-primary: 248 50% 70%;
+    --canais-digitais-secondary: 248 40% 80%;
+    --canais-digitais-accent: 248 45% 95%;
+
+    /* Area-specific colors - Infraestrutura */
+    --infraestrutura-primary: 201 40% 65%;
+    --infraestrutura-secondary: 201 35% 75%;
+    --infraestrutura-accent: 201 35% 94%;
+
+    /* Area-specific colors - Atendimento */
+    --atendimento-primary: 9 55% 70%;
+    --atendimento-secondary: 9 45% 80%;
+    --atendimento-accent: 9 50% 95%;
+
+    /* Area-specific colors - Arquitetura */
+    --arquitetura-primary: 279 45% 70%;
+    --arquitetura-secondary: 279 35% 80%;
+    --arquitetura-accent: 279 40% 95%;
+  }
+
+  .dark {
+    --background: 222.2 84% 4.9%;
+    --foreground: 210 40% 98%;
+
+    --card: 222.2 84% 4.9%;
+    --card-foreground: 210 40% 98%;
+
+    --popover: 222.2 84% 4.9%;
+    --popover-foreground: 210 40% 98%;
+
+    --primary: 210 40% 98%;
+    --primary-foreground: 222.2 47.4% 11.2%;
+
+    --secondary: 217.2 32.6% 17.5%;
+    --secondary-foreground: 210 40% 98%;
+
+    --muted: 217.2 32.6% 17.5%;
+    --muted-foreground: 215 20.2% 65.1%;
+
+    --accent: 217.2 32.6% 17.5%;
+    --accent-foreground: 210 40% 98%;
+
+    --destructive: 0 62.8% 30.6%;
+    --destructive-foreground: 210 40% 98%;
+
+    --border: 217.2 32.6% 17.5%;
+    --input: 217.2 32.6% 17.5%;
+    --ring: 212.7 26.8% 83.9%;
+    --sidebar-background: 240 5.9% 10%;
+    --sidebar-foreground: 240 4.8% 95.9%;
+    --sidebar-primary: 224.3 76.3% 48%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 240 3.7% 15.9%;
+    --sidebar-accent-foreground: 240 4.8% 95.9%;
+    --sidebar-border: 240 3.7% 15.9%;
+    --sidebar-ring: 217.2 91.2% 59.8%;
+
+    /* Area-specific colors - Porto Seguro */
+    --porto-seguro-primary: 191 100% 49%;
+    --porto-seguro-secondary: 219 69% 47%;
+    --porto-seguro-accent: 191 100% 85%;
+
+    /* Area-specific colors - Porto Serviço */
+    --porto-servico-primary: 218 100% 38%;
+    --porto-servico-secondary: 232 70% 32%;
+    --porto-servico-accent: 218 100% 80%;
+
+    /* Area-specific colors - Porto Bank */
+    --porto-bank-primary: 220 100% 20%;
+    --porto-bank-secondary: 229 100% 13%;
+    --porto-bank-accent: 220 45% 65%;
+
+    /* Area-specific colors - Porto Saúde */
+    --porto-saude-primary: 162 64% 49%;
+    --porto-saude-secondary: 44 73% 61%;
+    --porto-saude-accent: 162 64% 85%;
+
+    /* Area-specific colors - Canais Digitais */
+    --canais-digitais-primary: 248 87% 63%;
+    --canais-digitais-secondary: 248 87% 50%;
+    --canais-digitais-accent: 248 87% 90%;
+
+    /* Area-specific colors - Infraestrutura */
+    --infraestrutura-primary: 201 47% 51%;
+    --infraestrutura-secondary: 201 47% 35%;
+    --infraestrutura-accent: 201 47% 85%;
+
+    /* Area-specific colors - Atendimento */
+    --atendimento-primary: 9 100% 65%;
+    --atendimento-secondary: 9 100% 50%;
+    --atendimento-accent: 9 100% 90%;
+
+    /* Area-specific colors - Arquitetura */
+    --arquitetura-primary: 279 64% 63%;
+    --arquitetura-secondary: 279 64% 50%;
+    --arquitetura-accent: 279 64% 90%;
+  }
 }
 
-const statusConfig = {
-  excellent: {
-    color: "text-[hsl(var(--success))]",
-    bgColor: "bg-[hsl(var(--success-light))]",
-    label: "Excelente",
-  },
-  good: {
-    color: "text-[hsl(var(--blue-accent))]",
-    bgColor: "bg-[hsl(var(--blue-soft))]",
-    label: "Bom",
-  },
-  attention: {
-    color: "text-[hsl(var(--warning))]",
-    bgColor: "bg-[hsl(var(--warning-light))]",
-    label: "Atenção",
-  },
-};
+@layer base {
+  * {
+    @apply border-border;
+  }
 
-export const AreaReport = ({ area, manager, performance, revenue, status, rdmStats, areaColor = "blue-medium" }: AreaReportProps) => {
-  const statusStyle = statusConfig[status];
+  body {
+    @apply bg-background text-foreground;
+  }
 
-  return (
-    <Card className="group relative overflow-hidden bg-card transition-all duration-300 hover:shadow-lg hover:-translate-y-1" style={{ borderColor: `hsl(var(--${areaColor}-primary) / 0.4)`, borderWidth: '2px' }}>
-      <div 
-        className="absolute inset-0 opacity-0 group-hover:opacity-60 transition-opacity duration-500" 
-        style={{ 
-          background: `linear-gradient(135deg, transparent 0%, hsl(var(--${areaColor}-accent)) 100%)` 
-        }}
-      />
-      
-      <div className="relative p-5">
-        {/* Header */}
-        <div className="flex items-start justify-between mb-4">
-          <div>
-            <h3 className="text-lg font-bold text-foreground mb-1">{area}</h3>
-            <p className="text-sm text-muted-foreground">{manager}</p>
-          </div>
-          <div className={cn("px-3 py-1 rounded-full text-xs font-semibold", statusStyle.bgColor, statusStyle.color)}>
-            {statusStyle.label}
-          </div>
-        </div>
+  @keyframes fade-in {
+    from {
+      opacity: 0;
+      transform: translateY(10px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
 
-        {/* Revenue */}
-        <div className="mb-4">
-          <p className="text-2xl font-bold text-foreground">{revenue}</p>
-          <p className="text-xs text-muted-foreground uppercase tracking-wide">Receita</p>
-        </div>
-
-        {/* Performance */}
-        <div className="mb-4">
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
-              Performance
-            </span>
-            <span 
-              className="text-sm font-bold" 
-              style={{ color: `hsl(var(--${areaColor}-primary))` }}
-            >
-              {performance}%
-            </span>
-          </div>
-          <div className="relative h-2 bg-muted rounded-full overflow-hidden">
-            <div
-              className="h-full rounded-full transition-all duration-1000 ease-out"
-              style={{ 
-                width: `${performance}%`,
-                background: `linear-gradient(90deg, hsl(var(--${areaColor}-secondary)) 0%, hsl(var(--${areaColor}-primary)) 100%)`
-              }}
-            />
-          </div>
-        </div>
-
-        {/* RDM Stats */}
-        <div className="grid grid-cols-2 gap-3 pt-4 border-t border-[hsl(var(--border))]">
-          <div className="flex items-center gap-2">
-            <CheckCircle2 className="h-4 w-4 text-[hsl(var(--success))]" />
-            <div>
-              <p className="text-sm font-bold text-foreground">{rdmStats.concluidas}</p>
-              <p className="text-xs text-muted-foreground">Concluídas</p>
-            </div>
-          </div>
-          <div className="flex items-center gap-2">
-            <Clock className="h-4 w-4 text-[hsl(var(--warning))]" />
-            <div>
-              <p className="text-sm font-bold text-foreground">{rdmStats.emAndamento}</p>
-              <p className="text-xs text-muted-foreground">Em Andamento</p>
-            </div>
-          </div>
-          <div className="flex items-center gap-2">
-            <AlertCircle className="h-4 w-4 text-[hsl(var(--blue-accent))]" />
-            <div>
-              <p className="text-sm font-bold text-foreground">{rdmStats.abertas}</p>
-              <p className="text-xs text-muted-foreground">Abertas</p>
-            </div>
-          </div>
-          <div className="flex items-center gap-2">
-            <RotateCcw className="h-4 w-4 text-[hsl(var(--destructive))]" />
-            <div>
-              <p className="text-sm font-bold text-foreground">{rdmStats.rollback}</p>
-              <p className="text-xs text-muted-foreground">Rollback</p>
-            </div>
-          </div>
-        </div>
-      </div>
-    </Card>
-  );
-};
+  .animate-fade-in {
+    animation: fade-in 0.5s ease-out forwards;
+    opacity: 0;
+  }
+}
