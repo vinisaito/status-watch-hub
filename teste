@@ -10,58 +10,62 @@ interface TimelineProps {
   className?: string;
 }
 
-// Straight top line, curved turn at the end, and straight bottom line
 export const Timeline: React.FC<TimelineProps> = ({ items, className }) => {
   const sorted = [...items].sort((a, b) => Number(a.year) - Number(b.year));
 
-  // Responsive SVG that fits the container width
+  // Responsive proportions
   const VB_WIDTH = 1200;
-  const VB_HEIGHT = 220;
-  const PADDING_X = 48;
-  const TOP_Y = 80;
-  const BOTTOM_Y = 160; // second straight line y
-  const R = BOTTOM_Y - TOP_Y; // radius for the quarter turn
+  const VB_HEIGHT = 280;
+  const PADDING_X = 60;
+  const TOP_Y = 100;
+  const BOTTOM_Y = 200;
+  const R = (BOTTOM_Y - TOP_Y) * 0.95; // Smoother radius
   const RIGHT_X = VB_WIDTH - PADDING_X;
 
-  // Distribute items across the top and bottom runs
   const half = Math.ceil(sorted.length / 2);
   const topItems = sorted.slice(0, half);
   const bottomItems = sorted.slice(half);
 
   const xTop = (i: number, total: number) => {
     if (total <= 1) return (PADDING_X + RIGHT_X) / 2;
-    return PADDING_X + (i * (RIGHT_X - PADDING_X)) / (total - 1);
+    return PADDING_X + (i * (RIGHT_X - PADDING_X - R)) / (total - 1);
   };
 
-  // Bottom straight begins after the curve endpoint, so reduce the right bound by R
   const BOTTOM_RIGHT_X = RIGHT_X - R;
   const xBottom = (i: number, total: number) => {
     if (total <= 1) return (PADDING_X + BOTTOM_RIGHT_X) / 2;
-    // Right-to-left to follow the serpentine direction visually
     return BOTTOM_RIGHT_X - (i * (BOTTOM_RIGHT_X - PADDING_X)) / (total - 1);
   };
 
-  // Path: top straight -> quarter arc turn -> bottom straight
+  // Improved path with smoother curve
   const pathD = [
     `M ${PADDING_X} ${TOP_Y}`,
-    `H ${RIGHT_X}`,
-    // quarter-circle arc down-left to (RIGHT_X - R, BOTTOM_Y)
+    `H ${RIGHT_X - R}`,
+    `A ${R} ${R} 0 0 1 ${RIGHT_X} ${TOP_Y + R}`,
+    `V ${BOTTOM_Y}`,
     `A ${R} ${R} 0 0 1 ${RIGHT_X - R} ${BOTTOM_Y}`,
-    // bottom straight back to the left
     `H ${PADDING_X}`,
   ].join(" ");
 
   return (
     <div className={className}>
-      <div className="relative w-full overflow-x-hidden">
+      <div className="relative w-full px-2 sm:px-4 md:px-6">
         <svg
           viewBox={`0 0 ${VB_WIDTH} ${VB_HEIGHT}`}
           className="w-full h-auto text-blue-500"
+          preserveAspectRatio="xMidYMid meet"
           role="img"
           aria-label="Linha do tempo"
         >
           {/* Main path */}
-          <path d={pathD} fill="none" stroke="currentColor" strokeWidth={3} strokeLinecap="round" />
+          <path 
+            d={pathD} 
+            fill="none" 
+            stroke="currentColor" 
+            strokeWidth={3} 
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
 
           {/* Top row markers */}
           {topItems.map((it, i) => {
@@ -69,13 +73,31 @@ export const Timeline: React.FC<TimelineProps> = ({ items, className }) => {
             const y = TOP_Y;
             return (
               <g key={`t-${i}`}>
-                <circle cx={x} cy={y} r={9} fill="white" stroke="currentColor" strokeWidth={2.5} />
-                <circle cx={x} cy={y} r={3} className="fill-blue-500" />
-                <text x={x} y={y - 16} textAnchor="middle" className="fill-foreground" fontSize={12} fontWeight={600}>
+                <circle 
+                  cx={x} 
+                  cy={y} 
+                  r={10} 
+                  fill="white" 
+                  stroke="currentColor" 
+                  strokeWidth={3}
+                  className="drop-shadow-sm"
+                />
+                <circle cx={x} cy={y} r={4} className="fill-blue-500" />
+                <text 
+                  x={x} 
+                  y={y - 20} 
+                  textAnchor="middle" 
+                  className="fill-foreground font-semibold text-[14px] sm:text-[16px]"
+                >
                   {String(it.year)}
                 </text>
                 {it.title && (
-                  <text x={x} y={y - 2} textAnchor="middle" className="fill-muted-foreground" fontSize={11}>
+                  <text 
+                    x={x} 
+                    y={y - 4} 
+                    textAnchor="middle" 
+                    className="fill-muted-foreground text-[11px] sm:text-[13px]"
+                  >
                     {it.title}
                   </text>
                 )}
@@ -89,13 +111,31 @@ export const Timeline: React.FC<TimelineProps> = ({ items, className }) => {
             const y = BOTTOM_Y;
             return (
               <g key={`b-${i}`}>
-                <circle cx={x} cy={y} r={9} fill="white" stroke="currentColor" strokeWidth={2.5} />
-                <circle cx={x} cy={y} r={3} className="fill-blue-500" />
-                <text x={x} y={y + 28} textAnchor="middle" className="fill-foreground" fontSize={12} fontWeight={600}>
+                <circle 
+                  cx={x} 
+                  cy={y} 
+                  r={10} 
+                  fill="white" 
+                  stroke="currentColor" 
+                  strokeWidth={3}
+                  className="drop-shadow-sm"
+                />
+                <circle cx={x} cy={y} r={4} className="fill-blue-500" />
+                <text 
+                  x={x} 
+                  y={y + 32} 
+                  textAnchor="middle" 
+                  className="fill-foreground font-semibold text-[14px] sm:text-[16px]"
+                >
                   {String(it.year)}
                 </text>
                 {it.title && (
-                  <text x={x} y={y + 44} textAnchor="middle" className="fill-muted-foreground" fontSize={11}>
+                  <text 
+                    x={x} 
+                    y={y + 48} 
+                    textAnchor="middle" 
+                    className="fill-muted-foreground text-[11px] sm:text-[13px]"
+                  >
                     {it.title}
                   </text>
                 )}
