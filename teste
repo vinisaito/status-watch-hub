@@ -28,13 +28,17 @@ export const Timeline: React.FC<TimelineProps> = ({ items, className }) => {
 
   const xTop = (i: number, total: number) => {
     if (total <= 1) return (PADDING_X + RIGHT_X) / 2;
-    return PADDING_X + (i * (RIGHT_X - PADDING_X)) / (total - 1);
+    // Distribute until before the arc starts, leaving space for the curve
+    const topLineEnd = RIGHT_X - R * 0.3;
+    return PADDING_X + (i * (topLineEnd - PADDING_X)) / (total - 1);
   };
 
   const BOTTOM_RIGHT_X = RIGHT_X - R;
   const xBottom = (i: number, total: number) => {
     if (total <= 1) return (PADDING_X + BOTTOM_RIGHT_X) / 2;
-    return BOTTOM_RIGHT_X - (i * (BOTTOM_RIGHT_X - PADDING_X)) / (total - 1);
+    // Start from after the arc ends, leaving space for the curve
+    const bottomLineStart = BOTTOM_RIGHT_X + R * 0.3;
+    return bottomLineStart - (i * (bottomLineStart - PADDING_X)) / (total - 1);
   };
 
   // Improved path with smoother curve
