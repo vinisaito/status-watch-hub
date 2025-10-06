@@ -1,4 +1,22 @@
-{
-  "statusCode": 500,
-  "body": "{\"erro\": \"Erro inesperado\", \"detalhes\": \"name 'timezone' is not defined\", \"trace\": \"Traceback (most recent call last):\\n  File \\\"/var/task/lambda_function.py\\\", line 39, in lambda_handler\\n    fuso_brasilia = timezone(timedelta(hours=-3))\\n                    ^^^^^^^^\\nNameError: name 'timezone' is not defined\\n\"}"
-}
+        SELECT 
+            [rdm],
+            [solicitante],
+            [requisitante],
+            [status],
+            [area_afetada],
+            [ambiente],
+            [resumo],
+            [descricao],
+            [grupo_executor],
+            [executor],
+            [depto_grupo_executor],
+            [depto_executor],
+            [recurso_principal],
+            [data_inicio_programacao],
+            [data_fim_programacao]
+        FROM [mdb].[dbo].[view_ciops_rdm]
+        WHERE 
+            ([data_inicio_programacao] >= ? AND [data_inicio_programacao] <= ?)
+            OR
+            ([data_fim_programacao] >= ? AND [data_fim_programacao] <= ?)
+        ORDER BY [data_inicio_programacao] ASC
