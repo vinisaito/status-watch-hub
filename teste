@@ -1,79 +1,8 @@
-import json
-import os
-import pyodbc
-import traceback
-
-def lambda_handler(event, context):
-    print("🟢 Iniciando execução da Lambda...")
-
-    try:
-        # --- Lê variáveis de ambiente ---
-        server = os.environ["SERVER"]
-        user = os.environ["USER"]
-        password = os.environ["PASSWORD"]
-        database = os.environ["DATABASE"]
-        port = os.environ.get("PORT", "1433")
-
-        print(f"ℹ️ Conectando ao banco: {server}:{port} | DB: {database}")
-
-        # --- String de conexão com timeout mais curto ---
-        conn_str = (
-            f"DRIVER={{ODBC Driver 18 for SQL Server}};"
-            f"SERVER={server},{port};"
-            f"DATABASE={database};"
-            f"UID={user};"
-            f"PWD={password};"
-            "Encrypt=yes;"
-            "TrustServerCertificate=no;"
-            "Connection Timeout=10;"
-        )
-
-        # --- Teste de conexão ---
-        print("🔄 Tentando conectar...")
-        conn = pyodbc.connect(conn_str)
-        print("✅ Conexão estabelecida com sucesso.")
-
-        cursor = conn.cursor()
-
-        # --- Consulta SQL ---
-        query = """
-        SELECT 
-            [rdm],
-            [solicitante],
-            [requisitante],
-            [status],
-            [area_afetada],
-            [ambiente],
-            [resumo],
-            [descricao],
-            [grupo_executor],
-            [executor],
-            [depto_grupo_executor],
-            [depto_executor],
-            [recurso_principal],
-            [data_inicio_programacao],
-            [data_fim_programacao]
-        FROM [mdb].[dbo].[view_ciops_rdm]
-        """
-
-        print("📄 Executando query...")
-        cursor.execute(query)
-
-        columns = [col[0] for col in cursor.description]
-        results = [dict(zip(columns, row)) for row in cursor.fetchall()]
-
-        cursor.close()
-        conn.close()
-        print(f"✅ Consulta concluída. {len(results)} registros retornados.")
-
+    except Exception as e:
+        # Erro genérico
+        print("❌ Erro inesperado:", str(e))
+        traceback.print_exc()
         return {
-            "statusCode": 200,
-            "headers": {
-                "Content-Type": "application/json",
-                "Access-Control-Allow-Origin": "*"
-            },
-            "body": json.dumps(results, default=str)
+            "statusCode": 500,
+            "body": json.dumps({"erro": "Erro inesperado", "detalhes": str(e)})
         }
-
-    except pyodbc.InterfaceError as e:
-        # Erro de rede / conexão
