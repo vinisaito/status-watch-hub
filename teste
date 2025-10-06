@@ -2,6 +2,7 @@ import json
 import os
 import pyodbc
 import traceback
+from datetime import datetime, timedelta
 
 def lambda_handler(event, context):
     print("🟢 Iniciando execução da Lambda...")
@@ -34,7 +35,17 @@ def lambda_handler(event, context):
 
         cursor = conn.cursor()
 
-        # --- Consulta SQL com filtro 18h–08h ---
+        # --- Calcula o intervalo (ontem 18h até hoje 08h) ---
+        agora = datetime.now()
+        hoje = agora.date()
+        ontem = hoje - timedelta(days=1)
+
+        inicio_noite = datetime.combine(ontem, datetime.min.time()).replace(hour=18, minute=0, second=0)
+        fim_noite = datetime.combine(hoje, datetime.min.time()).replace(hour=8, minute=0, second=0)
+
+        print(f"🕓 Intervalo filtrado: {inicio_noite} → {fim_noite}")
+
+        # --- Consulta SQL com parâmetros ---
         query = """
         SELECT 
             [rdm],
@@ -54,19 +65,20 @@ def lambda_handler(event, context):
             [data_fim_programacao]
         FROM [mdb].[dbo].[view_ciops_rdm]
         WHERE 
-            (DATEPART(HOUR, [data_inicio_programacao]) >= 18)
+            ([data_inicio_programacao] >= ? AND [data_inicio_programacao] <= ?)
             OR
-            (DATEPART(HOUR, [data_inicio_programacao]) < 8)
+            ([data_fim_programacao] >= ? AND [data_fim_programacao] <= ?)
         """
 
-        print("📄 Executando query com filtro de horário (18h–08h)...")
-        cursor.execute(query)
+        print("📄 Executando query com filtro de período (ontem 18h → hoje 08h)...")
+        cursor.execute(query, (inicio_noite, fim_noite, inicio_noite, fim_noite))
 
         columns = [col[0] for col in cursor.description]
         results = [dict(zip(columns, row)) for row in cursor.fetchall()]
 
         cursor.close()
         conn.close()
+
         print(f"✅ Consulta concluída. {len(results)} registros retornados.")
 
         return {
