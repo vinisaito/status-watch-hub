@@ -3,6 +3,9 @@ import os
 import pyodbc
 import traceback
 
+def lambda_handler(event, context):
+    print("🟢 Iniciando execução da Lambda...")
+
     try:
         # --- Lê variáveis de ambiente ---
         server = os.environ["SERVER"]
@@ -13,7 +16,7 @@ import traceback
 
         print(f"ℹ️ Conectando ao banco: {server}:{port} | DB: {database}")
 
-        # --- String de conexão com timeout mais curto ---
+        # --- String de conexão ---
         conn_str = (
             f"DRIVER={{ODBC Driver 18 for SQL Server}};"
             f"SERVER={server},{port};"
@@ -25,14 +28,13 @@ import traceback
             "Connection Timeout=10;"
         )
 
-        # --- Teste de conexão ---
         print("🔄 Tentando conectar...")
         conn = pyodbc.connect(conn_str)
         print("✅ Conexão estabelecida com sucesso.")
 
         cursor = conn.cursor()
 
-        # --- Consulta SQL ---
+        # --- Consulta SQL com filtro 18h–08h ---
         query = """
         SELECT 
             [rdm],
@@ -51,9 +53,13 @@ import traceback
             [data_inicio_programacao],
             [data_fim_programacao]
         FROM [mdb].[dbo].[view_ciops_rdm]
+        WHERE 
+            (DATEPART(HOUR, [data_inicio_programacao]) >= 18)
+            OR
+            (DATEPART(HOUR, [data_inicio_programacao]) < 8)
         """
 
-        print("📄 Executando query...")
+        print("📄 Executando query com filtro de horário (18h–08h)...")
         cursor.execute(query)
 
         columns = [col[0] for col in cursor.description]
