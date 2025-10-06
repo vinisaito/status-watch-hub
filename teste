@@ -1,1 +1,109 @@
-  "body": "{\"erro\": \"Erro SQL ao executar consulta\", \"detalhes\": \"('08001', '[08001] [unixODBC][Microsoft][ODBC Driver 18 for SQL Server]SSL Provider: [error:14090086:SSL routines:ssl3_get_server_certificate:certificate verify failed:self signed certificate] (-1) (SQLDriverConnect)')\", \"trace\": \"Traceback (most recent call last):\\n  File \\\"/var/task/lambda_function.py\\\", line 33, in lambda_handler\\n    conn = pyodbc.connect(conn_str)\\n           ^^^^^^^^^^^^^^^^^^^^^^^^\\npyodbc.OperationalError: ('08001', '[08001] [unixODBC][Microsoft][ODBC Driver 18 for SQL Server]SSL Provider: [error:14090086:SSL routines:ssl3_get_server_certificate:certificate verify failed:self signed certificate] (-1) (SQLDriverConnect)')\\n\"}"
+import json
+import os
+import pyodbc
+import traceback
+
+    try:
+        # --- Lê variáveis de ambiente ---
+        server = os.environ["SERVER"]
+        user = os.environ["USER"]
+        password = os.environ["PASSWORD"]
+        database = os.environ["DATABASE"]
+        port = os.environ.get("PORT", "1433")
+
+        print(f"ℹ️ Conectando ao banco: {server}:{port} | DB: {database}")
+
+        # --- String de conexão com timeout mais curto ---
+        conn_str = (
+            f"DRIVER={{ODBC Driver 18 for SQL Server}};"
+            f"SERVER={server},{port};"
+            f"DATABASE={database};"
+            f"UID={user};"
+            f"PWD={password};"
+            "Encrypt=yes;"
+            "TrustServerCertificate=yes;"
+            "Connection Timeout=10;"
+        )
+
+        # --- Teste de conexão ---
+        print("🔄 Tentando conectar...")
+        conn = pyodbc.connect(conn_str)
+        print("✅ Conexão estabelecida com sucesso.")
+
+        cursor = conn.cursor()
+
+        # --- Consulta SQL ---
+        query = """
+        SELECT 
+            [rdm],
+            [solicitante],
+            [requisitante],
+            [status],
+            [area_afetada],
+            [ambiente],
+            [resumo],
+            [descricao],
+            [grupo_executor],
+            [executor],
+            [depto_grupo_executor],
+            [depto_executor],
+            [recurso_principal],
+            [data_inicio_programacao],
+            [data_fim_programacao]
+        FROM [mdb].[dbo].[view_ciops_rdm]
+        """
+
+        print("📄 Executando query...")
+        cursor.execute(query)
+
+        columns = [col[0] for col in cursor.description]
+        results = [dict(zip(columns, row)) for row in cursor.fetchall()]
+
+        cursor.close()
+        conn.close()
+        print(f"✅ Consulta concluída. {len(results)} registros retornados.")
+
+        return {
+            "statusCode": 200,
+            "headers": {
+                "Content-Type": "application/json",
+                "Access-Control-Allow-Origin": "*"
+            },
+            "body": json.dumps(results, default=str)
+        }
+
+    except pyodbc.InterfaceError as e:
+        print("❌ Erro de interface (provável timeout ou host inacessível):", str(e))
+        traceback.print_exc()
+        return {
+            "statusCode": 504,
+            "body": json.dumps({
+                "erro": "Timeout ou host inacessível",
+                "detalhes": str(e),
+                "trace": traceback.format_exc()
+            })
+        }
+
+    except pyodbc.Error as e:
+        print("❌ Erro SQL:", str(e))
+        traceback.print_exc()
+        return {
+            "statusCode": 500,
+            "body": json.dumps({
+                "erro": "Erro SQL ao executar consulta",
+                "detalhes": str(e),
+                "trace": traceback.format_exc()
+            })
+        }
+
+    except Exception as e:
+        print("❌ Erro inesperado:", str(e))
+        traceback.print_exc()
+        return {
+            "statusCode": 500,
+            "body": json.dumps({
+                "erro": "Erro inesperado",
+                "detalhes": str(e),
+                "trace": traceback.format_exc()
+            })
+        }
