@@ -1,403 +1,128 @@
-import React, { useLayoutEffect, useRef, useState, forwardRef } from "react";
-import type { ProductLine, RDM } from "@/types/rdm";
-import { CheckCircle2, XCircle, Clock, AlertCircle, RotateCcw, Wrench } from "lucide-react";
-import { cn } from "@/lib/utils";
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { toast } from "@/components/ui/sonner";
+import json
+import os
+import pyodbc
+import traceback
+from datetime import datetime, timedelta, timezone
 
-interface RDMTimelineProps {
-  productLine: ProductLine;
-  autoOpenRdmId?: string;
-}
 
-// Local RDMNode component (inlined from ./RDMNode)
-interface RDMNodeProps {
-  rdm: RDM;
-  color: string;
-  isFirst?: boolean;
-  isLast?: boolean;
-  productLineId?: string;
-  onSelect?: (rdm: RDM) => void;
-}
 
-const RDMNode = forwardRef<HTMLDivElement, RDMNodeProps>(
-  ({ rdm, color, isFirst, isLast, productLineId, onSelect }: RDMNodeProps, ref) => {
-    const isEpsilon = productLineId === "produto-5";
-    const showSideInfo =
-      rdm.number === "008" ||
-      rdm.number === "016" ||
-      (isEpsilon && rdm.number === "024");
-    const sideIsLeft = rdm.number === "016";
-    const sideIsRight = rdm.number === "008" || (isEpsilon && rdm.number === "024");
+    try:
+        # --- Lê variáveis de ambiente ---
+        server = os.environ["SERVER"]
+        user = os.environ["USER"]
+        password = os.environ["PASSWORD"]
+        database = os.environ["DATABASE"]
+        port = os.environ.get("PORT", "1433")
 
-    const getCategory = () => {
-      if (rdm.category) return rdm.category;
-      // Fallback mapping from coarse status
-      if (rdm.status === "executed") return "concluidas";
-      if (rdm.status === "failed") return "rollback";
-      return "em_andamento";
-    };
+        print(f"ℹ️ Conectando ao banco: {server}:{port} | DB: {database}")
 
-    const getVisuals = () => {
-      const cat = getCategory();
-      switch (cat) {
-        case "concluidas":
-          return {
-            Icon: CheckCircle2,
-            classes: "bg-card border-[hsl(var(--success))] text-[hsl(var(--success))]",
-            shadow: "0 4px 12px rgba(34, 197, 94, 0.2)",
-          };
-        case "rollback":
-          return {
-            Icon: RotateCcw,
-            classes: "bg-card border-[hsl(var(--destructive))] text-[hsl(var(--destructive))]",
-            shadow: "0 4px 12px rgba(239, 68, 68, 0.2)",
-          };
-        case "em_andamento": {
-          const raw = (rdm.rawStatus ?? "").toString().trim().toLowerCase();
-          const noAcc = raw
-            .normalize("NFD")
-            .replace(/\p{Diacritic}/gu, "");
-          const isImplantacao = /implantacao/.test(noAcc);
-          return {
-            Icon: isImplantacao ? Wrench : Clock,
-            classes: "bg-card border-[hsl(var(--warning))] text-[hsl(var(--warning))]",
-            shadow: undefined,
-          };
+        # --- String de conexão ---
+        conn_str = (
+            f"DRIVER={{ODBC Driver 18 for SQL Server}};"
+            f"SERVER={server},{port};"
+            f"DATABASE={database};"
+            f"UID={user};"
+            f"PWD={password};"
+            "Encrypt=yes;"
+            "TrustServerCertificate=yes;"
+            "Connection Timeout=10;"
+        )
+
+        print("🔄 Tentando conectar...")
+        conn = pyodbc.connect(conn_str)
+        print("✅ Conexão estabelecida com sucesso.")
+
+        cursor = conn.cursor()
+
+        # --- Calcula o intervalo (ontem 18h → hoje 08h) no fuso de Brasília ---
+        fuso_brasilia = timezone(timedelta(hours=-3))
+        agora = datetime.now(fuso_brasilia)
+        hoje = agora.date()
+        ontem = hoje - timedelta(days=1)
+
+        inicio_noite = datetime.combine(ontem, datetime.min.time(), tzinfo=fuso_brasilia).replace(hour=18)
+        fim_noite = datetime.combine(hoje, datetime.min.time(), tzinfo=fuso_brasilia).replace(hour=8)
+
+        print(f"🕓 Intervalo filtrado (horário de Brasília): {inicio_noite} → {fim_noite}")
+
+        # --- Consulta SQL com parâmetros e ordenação ---
+        query = """
+        SELECT 
+            [rdm],
+            [solicitante],
+            [requisitante],
+            [status],
+            [area_afetada],
+            [ambiente],
+            [resumo],
+            [descricao],
+            [grupo_executor],
+            [executor],
+            [depto_grupo_executor],
+            [depto_executor],
+            [recurso_principal],
+            [data_inicio_programacao],
+            [data_fim_programacao]
+        FROM [mdb].[dbo].[view_ciops_rdm]
+        WHERE 
+            ([data_inicio_programacao] >= ? AND [data_inicio_programacao] <= ?)
+            OR
+            ([data_fim_programacao] >= ? AND [data_fim_programacao] <= ?)
+        ORDER BY [data_inicio_programacao] ASC
+        """
+
+        print("📄 Executando query com filtro e ordenação...")
+        cursor.execute(query, (inicio_noite, fim_noite, inicio_noite, fim_noite))
+
+        columns = [col[0] for col in cursor.description]
+        results = [dict(zip(columns, row)) for row in cursor.fetchall()]
+
+        cursor.close()
+        conn.close()
+
+        print(f"✅ Consulta concluída. {len(results)} registros retornados.")
+
+        return {
+            "statusCode": 200,
+            "headers": {
+                "Content-Type": "application/json",
+                "Access-Control-Allow-Origin": "*"
+            },
+            "body": json.dumps(results, default=str)
         }
-        case "aberta":
-          return {
-            Icon: AlertCircle,
-            classes: "bg-card border-[hsl(var(--blue-accent))] text-[hsl(var(--blue-accent))]",
-            shadow: undefined,
-          };
-        case "em_aprovacao":
-          return {
-            Icon: Clock,
-            classes: "bg-card border-[hsl(var(--blue-medium))] text-[hsl(var(--blue-medium))]",
-            shadow: undefined,
-          };
-        case "cancelada":
-          return {
-            Icon: XCircle,
-            classes: "bg-card border-[hsl(var(--destructive))] text-[hsl(var(--destructive))]",
-            shadow: "0 4px 12px rgba(239, 68, 68, 0.15)",
-          };
-        default:
-          return {
-            Icon: Clock,
-            classes: "bg-card border-[hsl(var(--border))] text-muted-foreground",
-            shadow: undefined,
-          };
-      }
-    };
 
-    return (
-      <div className="relative flex flex-col items-center gap-2 group">
-        {/* RDM number above the circle, styled like the time badge */}
-        <div
-          className="text-xs font-medium text-muted-foreground bg-card px-2 py-0.5 rounded border border-border shadow-sm select-text cursor-pointer hover:bg-muted/50"
-          role="button"
-          tabIndex={0}
-          title="Clique para copiar o número da RDM"
-          onClick={async (e) => {
-            e.stopPropagation();
-            try {
-              await navigator.clipboard.writeText(rdm.number);
-              toast.success(`RDM ${rdm.number} copiada`);
-            } catch {
-              toast.error("Não foi possível copiar o número");
-            }
-          }}
-          onKeyDown={async (e) => {
-            if (e.key === "Enter" || e.key === " ") {
-              e.preventDefault();
-              e.stopPropagation();
-              try {
-                await navigator.clipboard.writeText(rdm.number);
-                toast.success(`RDM ${rdm.number} copiada`);
-              } catch {
-                toast.error("Não foi possível copiar o número");
-              }
-            }
-          }}
-        >
-          {rdm.number}
-        </div>
+    except pyodbc.InterfaceError as e:
+        print("❌ Erro de interface (provável timeout ou host inacessível):", str(e))
+        traceback.print_exc()
+        return {
+            "statusCode": 504,
+            "body": json.dumps({
+                "erro": "Timeout ou host inacessível",
+                "detalhes": str(e),
+                "trace": traceback.format_exc()
+            })
+        }
 
-        <div className="relative z-10" ref={ref}>
-          {(() => {
-            const v = getVisuals();
-            const IconEl = v.Icon;
-            return (
-              <div
-                className={cn(
-                  "w-10 h-10 rounded-full border-[3px] flex items-center justify-center",
-                  "transition-all duration-300 cursor-pointer",
-                  "hover:scale-110 hover:shadow-lg",
-                  v.classes
-                )}
-                style={{ boxShadow: v.shadow }}
-                role="button"
-                tabIndex={0}
-                aria-label={`Abrir detalhes da RDM ${rdm.number}`}
-                onClick={() => onSelect?.(rdm)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" || e.key === " ") {
-                    e.preventDefault();
-                    onSelect?.(rdm);
-                  }
-                }}
-              >
-                <IconEl className="w-4 h-4" />
-              </div>
-            );
-          })()}
-        </div>
+    except pyodbc.Error as e:
+        print("❌ Erro SQL:", str(e))
+        traceback.print_exc()
+        return {
+            "statusCode": 500,
+            "body": json.dumps({
+                "erro": "Erro SQL ao executar consulta",
+                "detalhes": str(e),
+                "trace": traceback.format_exc()
+            })
+        }
 
-        <div
-          className={cn(
-            "flex flex-col items-center gap-1 mt-2",
-            showSideInfo && "absolute top-1/2 -translate-y-1/2 z-10 mt-0",
-            showSideInfo && sideIsRight && "left-full ml-3 items-start",
-            showSideInfo && sideIsLeft && "right-full mr-3 items-end"
-          )}
-        >
-          <div className="text-xs font-medium text-muted-foreground bg-card px-2 py-0.5 rounded border border-border shadow-sm">
-            {rdm.time}
-          </div>
-        </div>
-
-        {/* Removed hover tooltip/pop-up for RDM description */}
-      </div>
-    );
-  }
-);
-
-RDMNode.displayName = "RDMNode";
-
-export const RDMTimeline: React.FC<RDMTimelineProps> = ({ productLine, autoOpenRdmId }) => {
-  const nodesPerRow = 8;
-
-  // Order RDMs by dataInicioProgramacao ascending (fallbacks: time, number, original index)
-  const orderedRdms = React.useMemo(() => {
-    const parseLocalTs = (s?: string): number => {
-      if (!s) return Number.POSITIVE_INFINITY;
-      const str = String(s).trim();
-      const normalized = /^(\d{4}-\d{2}-\d{2}) (\d{2}:\d{2}(?::\d{2})?)/.test(str)
-        ? str.replace(" ", "T")
-        : str;
-      const d = new Date(normalized);
-      const t = d.getTime();
-      return isNaN(t) ? Number.POSITIVE_INFINITY : t;
-    };
-    const toMinutes = (t?: string): number => {
-      if (!t) return Number.MAX_SAFE_INTEGER;
-      const m = t.match(/^(\d{2}):(\d{2})$/);
-      if (!m) return Number.MAX_SAFE_INTEGER;
-      return parseInt(m[1], 10) * 60 + parseInt(m[2], 10);
-    };
-
-    return [...productLine.rdms]
-      .map((r, i) => ({ r, i }))
-      .sort((a, b) => {
-        const ta = parseLocalTs(a.r.dataInicioProgramacao);
-        const tb = parseLocalTs(b.r.dataInicioProgramacao);
-        if (ta !== tb) return ta - tb;
-        const ma = toMinutes(a.r.time);
-        const mb = toMinutes(b.r.time);
-        if (ma !== mb) return ma - mb;
-        const na = parseInt(a.r.number, 10) || 0;
-        const nb = parseInt(b.r.number, 10) || 0;
-        if (na !== nb) return na - nb;
-        return a.i - b.i; // stable fallback
-      })
-      .map((x) => x.r);
-  }, [productLine.rdms]);
-
-  const rows = Math.ceil(orderedRdms.length / nodesPerRow);
-  const containerRef = useRef<HTMLDivElement | null>(null);
-  const nodeRefs = useRef<Array<HTMLDivElement | null>>([]);
-  const [linePositions, setLinePositions] = useState<
-    Array<{ x1: number; y1: number; x2: number; y2: number }>
-  >([]);
-  const [selectedRdm, setSelectedRdm] = useState<RDM | null>(null);
-  const [dialogOpen, setDialogOpen] = useState(false);
-
-  if (nodeRefs.current.length !== orderedRdms.length) {
-    nodeRefs.current = Array(orderedRdms.length).fill(null);
-  }
-
-  const recalcPositions = () => {
-    if (!containerRef.current) return;
-    const containerRect = containerRef.current.getBoundingClientRect();
-    const positions: Array<{ x: number; y: number; ok: boolean }> = nodeRefs.current.map((el) => {
-      if (!el) return { x: 0, y: 0, ok: false };
-      const rect = el.getBoundingClientRect();
-      return {
-        x: rect.left - containerRect.left + rect.width / 2,
-        y: rect.top - containerRect.top + rect.height / 2,
-        ok: rect.width > 0 && rect.height > 0,
-      };
-    });
-
-    const lines: Array<{ x1: number; y1: number; x2: number; y2: number }> = [];
-    for (let i = 0; i < positions.length - 1; i++) {
-      const p1 = positions[i];
-      const p2 = positions[i + 1];
-      if (p1.ok && p2.ok) {
-        lines.push({ x1: p1.x, y1: p1.y, x2: p2.x, y2: p2.y });
-      }
-    }
-    setLinePositions(lines);
-  };
-
-  useLayoutEffect(() => {
-    recalcPositions();
-    const onResize = () => recalcPositions();
-    window.addEventListener("resize", onResize);
-    return () => window.removeEventListener("resize", onResize);
-  }, [orderedRdms.length, nodesPerRow]);
-
-  // Auto-open modal for a specific RDM id (used by search)
-  React.useEffect(() => {
-    if (!autoOpenRdmId) return;
-    const idx = orderedRdms.findIndex((r) => r.id === autoOpenRdmId);
-    if (idx >= 0) {
-      const r = orderedRdms[idx];
-      setSelectedRdm(r);
-      setDialogOpen(true);
-      // Try to scroll node into view
-      const el = nodeRefs.current[idx];
-      if (el && typeof el.scrollIntoView === "function") {
-        el.scrollIntoView({ behavior: "smooth", block: "center", inline: "center" });
-      }
-    }
-  }, [autoOpenRdmId, orderedRdms]);
-
-  return (
-    <div className="mb-12 last:mb-0">
-      <div className="mb-6">
-        <h3 className="text-lg font-semibold text-foreground">{productLine.name}</h3>
-      </div>
-
-      <div className="relative w-full mb-4" ref={containerRef}>
-        <svg className="absolute inset-0 w-full h-full pointer-events-none" style={{ zIndex: 0 }}>
-          {linePositions.map((pos, index) => (
-            <line
-              key={`line-${index}`}
-              x1={pos.x1}
-              y1={pos.y1}
-              x2={pos.x2}
-              y2={pos.y2}
-              stroke="#000000"
-              strokeWidth={2}
-              strokeLinecap="round"
-            />
-          ))}
-        </svg>
-
-        <div
-          className="relative grid gap-x-4 gap-y-8 py-8"
-          style={{
-            gridTemplateColumns: `repeat(${nodesPerRow}, 1fr)`,
-            minHeight: `${rows * 140}px`,
-            zIndex: 1,
-          }}
-        >
-          {orderedRdms.map((rdm, index) => {
-            const row = Math.floor(index / nodesPerRow);
-            const col = index % nodesPerRow;
-            const isRightToLeft = row % 2 === 1;
-            const gridCol = isRightToLeft ? nodesPerRow - col : col + 1;
-
-            return (
-              <div
-                key={rdm.id}
-                style={{ gridColumn: gridCol, gridRow: row + 1 }}
-                className="flex justify-center"
-              >
-                <RDMNode
-                  ref={(el) => (nodeRefs.current[index] = el)}
-                  rdm={rdm}
-                  color={productLine.color}
-                  isFirst={index === 0}
-                  isLast={index === orderedRdms.length - 1}
-                  productLineId={productLine.id}
-                  onSelect={(item) => {
-                    setSelectedRdm(item);
-                    setDialogOpen(true);
-                  }}
-                />
-              </div>
-            );
-          })}
-        </div>
-      </div>
-      <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-        <DialogContent>
-          {selectedRdm && (
-            <div className="space-y-4">
-              <DialogHeader>
-                <DialogTitle>RDM {selectedRdm.number}</DialogTitle>
-                <DialogDescription>
-                  Horário: {selectedRdm.time} • Status: {selectedRdm.rawStatus ?? selectedRdm.status}
-                </DialogDescription>
-              </DialogHeader>
-              <div className="grid grid-cols-1 gap-3 text-sm">
-                <div className="flex items-center justify-between bg-muted/40 border border-border rounded px-3 py-2">
-                  <span className="text-muted-foreground">RDM</span>
-                  <span className="font-medium">{selectedRdm.number}</span>
-                </div>
-                <div className="flex items-center justify-between bg-muted/40 border border-border rounded px-3 py-2">
-                  <span className="text-muted-foreground">Status</span>
-                  <span className="font-medium">{selectedRdm.rawStatus ?? selectedRdm.status}</span>
-                </div>
-                {selectedRdm.area && (
-                  <div className="flex items-center justify-between bg-muted/40 border border-border rounded px-3 py-2">
-                    <span className="text-muted-foreground">Área Afetada</span>
-                    <span className="font-medium">{selectedRdm.area}</span>
-                  </div>
-                )}
-                {selectedRdm.resumo && (
-                  <div className="bg-card border border-border rounded px-3 py-2">
-                    <div className="text-muted-foreground mb-1">Resumo</div>
-                    <div className="text-foreground whitespace-pre-wrap">{selectedRdm.resumo}</div>
-                  </div>
-                )}
-                {selectedRdm.grupoExecutor && (
-                  <div className="flex items-center justify-between bg-muted/40 border border-border rounded px-3 py-2">
-                    <span className="text-muted-foreground">Grupo Executor</span>
-                    <span className="font-medium">{selectedRdm.grupoExecutor}</span>
-                  </div>
-                )}
-                {(selectedRdm.dataInicioProgramacao || selectedRdm.dataFimProgramacao) && (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    <div className="flex items-center justify-between bg-muted/40 border border-border rounded px-3 py-2">
-                      <span className="text-muted-foreground">Início Programação</span>
-                      <span className="font-medium">
-                        {selectedRdm.dataInicioProgramacao ?? "—"}
-                      </span>
-                    </div>
-                    <div className="flex items-center justify-between bg-muted/40 border border-border rounded px-3 py-2">
-                      <span className="text-muted-foreground">Fim Programação</span>
-                      <span className="font-medium">
-                        {selectedRdm.dataFimProgramacao ?? "—"}
-                      </span>
-                    </div>
-                  </div>
-                )}
-              </div>
-              {selectedRdm.description && !selectedRdm.resumo && (
-                <p className="text-sm text-foreground">{selectedRdm.description}</p>
-              )}
-            </div>
-          )}
-        </DialogContent>
-      </Dialog>
-    </div>
-  );
-};
-
-export { RDMNode };
-export default RDMTimeline;
+    except Exception as e:
+        print("❌ Erro inesperado:", str(e))
+        traceback.print_exc()
+        return {
+            "statusCode": 500,
+            "body": json.dumps({
+                "erro": "Erro inesperado",
+                "detalhes": str(e),
+                "trace": traceback.format_exc()
+            })
+        }
