@@ -1,8 +1,95 @@
-    except Exception as e:
-        # Erro genérico
-        print("❌ Erro inesperado:", str(e))
-        traceback.print_exc()
+import os
+import pyodbc
+import json
+import time
+from datetime import datetime
+
+def lambda_handler(event, context):
+    start_total = time.time()
+    print("[INÍCIO] Execução da Lambda")
+
+    try:
+        # Variáveis de ambiente
+        server = os.environ['DB_SERVER']
+        username = os.environ['DB_USER']
+        password = os.environ['DB_PASSWORD']
+        port = os.environ.get('DB_PORT', '1433')  # Padrão 1433
+        database = 'mdb'
+
+        # String de conexão (suporte a Unicode)
+        connection_string = (
+            f'DRIVER={{ODBC Driver 18 for SQL Server}};'
+            f'SERVER={server},{port};'
+            f'DATABASE={database};'
+            f'UID={username};'
+            f'PWD={password};'
+            f'Encrypt=no;TrustServerCertificate=yes;'
+            f'CHARSET=UTF8;'
+        )
+
+        # Conexão
+        start_conexao = time.time()
+        conn = pyodbc.connect(connection_string, timeout=5)
+        cursor = conn.cursor()
+        print(f"[TEMPO] Conexão com o banco: {time.time() - start_conexao:.2f}s")
+
+        # Consulta SQL
+        query = """
+            SELECT [chamado]
+                  ,[tipo_chamado]
+                  ,[status_chamado]
+                  ,[abertura_chamado]
+                  ,[resumo_chamado]
+                  ,[grupo_chamado]
+                  ,[severidade_chamado]
+                  ,[acionado]
+                  ,[link_chamado]
+            FROM [mdb].[dbo].[view_ciops_acionamento]
+            WHERE TRY_CONVERT(DATETIME, abertura_chamado, 103) >= DATEADD(HOUR, -10, GETDATE());
+        """
+
+        # Executa a consulta
+        start_query = time.time()
+        cursor.execute(query)
+        rows = cursor.fetchall()
+        print(f"[TEMPO] Execução da query: {time.time() - start_query:.2f}s")
+
+        # Processamento dos dados
+        start_process = time.time()
+        columns = [column[0] for column in cursor.description]
+        results = []
+        for row in rows:
+            row_dict = dict(zip(columns, row))
+            # Converte abertura_chamado para ISO 8601 se for datetime
+            if isinstance(row_dict.get("abertura_chamado"), datetime):
+                row_dict["abertura_chamado"] = row_dict["abertura_chamado"].strftime("%Y-%m-%dT%H:%M:%S")
+            results.append(row_dict)
+        print(f"[TEMPO] Processamento dos dados: {time.time() - start_process:.2f}s")
+
+        # Fecha conexão
+        cursor.close()
+        conn.close()
+
+        tempo_total = time.time() - start_total
+        print(f"[TOTAL] Tempo total da Lambda: {tempo_total:.2f}s")
+
+        # Retorna JSON
         return {
-            "statusCode": 500,
-            "body": json.dumps({"erro": "Erro inesperado", "detalhes": str(e)})
+            'statusCode': 200,
+            'headers': {
+                'Content-Type': 'application/json; charset=utf-8',
+                'Access-Control-Allow-Origin': '*'
+            },
+            'body': json.dumps(results, ensure_ascii=False)
+        }
+
+    except Exception as e:
+        print("[ERRO]", str(e))
+        return {
+            'statusCode': 500,
+            'headers': {
+                'Content-Type': 'application/json; charset=utf-8',
+                'Access-Control-Allow-Origin': '*'
+            },
+            'body': json.dumps({'error': str(e)}, ensure_ascii=False)
         }
