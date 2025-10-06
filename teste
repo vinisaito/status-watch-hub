@@ -124,3 +124,9 @@ from datetime import datetime, timedelta, timezone
                 "trace": traceback.format_exc()
             })
         }
+
+
+{
+  "statusCode": 500,
+  "body": "{\"erro\": \"Erro SQL ao executar consulta\", \"detalhes\": \"('The SQL contains 2 parameter markers, but 4 parameters were supplied', 'HY000')\", \"trace\": \"Traceback (most recent call last):\\n  File \\\"/var/task/lambda_function.py\\\", line 73, in lambda_handler\\n    cursor.execute(query, (inicio_noite, fim_noite, inicio_noite, fim_noite))\\npyodbc.ProgrammingError: ('The SQL contains 2 parameter markers, but 4 parameters were supplied', 'HY000')\\n\"}"
+}
