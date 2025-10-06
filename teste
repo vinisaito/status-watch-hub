@@ -1,16 +1,73 @@
-SELECT [rdm]
-      ,[solicitante]
-      ,[requisitante]
-      ,[status]
-      ,[area_afetada]
-      ,[ambiente]
-      ,[resumo]
-      ,[descricao]
-      ,[grupo_executor]
-      ,[executor]
-      ,[depto_grupo_executor]
-      ,[depto_executor]
-      ,[recurso_principal]
-      ,[data_inicio_programacao]
-      ,[data_fim_programacao]
-  FROM [mdb].[dbo].[view_ciops_rdm]
+import json
+import os
+import pyodbc
+
+def lambda_handler(event, context):
+    try:
+        # --- Lê as variáveis de ambiente ---
+        server = os.environ["SERVER"]
+        user = os.environ["USER"]
+        password = os.environ["PASSWORD"]
+        database = os.environ["DATABASE"]
+        port = os.environ.get("PORT", "1433")  # porta padrão do SQL Server
+
+        # --- Monta a string de conexão ---
+        conn_str = (
+            f"DRIVER={{ODBC Driver 18 for SQL Server}};"
+            f"SERVER={server},{port};"
+            f"DATABASE={database};"
+            f"UID={user};"
+            f"PWD={password};"
+            "Encrypt=yes;"
+            "TrustServerCertificate=no;"
+            "Connection Timeout=30;"
+        )
+
+        # --- Conexão com o banco de dados ---
+        conn = pyodbc.connect(conn_str)
+        cursor = conn.cursor()
+
+        # --- Consulta SQL ---
+        query = """
+        SELECT 
+            [rdm],
+            [solicitante],
+            [requisitante],
+            [status],
+            [area_afetada],
+            [ambiente],
+            [resumo],
+            [descricao],
+            [grupo_executor],
+            [executor],
+            [depto_grupo_executor],
+            [depto_executor],
+            [recurso_principal],
+            [data_inicio_programacao],
+            [data_fim_programacao]
+        FROM [mdb].[dbo].[view_ciops_rdm]
+        """
+
+        cursor.execute(query)
+        columns = [column[0] for column in cursor.description]
+        results = [dict(zip(columns, row)) for row in cursor.fetchall()]
+
+        cursor.close()
+        conn.close()
+
+        # --- Retorno para a API Gateway ---
+        return {
+            "statusCode": 200,
+            "headers": {
+                "Content-Type": "application/json",
+                "Access-Control-Allow-Origin": "*"
+            },
+            "body": json.dumps(results, default=str)
+        }
+
+    except Exception as e:
+        print("Erro ao consultar banco:", str(e))
+        return {
+            "statusCode": 500,
+            "body": json.dumps({"erro": str(e)})
+        }
