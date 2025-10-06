@@ -4,10 +4,10 @@ import pyodbc
 import traceback
 from datetime import datetime, timedelta, timezone
 
-    def lambda_handler(event, context):
-        print("Iniciando")
-
+def lambda_handler(event, context):
     try:
+        print("🚀 Iniciando execução da Lambda")
+
         # --- Lê variáveis de ambiente ---
         server = os.environ["SERVER"]
         user = os.environ["USER"]
@@ -29,13 +29,13 @@ from datetime import datetime, timedelta, timezone
             "Connection Timeout=10;"
         )
 
+        # --- Conexão ---
         print("🔄 Tentando conectar...")
         conn = pyodbc.connect(conn_str)
         print("✅ Conexão estabelecida com sucesso.")
-
         cursor = conn.cursor()
 
-        # --- Calcula o intervalo (ontem 18h → hoje 08h) no fuso de Brasília ---
+        # --- Intervalo (ontem 18h → hoje 08h) ---
         fuso_brasilia = timezone(timedelta(hours=-3))
         agora = datetime.now(fuso_brasilia)
         hoje = agora.date()
@@ -44,9 +44,9 @@ from datetime import datetime, timedelta, timezone
         inicio_noite = datetime.combine(ontem, datetime.min.time(), tzinfo=fuso_brasilia).replace(hour=18)
         fim_noite = datetime.combine(hoje, datetime.min.time(), tzinfo=fuso_brasilia).replace(hour=8)
 
-        print(f"🕓 Intervalo filtrado (horário de Brasília): {inicio_noite} → {fim_noite}")
+        print(f"🕓 Intervalo filtrado: {inicio_noite} → {fim_noite}")
 
-        # --- Consulta SQL com parâmetros e ordenação ---
+        # --- Query SQL ---
         query = """
         SELECT 
             [rdm],
@@ -69,16 +69,16 @@ from datetime import datetime, timedelta, timezone
         ORDER BY [data_inicio_programacao] ASC
         """
 
-        print("📄 Executando query com filtro e ordenação...")
-        cursor.execute(query, (inicio_noite, fim_noite, inicio_noite, fim_noite))
-
+        # --- Execução ---
+        print("📄 Executando query...")
+        cursor.execute(query, (inicio_noite, fim_noite))
         columns = [col[0] for col in cursor.description]
         results = [dict(zip(columns, row)) for row in cursor.fetchall()]
 
+        print(f"✅ Consulta concluída. {len(results)} registros retornados.")
+
         cursor.close()
         conn.close()
-
-        print(f"✅ Consulta concluída. {len(results)} registros retornados.")
 
         return {
             "statusCode": 200,
@@ -90,7 +90,7 @@ from datetime import datetime, timedelta, timezone
         }
 
     except pyodbc.InterfaceError as e:
-        print("❌ Erro de interface (provável timeout ou host inacessível):", str(e))
+        print("❌ Erro de interface:", e)
         traceback.print_exc()
         return {
             "statusCode": 504,
@@ -102,7 +102,7 @@ from datetime import datetime, timedelta, timezone
         }
 
     except pyodbc.Error as e:
-        print("❌ Erro SQL:", str(e))
+        print("❌ Erro SQL:", e)
         traceback.print_exc()
         return {
             "statusCode": 500,
@@ -114,7 +114,7 @@ from datetime import datetime, timedelta, timezone
         }
 
     except Exception as e:
-        print("❌ Erro inesperado:", str(e))
+        print("❌ Erro inesperado:", e)
         traceback.print_exc()
         return {
             "statusCode": 500,
@@ -124,9 +124,3 @@ from datetime import datetime, timedelta, timezone
                 "trace": traceback.format_exc()
             })
         }
-
-
-{
-  "statusCode": 500,
-  "body": "{\"erro\": \"Erro SQL ao executar consulta\", \"detalhes\": \"('The SQL contains 2 parameter markers, but 4 parameters were supplied', 'HY000')\", \"trace\": \"Traceback (most recent call last):\\n  File \\\"/var/task/lambda_function.py\\\", line 73, in lambda_handler\\n    cursor.execute(query, (inicio_noite, fim_noite, inicio_noite, fim_noite))\\npyodbc.ProgrammingError: ('The SQL contains 2 parameter markers, but 4 parameters were supplied', 'HY000')\\n\"}"
-}
