@@ -2,7 +2,7 @@ import json
 import os
 import pyodbc
 import traceback
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 def lambda_handler(event, context):
     print("🟢 Iniciando execução da Lambda...")
@@ -35,17 +35,18 @@ def lambda_handler(event, context):
 
         cursor = conn.cursor()
 
-        # --- Calcula o intervalo (ontem 18h até hoje 08h) ---
-        agora = datetime.now()
+        # --- Calcula o intervalo (ontem 18h → hoje 08h) no fuso de Brasília ---
+        fuso_brasilia = timezone(timedelta(hours=-3))
+        agora = datetime.now(fuso_brasilia)
         hoje = agora.date()
         ontem = hoje - timedelta(days=1)
 
-        inicio_noite = datetime.combine(ontem, datetime.min.time()).replace(hour=18, minute=0, second=0)
-        fim_noite = datetime.combine(hoje, datetime.min.time()).replace(hour=8, minute=0, second=0)
+        inicio_noite = datetime.combine(ontem, datetime.min.time(), tzinfo=fuso_brasilia).replace(hour=18)
+        fim_noite = datetime.combine(hoje, datetime.min.time(), tzinfo=fuso_brasilia).replace(hour=8)
 
-        print(f"🕓 Intervalo filtrado: {inicio_noite} → {fim_noite}")
+        print(f"🕓 Intervalo filtrado (horário de Brasília): {inicio_noite} → {fim_noite}")
 
-        # --- Consulta SQL com parâmetros ---
+        # --- Consulta SQL com parâmetros e ordenação ---
         query = """
         SELECT 
             [rdm],
@@ -68,9 +69,10 @@ def lambda_handler(event, context):
             ([data_inicio_programacao] >= ? AND [data_inicio_programacao] <= ?)
             OR
             ([data_fim_programacao] >= ? AND [data_fim_programacao] <= ?)
+        ORDER BY [data_inicio_programacao] ASC
         """
 
-        print("📄 Executando query com filtro de período (ontem 18h → hoje 08h)...")
+        print("📄 Executando query com filtro e ordenação...")
         cursor.execute(query, (inicio_noite, fim_noite, inicio_noite, fim_noite))
 
         columns = [col[0] for col in cursor.description]
