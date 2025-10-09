@@ -1,256 +1,103 @@
-import React, { useState } from "react";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { ChangeAnalysis } from "@/components/ChangeAnalysis";
+import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { 
-  Calendar, 
-  Clock, 
-  Users, 
-  FileText, 
-  AlertCircle, 
-  CheckCircle2, 
-  XCircle, 
-  RotateCcw,
-  Wrench,
-  ChevronDown,
-  ChevronUp
-} from "lucide-react";
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
-import type { RDM } from "@/types/rdm";
-import { cn } from "@/lib/utils";
+import { Card, CardContent } from "@/components/ui/card";
+import { Brain, ShieldAlert, CheckCircle2, TriangleAlert, Download, Info, CalendarDays } from "lucide-react";
 
-interface RDMDetailModalProps {
-  rdm: RDM | null;
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-}
-
-const RDMDetailModal: React.FC<RDMDetailModalProps> = ({ rdm, open, onOpenChange }) => {
-  const [isResumoExpanded, setIsResumoExpanded] = useState(false);
-  
-  if (!rdm) return null;
-
-  const getCategory = () => {
-    if (rdm.category) return rdm.category;
-    if (rdm.status === "executed") return "concluidas";
-    if (rdm.status === "failed") return "rollback";
-    return "em_andamento";
-  };
-
-  const getStatusConfig = () => {
-    const cat = getCategory();
-    const raw = (rdm.rawStatus ?? "").toString().trim().toLowerCase();
-    const noAcc = raw.normalize("NFD").replace(/\p{Diacritic}/gu, "");
-    const isImplantacao = /implantacao/.test(noAcc);
-
-    switch (cat) {
-      case "concluidas":
-        return {
-          Icon: CheckCircle2,
-          label: "Concluída",
-          colorClass: "text-[hsl(var(--success))]",
-          bgClass: "bg-[hsl(var(--success))]/10",
-          borderClass: "border-[hsl(var(--success))]/20"
-        };
-      case "rollback":
-        return {
-          Icon: RotateCcw,
-          label: "Rollback",
-          colorClass: "text-[hsl(var(--destructive))]",
-          bgClass: "bg-[hsl(var(--destructive))]/10",
-          borderClass: "border-[hsl(var(--destructive))]/20"
-        };
-      case "em_andamento":
-        return {
-          Icon: isImplantacao ? Wrench : Clock,
-          label: isImplantacao ? "Em Implantação" : "Em Andamento",
-          colorClass: "text-[hsl(var(--warning))]",
-          bgClass: "bg-[hsl(var(--warning))]/10",
-          borderClass: "border-[hsl(var(--warning))]/20"
-        };
-      case "aberta":
-        return {
-          Icon: AlertCircle,
-          label: "Aberta",
-          colorClass: "text-[hsl(var(--blue-accent))]",
-          bgClass: "bg-[hsl(var(--blue-accent))]/10",
-          borderClass: "border-[hsl(var(--blue-accent))]/20"
-        };
-      case "em_aprovacao":
-        return {
-          Icon: Clock,
-          label: "Em Aprovação",
-          colorClass: "text-[hsl(var(--blue-medium))]",
-          bgClass: "bg-[hsl(var(--blue-medium))]/10",
-          borderClass: "border-[hsl(var(--blue-medium))]/20"
-        };
-      case "cancelada":
-        return {
-          Icon: XCircle,
-          label: "Cancelada",
-          colorClass: "text-[hsl(var(--destructive))]",
-          bgClass: "bg-[hsl(var(--destructive))]/10",
-          borderClass: "border-[hsl(var(--destructive))]/20"
-        };
-      default:
-        return {
-          Icon: Clock,
-          label: "Pendente",
-          colorClass: "text-muted-foreground",
-          bgClass: "bg-muted/50",
-          borderClass: "border-border"
-        };
-    }
-  };
-
-  const statusConfig = getStatusConfig();
-  const StatusIcon = statusConfig.Icon;
-
+const Index = () => {
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
-        <DialogHeader className="space-y-4 pb-4 border-b">
-          <div className="flex items-start justify-between gap-4">
-            <div className="flex-1">
-              <DialogTitle className="text-2xl font-bold mb-2">
-                RDM {rdm.number}
-              </DialogTitle>
-              <div className="flex items-center gap-2">
-                <Badge 
-                  variant="outline" 
-                  className={cn(
-                    "flex items-center gap-1.5 px-3 py-1 text-sm font-medium border-2",
-                    statusConfig.colorClass,
-                    statusConfig.bgClass,
-                    statusConfig.borderClass
-                  )}
-                >
-                  <StatusIcon className="w-4 h-4" />
-                  {rdm.rawStatus ?? statusConfig.label}
-                </Badge>
-                {rdm.time && (
-                  <Badge variant="secondary" className="flex items-center gap-1.5">
-                    <Clock className="w-3 h-3" />
-                    {rdm.time}
-                  </Badge>
-                )}
-              </div>
-            </div>
+    <div className="min-h-screen bg-background">
+      {/* Header minimalista (ações) */}
+      <header className="sticky top-0 z-20 border-b bg-background/80 backdrop-blur supports-[backdrop-filter]:bg-background/60">
+        <div className="container mx-auto px-6">
+          <div className="flex h-14 items-center justify-end gap-2">
+            <Button variant="secondary" type="button">
+              <Download className="size-4" />
+              Exportar PDF
+            </Button>
+            <Button type="button">
+              <Brain className="size-4" />
+              Nova análise
+            </Button>
           </div>
-        </DialogHeader>
-
-        <div className="space-y-4 pt-4">
-          {/* Resumo destacado */}
-          {rdm.resumo && (
-            <Collapsible open={isResumoExpanded} onOpenChange={setIsResumoExpanded}>
-              <div className={cn(
-                "rounded-lg border-2 transition-all",
-                statusConfig.bgClass,
-                statusConfig.borderClass
-              )}>
-                <CollapsibleTrigger className="w-full p-4 flex items-start gap-3 hover:opacity-80 transition-opacity">
-                  <FileText className={cn("w-5 h-5 mt-0.5 flex-shrink-0", statusConfig.colorClass)} />
-                  <div className="flex-1 text-left">
-                    <h4 className="font-semibold text-foreground flex items-center gap-2 mb-2">
-                      Resumo
-                      {isResumoExpanded ? (
-                        <ChevronUp className="w-4 h-4" />
-                      ) : (
-                        <ChevronDown className="w-4 h-4" />
-                      )}
-                    </h4>
-                    {!isResumoExpanded && (
-                      <p className="text-sm text-foreground/80 leading-relaxed line-clamp-2">
-                        {rdm.resumo}
-                      </p>
-                    )}
-                  </div>
-                </CollapsibleTrigger>
-                <CollapsibleContent>
-                  <div className="px-4 pb-4 pl-12">
-                    <p className="text-sm text-foreground/80 leading-relaxed whitespace-pre-wrap break-words">
-                      {rdm.resumo}
-                    </p>
-                  </div>
-                </CollapsibleContent>
-              </div>
-            </Collapsible>
-          )}
-
-          {/* Grid de informações */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-            {/* Área Afetada */}
-            {rdm.area && (
-              <div className="bg-card border rounded-lg p-4 hover:border-primary/50 transition-colors">
-                <div className="flex items-center gap-2 mb-2">
-                  <AlertCircle className="w-4 h-4 text-primary" />
-                  <span className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
-                    Área Afetada
-                  </span>
-                </div>
-                <p className="text-sm font-semibold text-foreground">{rdm.area}</p>
-              </div>
-            )}
-
-            {/* Grupo Executor */}
-            {rdm.grupoExecutor && (
-              <div className="bg-card border rounded-lg p-4 hover:border-primary/50 transition-colors">
-                <div className="flex items-center gap-2 mb-2">
-                  <Users className="w-4 h-4 text-primary" />
-                  <span className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
-                    Grupo Executor
-                  </span>
-                </div>
-                <p className="text-sm font-semibold text-foreground">{rdm.grupoExecutor}</p>
-              </div>
-            )}
-          </div>
-
-          {/* Datas de Programação */}
-          {(rdm.dataInicioProgramacao || rdm.dataFimProgramacao) && (
-            <div className="bg-gradient-to-br from-muted/30 to-muted/10 border rounded-lg p-4">
-              <div className="flex items-center gap-2 mb-3">
-                <Calendar className="w-4 h-4 text-primary" />
-                <h4 className="text-sm font-semibold text-foreground">Programação</h4>
-              </div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                {rdm.dataInicioProgramacao && (
-                  <div>
-                    <p className="text-xs text-muted-foreground mb-1">Início</p>
-                    <p className="text-sm font-medium text-foreground">
-                      {rdm.dataInicioProgramacao}
-                    </p>
-                  </div>
-                )}
-                {rdm.dataFimProgramacao && (
-                  <div>
-                    <p className="text-xs text-muted-foreground mb-1">Fim</p>
-                    <p className="text-sm font-medium text-foreground">
-                      {rdm.dataFimProgramacao}
-                    </p>
-                  </div>
-                )}
-              </div>
-            </div>
-          )}
-
-          {/* Descrição adicional */}
-          {rdm.description && !rdm.resumo && (
-            <div className="bg-card border rounded-lg p-4">
-              <div className="flex items-start gap-3">
-                <FileText className="w-4 h-4 text-muted-foreground mt-0.5" />
-                <div className="flex-1">
-                  <h4 className="text-sm font-semibold mb-2 text-foreground">Descrição</h4>
-                  <p className="text-sm text-muted-foreground leading-relaxed">
-                    {rdm.description}
-                  </p>
-                </div>
-              </div>
-            </div>
-          )}
         </div>
-      </DialogContent>
-    </Dialog>
+      </header>
+
+      {/* Conteúdo em coluna estreita (formato vertical) */}
+      <main className="container mx-auto max-w-3xl px-6 py-8 space-y-6">
+        {/* Cabeçalho do Relatório */}
+        <Card className="shadow-card">
+          <CardContent className="p-6">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <h1 className="text-2xl font-bold tracking-tight">Score de RDMs - 537702</h1>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  Avaliação de riscos, clareza e conformidade das mudanças.
+                </p>
+                <div className="mt-3 flex flex-wrap items-center gap-2 text-sm">
+                  <Badge variant="default">Medio</Badge>
+                  <div className="flex items-center gap-1 text-muted-foreground">
+                    <CalendarDays className="size-4" />
+                    Última atualização: {new Date().toLocaleDateString("pt-BR", { day: "2-digit", month: "long", year: "numeric" })}
+                  </div>
+                </div>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Resumo Executivo */}
+        <Card className="shadow-card">
+          <CardContent className="p-6">
+            <h2 className="text-lg font-semibold">Resumo Executivo</h2>
+            <div className="mt-4 space-y-3">
+              <div className="flex items-center justify-between rounded-md border p-3">
+                <div className="flex items-center gap-2 text-danger">
+                  <ShieldAlert className="size-5" />
+                  <span className="font-medium">Acompanhar</span>
+                </div>
+                <div className="text-xl font-semibold">1</div>
+              </div>
+              <div className="flex items-center justify-between rounded-md border p-3">
+                <div className="flex items-center gap-2 text-warning">
+                  <TriangleAlert className="size-5" />
+                  <span className="font-medium">Atenção</span>
+                </div>
+                <div className="text-xl font-semibold">2</div>
+              </div>
+              <div className="flex items-center justify-between rounded-md border p-3">
+                <div className="flex items-center gap-2 text-success">
+                  <CheckCircle2 className="size-5" />
+                  <span className="font-medium">OK</span>
+                </div>
+                <div className="text-xl font-semibold">2</div>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Insights */}
+        <Card className="shadow-card">
+          <CardContent className="p-6">
+            <div className="flex items-center gap-2">
+              <Info className="size-4 text-primary" />
+              <h2 className="text-lg font-semibold">Insights (Gerado por IA)</h2>
+            </div>
+            <div className="mt-3 space-y-2 text-sm text-muted-foreground">
+              <p>
+                Foi identificado que houve alguns campos que estão preenchidos de maneira não devida e outros campos preenchidos corretamente. Com isso, a classificação do Score é "Médio"
+              </p>
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Detalhamento por Campo */}
+        <div className="space-y-2">
+          <ChangeAnalysis />
+        </div>
+      </main>
+    </div>
   );
 };
 
-export default RDMDetailModal;
+export default Index;
