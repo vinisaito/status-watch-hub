@@ -4,17 +4,34 @@ import os
 from datetime import datetime, timezone
 from decimal import Decimal
 
+# ---------- Config ----------
 dynamodb = boto3.resource("dynamodb")
 table = dynamodb.Table(os.environ["RDM_TABLE"])
 
+# ---------- Headers CORS ----------
 cors_headers = {
     "Access-Control-Allow-Origin": "*",
     "Access-Control-Allow-Methods": "OPTIONS,POST,GET",
     "Access-Control-Allow-Headers": "Content-Type"
 }
 
+
 def lambda_handler(event, context):
+    """
+    Lambda REST API para registrar RDMs no DynamoDB.
+    Suporta CORS completo (OPTIONS + POST).
+    """
+
     try:
+        # --- Tratar requisição de preflight (OPTIONS) ---
+        if event.get("httpMethod") == "OPTIONS":
+            return {
+                "statusCode": 200,
+                "headers": cors_headers,
+                "body": json.dumps({"message": "CORS preflight OK"})
+            }
+
+        # --- Ler corpo da requisição ---
         raw_body = event.get("body")
         body = json.loads(raw_body) if raw_body else {}
 
@@ -22,6 +39,7 @@ def lambda_handler(event, context):
         status = body.get("status")
         timestamp = body.get("timestamp")
 
+        # --- Validação básica ---
         if rdm is None or status is None:
             return {
                 "statusCode": 400,
@@ -29,18 +47,21 @@ def lambda_handler(event, context):
                 "body": json.dumps({"error": "Campos obrigatórios: rdm e status"})
             }
 
+        # --- Converter rdm para número ---
         try:
             rdm = int(rdm)
-        except ValueError:
+        except (ValueError, TypeError):
             return {
                 "statusCode": 400,
                 "headers": cors_headers,
                 "body": json.dumps({"error": "O campo 'rdm' deve ser numérico"})
             }
 
+        # --- Gerar timestamp se não informado ---
         if not timestamp:
             timestamp = datetime.now(timezone.utc).isoformat()
 
+        # --- Inserir no DynamoDB ---
         table.put_item(
             Item={
                 "rdm": Decimal(rdm),
@@ -49,6 +70,7 @@ def lambda_handler(event, context):
             }
         )
 
+        # --- Retornar sucesso ---
         return {
             "statusCode": 200,
             "headers": cors_headers,
