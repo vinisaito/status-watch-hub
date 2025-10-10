@@ -1,4 +1,3 @@
-INDEX:
 import { Card } from "@/components/ui/card";
 import { CheckCircle2, Clock, AlertCircle, RotateCcw, XCircle, Wrench } from "lucide-react";
 
@@ -22,117 +21,147 @@ interface AreaReportProps {
 }
 
 export const AreaReport = ({ area, manager: _manager, performance: _performance, revenue, status: _status, rdmStats, areaColor = "blue-medium", borderColor, accentColor }: AreaReportProps) => {
-  const total = rdmStats.concluidas + rdmStats.emAndamento + rdmStats.abertas + rdmStats.rollback;
+  const total = rdmStats.concluidas + rdmStats.emAndamento + rdmStats.abertas + rdmStats.rollback + (rdmStats.emAprovacao || 0) + (rdmStats.cancelada || 0);
   const completionPercentage = total > 0 ? Math.round((rdmStats.concluidas / total) * 100) : 0;
 
   return (
     <Card
-      className="group relative overflow-hidden bg-card transition-all duration-300 hover:shadow-xl hover:-translate-y-2"
-      style={{ borderColor: borderColor ?? "hsl(var(--border))", borderWidth: "2px" }}
+      className="group relative overflow-hidden bg-gradient-to-br from-card to-card/95 transition-all duration-500 hover:shadow-executive-hover hover:-translate-y-1 border-2"
+      style={{ borderColor: borderColor ?? "hsl(var(--border))" }}
     >
-      {/* Gradient overlay on hover */}
+      {/* Subtle gradient overlay on hover */}
       <div 
-        className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-500" 
+        className="absolute inset-0 opacity-0 group-hover:opacity-5 transition-opacity duration-700" 
         style={{ background: `linear-gradient(135deg, transparent 0%, ${accentColor ?? "hsl(var(--blue-soft))"} 100%)` }}
       />
       
-      <div className="relative p-6 flex flex-col h-full">
+      {/* Top accent bar */}
+      <div 
+        className="absolute top-0 left-0 right-0 h-1.5 opacity-80"
+        style={{ background: `linear-gradient(90deg, ${accentColor ?? "hsl(var(--primary))"}, transparent)` }}
+      />
+      
+      <div className="relative p-8">
         {/* Header with circular progress */}
-        <div className="flex items-start justify-between mb-6">
+        <div className="flex items-start justify-between mb-8">
           <div className="flex-1">
-            <h3 className="text-sm font-semibold text-muted-foreground tracking-wide uppercase mb-1">
+            <h3 className="text-xs font-bold text-muted-foreground tracking-[0.1em] uppercase mb-3 opacity-70">
               {area}
             </h3>
-            <p className="text-4xl font-bold text-foreground tracking-tight">{revenue}</p>
-            <p className="text-xs text-muted-foreground mt-1">Total RDMs</p>
+            <p className="text-5xl font-bold bg-gradient-to-br from-foreground to-foreground/70 bg-clip-text text-transparent tracking-tight leading-none mb-2">
+              {revenue}
+            </p>
+            <p className="text-sm text-muted-foreground font-medium">Total de RDMs</p>
           </div>
           
-          {/* Circular Progress Indicator */}
-          <div className="relative w-16 h-16">
-            <svg className="w-16 h-16 transform -rotate-90" viewBox="0 0 64 64">
+          {/* Enhanced Circular Progress Indicator */}
+          <div className="relative w-20 h-20">
+            <svg className="w-20 h-20 transform -rotate-90 filter drop-shadow-lg" viewBox="0 0 80 80">
+              {/* Background circle with subtle gradient */}
               <circle
-                cx="32"
-                cy="32"
-                r="28"
+                cx="40"
+                cy="40"
+                r="34"
                 fill="none"
                 stroke="hsl(var(--neutral-100))"
                 strokeWidth="6"
+                opacity="0.2"
               />
+              {/* Progress circle with gradient */}
+              <defs>
+                <linearGradient id="progressGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+                  <stop offset="0%" stopColor="hsl(var(--success))" />
+                  <stop offset="100%" stopColor="hsl(var(--info))" />
+                </linearGradient>
+              </defs>
               <circle
-                cx="32"
-                cy="32"
-                r="28"
+                cx="40"
+                cy="40"
+                r="34"
                 fill="none"
-                stroke="hsl(var(--success))"
+                stroke="url(#progressGradient)"
                 strokeWidth="6"
-                strokeDasharray={`${(completionPercentage / 100) * 176} 176`}
+                strokeDasharray={`${(completionPercentage / 100) * 213.6} 213.6`}
                 strokeLinecap="round"
-                className="transition-all duration-1000"
+                className="transition-all duration-1000 ease-out"
+                style={{ filter: "drop-shadow(0 0 8px hsl(var(--success) / 0.4))" }}
               />
             </svg>
             <div className="absolute inset-0 flex items-center justify-center">
-              <span className="text-xs font-bold text-foreground">{completionPercentage}%</span>
+              <span className="text-sm font-bold text-foreground">{completionPercentage}%</span>
             </div>
           </div>
         </div>
 
         {/* Status Grid with enhanced visuals */}
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-2 gap-4">
           {/* Concluídas */}
-          <div className="bg-[hsl(var(--success-light))] rounded-lg p-3 border border-[hsl(var(--success))]/20 transition-transform duration-200 hover:scale-105">
-            <div className="flex items-center gap-2 mb-1">
-              <CheckCircle2 className="h-4 w-4 text-[hsl(var(--success))]" />
-              <p className="text-lg font-bold text-foreground">{rdmStats.concluidas}</p>
+          <div className="bg-[hsl(var(--success-light))] rounded-xl p-4 border-2 border-[hsl(var(--success))]/10 transition-all duration-300 hover:scale-[1.02] hover:shadow-lg hover:border-[hsl(var(--success))]/30">
+            <div className="flex items-center gap-3 mb-2">
+              <div className="p-2 rounded-lg bg-[hsl(var(--success))]/10">
+                <CheckCircle2 className="h-5 w-5 text-[hsl(var(--success))]" />
+              </div>
+              <p className="text-2xl font-bold text-foreground tracking-tight">{rdmStats.concluidas}</p>
             </div>
-            <p className="text-xs text-muted-foreground font-medium">Concluídas</p>
+            <p className="text-xs text-muted-foreground font-semibold uppercase tracking-wide">Concluídas</p>
           </div>
 
           {/* Em Andamento */}
-          <div className="bg-[hsl(var(--warning-light))] rounded-lg p-3 border border-[hsl(var(--warning))]/20 transition-transform duration-200 hover:scale-105">
-            <div className="flex items-center gap-2 mb-1">
-              <Wrench className="h-4 w-4 text-[hsl(var(--warning))]" />
-              <p className="text-lg font-bold text-foreground">{rdmStats.emAndamento}</p>
+          <div className="bg-[hsl(var(--warning-light))] rounded-xl p-4 border-2 border-[hsl(var(--warning))]/10 transition-all duration-300 hover:scale-[1.02] hover:shadow-lg hover:border-[hsl(var(--warning))]/30">
+            <div className="flex items-center gap-3 mb-2">
+              <div className="p-2 rounded-lg bg-[hsl(var(--warning))]/10">
+                <Wrench className="h-5 w-5 text-[hsl(var(--warning))]" />
+              </div>
+              <p className="text-2xl font-bold text-foreground tracking-tight">{rdmStats.emAndamento}</p>
             </div>
-            <p className="text-xs text-muted-foreground font-medium">Em Implantação</p>
+            <p className="text-xs text-muted-foreground font-semibold uppercase tracking-wide">Em Implantação</p>
           </div>
 
           {/* Abertas */}
-          <div className="bg-[hsl(var(--blue-soft))] rounded-lg p-3 border border-[hsl(var(--blue-accent))]/20 transition-transform duration-200 hover:scale-105">
-            <div className="flex items-center gap-2 mb-1">
-              <AlertCircle className="h-4 w-4 text-[hsl(var(--blue-accent))]" />
-              <p className="text-lg font-bold text-foreground">{rdmStats.abertas}</p>
+          <div className="bg-[hsl(var(--info-light))] rounded-xl p-4 border-2 border-[hsl(var(--info))]/10 transition-all duration-300 hover:scale-[1.02] hover:shadow-lg hover:border-[hsl(var(--info))]/30">
+            <div className="flex items-center gap-3 mb-2">
+              <div className="p-2 rounded-lg bg-[hsl(var(--info))]/10">
+                <AlertCircle className="h-5 w-5 text-[hsl(var(--info))]" />
+              </div>
+              <p className="text-2xl font-bold text-foreground tracking-tight">{rdmStats.abertas}</p>
             </div>
-            <p className="text-xs text-muted-foreground font-medium">Abertas</p>
+            <p className="text-xs text-muted-foreground font-semibold uppercase tracking-wide">Abertas</p>
           </div>
 
           {/* Em Aprovação */}
           {typeof rdmStats.emAprovacao === "number" && (
-            <div className="bg-[hsl(var(--blue-soft))] rounded-lg p-3 border border-[hsl(var(--blue-medium))]/20 transition-transform duration-200 hover:scale-105">
-              <div className="flex items-center gap-2 mb-1">
-                <Clock className="h-4 w-4 text-[hsl(var(--blue-medium))]" />
-                <p className="text-lg font-bold text-foreground">{rdmStats.emAprovacao}</p>
+            <div className="bg-[hsl(var(--blue-soft))] rounded-xl p-4 border-2 border-[hsl(var(--blue-medium))]/10 transition-all duration-300 hover:scale-[1.02] hover:shadow-lg hover:border-[hsl(var(--blue-medium))]/30">
+              <div className="flex items-center gap-3 mb-2">
+                <div className="p-2 rounded-lg bg-[hsl(var(--blue-medium))]/10">
+                  <Clock className="h-5 w-5 text-[hsl(var(--blue-medium))]" />
+                </div>
+                <p className="text-2xl font-bold text-foreground tracking-tight">{rdmStats.emAprovacao}</p>
               </div>
-              <p className="text-xs text-muted-foreground font-medium">Em Aprovação</p>
+              <p className="text-xs text-muted-foreground font-semibold uppercase tracking-wide">Em Aprovação</p>
             </div>
           )}
 
           {/* Rollback */}
-          <div className="bg-red-50 rounded-lg p-3 border border-red-200 transition-transform duration-200 hover:scale-105">
-            <div className="flex items-center gap-2 mb-1">
-              <RotateCcw className="h-4 w-4 text-red-600" />
-              <p className="text-lg font-bold text-foreground">{rdmStats.rollback}</p>
+          <div className="bg-[hsl(var(--error-light))] rounded-xl p-4 border-2 border-[hsl(var(--error))]/10 transition-all duration-300 hover:scale-[1.02] hover:shadow-lg hover:border-[hsl(var(--error))]/30">
+            <div className="flex items-center gap-3 mb-2">
+              <div className="p-2 rounded-lg bg-[hsl(var(--error))]/10">
+                <RotateCcw className="h-5 w-5 text-[hsl(var(--error))]" />
+              </div>
+              <p className="text-2xl font-bold text-foreground tracking-tight">{rdmStats.rollback}</p>
             </div>
-            <p className="text-xs text-muted-foreground font-medium">Rollback</p>
+            <p className="text-xs text-muted-foreground font-semibold uppercase tracking-wide">Rollback</p>
           </div>
 
           {/* Cancelada */}
           {typeof rdmStats.cancelada === "number" && (
-            <div className="bg-red-50 rounded-lg p-3 border border-red-200 transition-transform duration-200 hover:scale-105">
-              <div className="flex items-center gap-2 mb-1">
-                <XCircle className="h-4 w-4 text-red-500" />
-                <p className="text-lg font-bold text-foreground">{rdmStats.cancelada}</p>
+            <div className="bg-[hsl(var(--error-light))] rounded-xl p-4 border-2 border-[hsl(var(--error))]/10 transition-all duration-300 hover:scale-[1.02] hover:shadow-lg hover:border-[hsl(var(--error))]/30">
+              <div className="flex items-center gap-3 mb-2">
+                <div className="p-2 rounded-lg bg-[hsl(var(--error))]/10">
+                  <XCircle className="h-5 w-5 text-[hsl(var(--error))]" />
+                </div>
+                <p className="text-2xl font-bold text-foreground tracking-tight">{rdmStats.cancelada}</p>
               </div>
-              <p className="text-xs text-muted-foreground font-medium">Cancelada</p>
+              <p className="text-xs text-muted-foreground font-semibold uppercase tracking-wide">Cancelada</p>
             </div>
           )}
         </div>
@@ -147,150 +176,6 @@ export const AreaReport = ({ area, manager: _manager, performance: _performance,
 
 
 
-
-
-
-
-
-
-
-
-
-import { AreaReport } from "@/components/AreaReport";
-import { useState, useEffect } from "react";
-import RDMTimeline from "@/components/RDMTimeline";
-import type { RDM } from "@/types/rdm";
-import { fetchRdms, mapApiItemToRdm } from "@/lib/api";
-
-const Index = () => {
-  // Only the Visão Geral (Overview) section is displayed for executives
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [allRdms, setAllRdms] = useState<RDM[]>([]);
-  const [search, setSearch] = useState("");
-  const [searchResultRdmId, setSearchResultRdmId] = useState<string | null>(null);
-
-  const totalReport = {
-    area: "Visão Geral",
-    performance: 85,
-    revenue: String(allRdms.length),
-    status: "excellent" as const,
-    rdmStats: {
-      concluidas: allRdms.filter((r) => r.category === "concluidas").length,
-      emAndamento: allRdms.filter((r) => r.category === "em_andamento").length,
-      abertas: allRdms.filter((r) => r.category === "aberta").length,
-      rollback: allRdms.filter((r) => r.category === "rollback").length,
-      emAprovacao: allRdms.filter((r) => r.category === "em_aprovacao").length,
-      cancelada: allRdms.filter((r) => r.category === "cancelada").length,
-    },
-  };
-
-  // Load data from API once
-  useEffect(() => {
-    const ctrl = new AbortController();
-    (async () => {
-      try {
-        setLoading(true);
-        setError(null);
-  const items = await fetchRdms(ctrl.signal);
-  setAllRdms(items.map((it, idx) => mapApiItemToRdm(it, idx)));
-      } catch (e: any) {
-        setError(e?.message ?? "Erro ao carregar dados");
-      } finally {
-        setLoading(false);
-      }
-    })();
-    return () => ctrl.abort();
-  }, []);
-
-  // Handle search submit: find RDM by number (ignoring leading zeros)
-  const onSearch = (e: React.FormEvent) => {
-    e.preventDefault();
-    const q = search.trim();
-    if (!q) {
-      setSearchResultRdmId(null);
-      return;
-    }
-    // Normalize number without leading zeros for comparison
-    const norm = q.replace(/^0+/, "");
-    // Search only in the Visão Geral timeline (all RDMs)
-    const rAll = allRdms.find((r) => r.number.replace(/^0+/, "") === norm);
-    if (rAll) {
-      setTimeout(() => setSearchResultRdmId(rAll.id), 0);
-    } else {
-      setSearchResultRdmId(null);
-    }
-  };
-
-  return (
-    <div className="min-h-screen bg-gradient-to-br from-[hsl(var(--background))] via-[hsl(var(--neutral-50))] to-[hsl(var(--blue-soft))]">
-      {/* Header */}
-      <header className="bg-white/80 backdrop-blur-sm py-2 px-6 shadow-sm sticky top-0 z-20 border-b border-[hsl(var(--border))]">
-        <div className="max-w-7xl mx-auto">
-          <div className="flex justify-center">
-            <img src="/logo.png" alt="Logo" className="h-12 md:h-16 w-auto" />
-          </div>
-        </div>
-      </header>
-
-      <main className="max-w-7xl mx-auto px-6 py-8">
-          {/* Título e busca */}
-          <section className="mb-10">
-            <div className="mb-6 text-center">
-              <h2 className="text-2xl md:text-3xl font-bold text-foreground tracking-tight">
-                Acompanhamento da Janela de RDMs
-              </h2>
-              <p className="text-sm md:text-base text-muted-foreground mt-1">
-                Visão Geral executiva — status consolidado e linha do tempo
-              </p>
-            </div>
-
-            <form onSubmit={onSearch} className="max-w-md mx-auto mb-6 flex gap-2">
-              <input
-                className="flex-1 px-3 py-2 rounded border border-[hsl(var(--border))] bg-white shadow-sm"
-                placeholder="Pesquisar RDM (ex.: 123)"
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-              />
-              <button
-                type="submit"
-                className="px-4 py-2 rounded bg-[hsl(var(--blue-medium))] text-white hover:opacity-90"
-              >
-                Buscar
-              </button>
-            </form>
-
-            <div className="max-w-md mx-auto animate-fade-in">
-              <AreaReport {...totalReport} />
-            </div>
-          </section>
-
-          {/* Timeline da Visão Geral */}
-          <section>
-            {loading && (
-              <div className="text-center text-sm text-muted-foreground py-8">Carregando dados…</div>
-            )}
-            {error && (
-              <div className="text-center text-sm text-red-600 py-8">{error}</div>
-            )}
-            {!loading && !error && (
-              <div className="rounded-lg border border-[hsl(var(--border))] bg-card p-6 shadow-lg font-sans antialiased">
-                <RDMTimeline
-                  productLine={{ id: "produto-overview", name: totalReport.area, color: "#0046c0", rdms: allRdms }}
-                  autoOpenRdmId={searchResultRdmId ?? undefined}
-                />
-              </div>
-            )}
-          </section>
-      </main>
-    </div>
-  );
-};
-
-export default Index;
-
-
-TIMELINE:
 interface TimelineItem {
   year: number;
   title: string;
@@ -302,36 +187,77 @@ interface TimelineProps {
 
 const Timeline = ({ items }: TimelineProps) => {
   return (
-    <div className="relative py-12">
-      {/* Dual rails to echo a train track motif */}
-      <div className="pointer-events-none absolute left-0 right-0 top-12 h-16">
-        <div className="absolute inset-x-0 top-2 h-0.5 bg-gradient-to-r from-border via-border/40 to-border" />
-        <div className="absolute inset-x-0 top-5 h-0.5 bg-gradient-to-r from-border via-border/40 to-border" />
-        <div className="absolute inset-x-0 top-[26px] h-0.5 bg-[repeating-linear-gradient(90deg,theme(colors.border/60)_0px,theme(colors.border/60)_12px,transparent_12px,transparent_22px)]" />
+    <div className="relative py-16">
+      {/* Enhanced dual rails with metallic effect */}
+      <div className="pointer-events-none absolute left-0 right-0 top-16 h-20">
+        {/* Top rail with gradient shimmer */}
+        <div 
+          className="absolute inset-x-0 top-2 h-1 rounded-full opacity-60"
+          style={{ 
+            background: "linear-gradient(90deg, hsl(var(--border)) 0%, hsl(var(--primary) / 0.3) 50%, hsl(var(--border)) 100%)"
+          }}
+        />
+        {/* Bottom rail */}
+        <div 
+          className="absolute inset-x-0 top-7 h-1 rounded-full opacity-60"
+          style={{ 
+            background: "linear-gradient(90deg, hsl(var(--border)) 0%, hsl(var(--primary) / 0.3) 50%, hsl(var(--border)) 100%)"
+          }}
+        />
+        {/* Cross ties pattern - enhanced */}
+        <div 
+          className="absolute inset-x-0 top-[18px] h-1"
+          style={{
+            background: "repeating-linear-gradient(90deg, hsl(var(--border) / 0.8) 0px, hsl(var(--border) / 0.8) 14px, transparent 14px, transparent 28px)"
+          }}
+        />
+        {/* Subtle glow effect */}
+        <div 
+          className="absolute inset-x-0 top-0 h-full opacity-20"
+          style={{ 
+            background: "radial-gradient(ellipse at center, hsl(var(--primary) / 0.15) 0%, transparent 70%)"
+          }}
+        />
       </div>
 
-      {/* Grid that fits all items within the available width (no horizontal scroll) */}
+      {/* Grid that fits all items within the available width */}
       <div
-        className="grid items-start gap-8 pb-6"
-        style={{ gridTemplateColumns: `repeat(auto-fit, minmax(180px, 1fr))` }}
+        className="grid items-start gap-10 pb-8"
+        style={{ gridTemplateColumns: `repeat(auto-fit, minmax(200px, 1fr))` }}
       >
         {items.map((item, index) => (
-          <div key={index} className="group relative pt-14">
-            {/* Connector from track to card */}
-            <div className="absolute left-1/2 top-6 h-[calc(100%-3rem)] w-px -translate-x-1/2 bg-border/70" aria-hidden />
+          <div key={index} className="group relative pt-20">
+            {/* Enhanced connector from track to card */}
+            <div 
+              className="absolute left-1/2 top-10 h-[calc(100%-4rem)] w-0.5 -translate-x-1/2 bg-gradient-to-b from-border via-primary/20 to-border opacity-40 transition-opacity duration-300 group-hover:opacity-70" 
+              aria-hidden 
+            />
 
-            {/* Dot */}
-            <div className="absolute left-1/2 top-0 flex h-10 w-10 -translate-x-1/2 items-center justify-center rounded-full bg-background shadow-[0_8px_20px_-12px_rgba(15,23,42,0.45)] transition-transform group-hover:-translate-y-0.5">
-              <div className="flex h-8 w-8 items-center justify-center rounded-full bg-primary text-xs uppercase tracking-wide text-primary-foreground">
-                {index + 1}
+            {/* Enhanced dot with glow effect */}
+            <div className="absolute left-1/2 top-0 flex h-12 w-12 -translate-x-1/2 items-center justify-center">
+              {/* Outer glow ring */}
+              <div className="absolute inset-0 rounded-full bg-primary/20 opacity-0 transition-all duration-500 group-hover:opacity-100 group-hover:scale-150 blur-md" />
+              
+              {/* Dot container */}
+              <div className="relative flex h-12 w-12 items-center justify-center rounded-full bg-gradient-to-br from-background to-background shadow-executive transition-all duration-300 group-hover:-translate-y-1 group-hover:shadow-executive-hover ring-2 ring-border/50 group-hover:ring-primary/50">
+                <div className="flex h-9 w-9 items-center justify-center rounded-full bg-gradient-to-br from-primary to-primary/80 text-xs font-bold uppercase tracking-wider text-primary-foreground shadow-inner">
+                  {index + 1}
+                </div>
               </div>
             </div>
 
-            {/* Card */}
-            <div className="relative rounded-2xl border border-border/60 bg-card/90 p-5 backdrop-blur-sm transition-all duration-200 group-hover:-translate-y-1 group-hover:border-primary/50 group-hover:shadow-lg">
-              <div className="flex flex-col items-center gap-3 text-center">
-                <span className="rounded-full bg-primary/10 px-3 py-1 text-sm font-semibold text-primary">{item.year}</span>
-                <span className="text-sm md:text-base leading-relaxed text-muted-foreground">{item.title}</span>
+            {/* Enhanced card with gradient background */}
+            <div className="relative rounded-2xl border-2 border-border/60 bg-gradient-to-br from-card via-card to-card/95 p-6 backdrop-blur-sm shadow-executive transition-all duration-500 group-hover:-translate-y-2 group-hover:border-primary/40 group-hover:shadow-executive-hover">
+              {/* Subtle shine effect on hover */}
+              <div className="absolute inset-0 rounded-2xl bg-gradient-to-br from-primary/5 via-transparent to-transparent opacity-0 transition-opacity duration-500 group-hover:opacity-100" />
+              
+              <div className="relative flex flex-col items-center gap-4 text-center">
+                <span className="inline-flex items-center justify-center rounded-full bg-gradient-to-br from-primary/15 to-primary/5 px-4 py-1.5 text-sm font-bold text-primary ring-1 ring-primary/20 transition-all duration-300 group-hover:ring-primary/40">
+                  {item.year}
+                </span>
+                <span className="text-sm md:text-base font-medium leading-relaxed text-muted-foreground text-balance">
+                  {item.title}
+                </span>
               </div>
             </div>
           </div>
@@ -342,4 +268,3 @@ const Timeline = ({ items }: TimelineProps) => {
 };
 
 export default Timeline;
-
