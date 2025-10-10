@@ -1,270 +1,165 @@
-import { Card } from "@/components/ui/card";
-import { CheckCircle2, Clock, AlertCircle, RotateCcw, XCircle, Wrench } from "lucide-react";
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
 
-interface AreaReportProps {
-  area: string;
-  manager?: string;
-  performance: number;
-  revenue: string;
-  status: "excellent" | "good" | "attention";
-  rdmStats: {
-    concluidas: number;
-    emAndamento: number;
-    abertas: number;
-    rollback: number;
-    emAprovacao?: number;
-    cancelada?: number;
-  };
-  areaColor?: string;
-  borderColor?: string;
-  accentColor?: string;
+/* Definition of the design system. All colors, gradients, fonts, etc should be defined here. 
+All colors MUST be HSL.
+*/
+
+@layer base {
+  :root {
+    --background: 210 20% 98%;
+    --foreground: 222 47% 11%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 222 47% 11%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 222 47% 11%;
+
+    --primary: 221 83% 53%;
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 210 17% 93%;
+    --secondary-foreground: 222 47% 11%;
+
+    --muted: 210 17% 95%;
+    --muted-foreground: 215 16% 47%;
+
+    --accent: 221 83% 53%;
+    --accent-foreground: 0 0% 100%;
+
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 214 32% 88%;
+    --input: 214 32% 91%;
+    --ring: 221 83% 53%;
+
+    --radius: 0.75rem;
+
+    /* Executive color palette */
+    --executive-blue: 221 83% 53%;
+    --executive-blue-light: 221 83% 95%;
+    --executive-navy: 222 47% 11%;
+    --executive-gray: 215 16% 47%;
+    --executive-gray-light: 210 17% 98%;
+    
+    /* Status colors */
+    --success: 142 71% 45%;
+    --success-light: 142 71% 96%;
+    --warning: 38 92% 50%;
+    --warning-light: 38 92% 96%;
+    --info: 199 89% 48%;
+    --info-light: 199 89% 96%;
+    --error: 0 72% 51%;
+    --error-light: 0 72% 96%;
+
+    /* Context colors matching original code */
+    --blue-soft: 221 83% 96%;
+    --blue-medium: 221 83% 53%;
+    --blue-accent: 199 89% 48%;
+    --neutral-50: 210 20% 98%;
+    --neutral-100: 210 17% 93%;
+
+    /* Gradients */
+    --gradient-primary: linear-gradient(135deg, hsl(221 83% 53%) 0%, hsl(199 89% 48%) 100%);
+    --gradient-subtle: linear-gradient(180deg, hsl(210 20% 98%) 0%, hsl(0 0% 100%) 100%);
+    --gradient-card: linear-gradient(135deg, hsl(0 0% 100%) 0%, hsl(221 83% 99%) 100%);
+
+    /* Shadows */
+    --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+    --shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+    --shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
+    --shadow-xl: 0 20px 25px -5px rgb(0 0 0 / 0.1), 0 8px 10px -6px rgb(0 0 0 / 0.1);
+    --shadow-glow: 0 0 40px hsl(221 83% 53% / 0.15);
+
+    --sidebar-background: 0 0% 98%;
+    --sidebar-foreground: 240 5.3% 26.1%;
+    --sidebar-primary: 240 5.9% 10%;
+    --sidebar-primary-foreground: 0 0% 98%;
+    --sidebar-accent: 240 4.8% 95.9%;
+    --sidebar-accent-foreground: 240 5.9% 10%;
+    --sidebar-border: 220 13% 91%;
+    --sidebar-ring: 217.2 91.2% 59.8%;
+  }
+
+  .dark {
+    --background: 222 47% 11%;
+    --foreground: 210 40% 98%;
+
+    --card: 222 47% 13%;
+    --card-foreground: 210 40% 98%;
+
+    --popover: 222 47% 13%;
+    --popover-foreground: 210 40% 98%;
+
+    --primary: 221 83% 53%;
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 217 33% 18%;
+    --secondary-foreground: 210 40% 98%;
+
+    --muted: 217 33% 18%;
+    --muted-foreground: 215 20% 65%;
+
+    --accent: 221 83% 53%;
+    --accent-foreground: 0 0% 100%;
+
+    --destructive: 0 63% 31%;
+    --destructive-foreground: 210 40% 98%;
+
+    --border: 217 33% 22%;
+    --input: 217 33% 18%;
+    --ring: 221 83% 53%;
+
+    --success: 142 71% 45%;
+    --success-light: 142 71% 15%;
+    --warning: 38 92% 50%;
+    --warning-light: 38 92% 15%;
+    --info: 199 89% 48%;
+    --info-light: 199 89% 15%;
+    --error: 0 72% 51%;
+    --error-light: 0 72% 15%;
+
+    --blue-soft: 221 83% 20%;
+    --blue-medium: 221 83% 53%;
+    --blue-accent: 199 89% 48%;
+    --neutral-50: 222 47% 13%;
+    --neutral-100: 217 33% 18%;
+
+    --sidebar-background: 240 5.9% 10%;
+    --sidebar-foreground: 240 4.8% 95.9%;
+    --sidebar-primary: 224.3 76.3% 48%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 240 3.7% 15.9%;
+    --sidebar-accent-foreground: 240 4.8% 95.9%;
+    --sidebar-border: 240 3.7% 15.9%;
+    --sidebar-ring: 217.2 91.2% 59.8%;
+  }
 }
 
-export const AreaReport = ({ area, manager: _manager, performance: _performance, revenue, status: _status, rdmStats, areaColor = "blue-medium", borderColor, accentColor }: AreaReportProps) => {
-  const total = rdmStats.concluidas + rdmStats.emAndamento + rdmStats.abertas + rdmStats.rollback + (rdmStats.emAprovacao || 0) + (rdmStats.cancelada || 0);
-  const completionPercentage = total > 0 ? Math.round((rdmStats.concluidas / total) * 100) : 0;
+@layer base {
+  * {
+    @apply border-border;
+  }
 
-  return (
-    <Card
-      className="group relative overflow-hidden bg-gradient-to-br from-card to-card/95 transition-all duration-500 hover:shadow-executive-hover hover:-translate-y-1 border-2"
-      style={{ borderColor: borderColor ?? "hsl(var(--border))" }}
-    >
-      {/* Subtle gradient overlay on hover */}
-      <div 
-        className="absolute inset-0 opacity-0 group-hover:opacity-5 transition-opacity duration-700" 
-        style={{ background: `linear-gradient(135deg, transparent 0%, ${accentColor ?? "hsl(var(--blue-soft))"} 100%)` }}
-      />
-      
-      {/* Top accent bar */}
-      <div 
-        className="absolute top-0 left-0 right-0 h-1.5 opacity-80"
-        style={{ background: `linear-gradient(90deg, ${accentColor ?? "hsl(var(--primary))"}, transparent)` }}
-      />
-      
-      <div className="relative p-8">
-        {/* Header with circular progress */}
-        <div className="flex items-start justify-between mb-8">
-          <div className="flex-1">
-            <h3 className="text-xs font-bold text-muted-foreground tracking-[0.1em] uppercase mb-3 opacity-70">
-              {area}
-            </h3>
-            <p className="text-5xl font-bold bg-gradient-to-br from-foreground to-foreground/70 bg-clip-text text-transparent tracking-tight leading-none mb-2">
-              {revenue}
-            </p>
-            <p className="text-sm text-muted-foreground font-medium">Total de RDMs</p>
-          </div>
-          
-          {/* Enhanced Circular Progress Indicator */}
-          <div className="relative w-20 h-20">
-            <svg className="w-20 h-20 transform -rotate-90 filter drop-shadow-lg" viewBox="0 0 80 80">
-              {/* Background circle with subtle gradient */}
-              <circle
-                cx="40"
-                cy="40"
-                r="34"
-                fill="none"
-                stroke="hsl(var(--neutral-100))"
-                strokeWidth="6"
-                opacity="0.2"
-              />
-              {/* Progress circle with gradient */}
-              <defs>
-                <linearGradient id="progressGradient" x1="0%" y1="0%" x2="100%" y2="100%">
-                  <stop offset="0%" stopColor="hsl(var(--success))" />
-                  <stop offset="100%" stopColor="hsl(var(--info))" />
-                </linearGradient>
-              </defs>
-              <circle
-                cx="40"
-                cy="40"
-                r="34"
-                fill="none"
-                stroke="url(#progressGradient)"
-                strokeWidth="6"
-                strokeDasharray={`${(completionPercentage / 100) * 213.6} 213.6`}
-                strokeLinecap="round"
-                className="transition-all duration-1000 ease-out"
-                style={{ filter: "drop-shadow(0 0 8px hsl(var(--success) / 0.4))" }}
-              />
-            </svg>
-            <div className="absolute inset-0 flex items-center justify-center">
-              <span className="text-sm font-bold text-foreground">{completionPercentage}%</span>
-            </div>
-          </div>
-        </div>
-
-        {/* Status Grid with enhanced visuals */}
-        <div className="grid grid-cols-2 gap-4">
-          {/* Concluídas */}
-          <div className="bg-[hsl(var(--success-light))] rounded-xl p-4 border-2 border-[hsl(var(--success))]/10 transition-all duration-300 hover:scale-[1.02] hover:shadow-lg hover:border-[hsl(var(--success))]/30">
-            <div className="flex items-center gap-3 mb-2">
-              <div className="p-2 rounded-lg bg-[hsl(var(--success))]/10">
-                <CheckCircle2 className="h-5 w-5 text-[hsl(var(--success))]" />
-              </div>
-              <p className="text-2xl font-bold text-foreground tracking-tight">{rdmStats.concluidas}</p>
-            </div>
-            <p className="text-xs text-muted-foreground font-semibold uppercase tracking-wide">Concluídas</p>
-          </div>
-
-          {/* Em Andamento */}
-          <div className="bg-[hsl(var(--warning-light))] rounded-xl p-4 border-2 border-[hsl(var(--warning))]/10 transition-all duration-300 hover:scale-[1.02] hover:shadow-lg hover:border-[hsl(var(--warning))]/30">
-            <div className="flex items-center gap-3 mb-2">
-              <div className="p-2 rounded-lg bg-[hsl(var(--warning))]/10">
-                <Wrench className="h-5 w-5 text-[hsl(var(--warning))]" />
-              </div>
-              <p className="text-2xl font-bold text-foreground tracking-tight">{rdmStats.emAndamento}</p>
-            </div>
-            <p className="text-xs text-muted-foreground font-semibold uppercase tracking-wide">Em Implantação</p>
-          </div>
-
-          {/* Abertas */}
-          <div className="bg-[hsl(var(--info-light))] rounded-xl p-4 border-2 border-[hsl(var(--info))]/10 transition-all duration-300 hover:scale-[1.02] hover:shadow-lg hover:border-[hsl(var(--info))]/30">
-            <div className="flex items-center gap-3 mb-2">
-              <div className="p-2 rounded-lg bg-[hsl(var(--info))]/10">
-                <AlertCircle className="h-5 w-5 text-[hsl(var(--info))]" />
-              </div>
-              <p className="text-2xl font-bold text-foreground tracking-tight">{rdmStats.abertas}</p>
-            </div>
-            <p className="text-xs text-muted-foreground font-semibold uppercase tracking-wide">Abertas</p>
-          </div>
-
-          {/* Em Aprovação */}
-          {typeof rdmStats.emAprovacao === "number" && (
-            <div className="bg-[hsl(var(--blue-soft))] rounded-xl p-4 border-2 border-[hsl(var(--blue-medium))]/10 transition-all duration-300 hover:scale-[1.02] hover:shadow-lg hover:border-[hsl(var(--blue-medium))]/30">
-              <div className="flex items-center gap-3 mb-2">
-                <div className="p-2 rounded-lg bg-[hsl(var(--blue-medium))]/10">
-                  <Clock className="h-5 w-5 text-[hsl(var(--blue-medium))]" />
-                </div>
-                <p className="text-2xl font-bold text-foreground tracking-tight">{rdmStats.emAprovacao}</p>
-              </div>
-              <p className="text-xs text-muted-foreground font-semibold uppercase tracking-wide">Em Aprovação</p>
-            </div>
-          )}
-
-          {/* Rollback */}
-          <div className="bg-[hsl(var(--error-light))] rounded-xl p-4 border-2 border-[hsl(var(--error))]/10 transition-all duration-300 hover:scale-[1.02] hover:shadow-lg hover:border-[hsl(var(--error))]/30">
-            <div className="flex items-center gap-3 mb-2">
-              <div className="p-2 rounded-lg bg-[hsl(var(--error))]/10">
-                <RotateCcw className="h-5 w-5 text-[hsl(var(--error))]" />
-              </div>
-              <p className="text-2xl font-bold text-foreground tracking-tight">{rdmStats.rollback}</p>
-            </div>
-            <p className="text-xs text-muted-foreground font-semibold uppercase tracking-wide">Rollback</p>
-          </div>
-
-          {/* Cancelada */}
-          {typeof rdmStats.cancelada === "number" && (
-            <div className="bg-[hsl(var(--error-light))] rounded-xl p-4 border-2 border-[hsl(var(--error))]/10 transition-all duration-300 hover:scale-[1.02] hover:shadow-lg hover:border-[hsl(var(--error))]/30">
-              <div className="flex items-center gap-3 mb-2">
-                <div className="p-2 rounded-lg bg-[hsl(var(--error))]/10">
-                  <XCircle className="h-5 w-5 text-[hsl(var(--error))]" />
-                </div>
-                <p className="text-2xl font-bold text-foreground tracking-tight">{rdmStats.cancelada}</p>
-              </div>
-              <p className="text-xs text-muted-foreground font-semibold uppercase tracking-wide">Cancelada</p>
-            </div>
-          )}
-        </div>
-      </div>
-    </Card>
-  );
-};
-
-
-
-
-
-
-
-interface TimelineItem {
-  year: number;
-  title: string;
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-feature-settings: "rlig" 1, "calt" 1;
+  }
 }
 
-interface TimelineProps {
-  items: TimelineItem[];
+@layer utilities {
+  .text-balance {
+    text-wrap: balance;
+  }
+  
+  .shadow-executive {
+    box-shadow: var(--shadow-lg);
+  }
+  
+  .shadow-executive-hover {
+    box-shadow: var(--shadow-xl);
+  }
 }
-
-const Timeline = ({ items }: TimelineProps) => {
-  return (
-    <div className="relative py-16">
-      {/* Enhanced dual rails with metallic effect */}
-      <div className="pointer-events-none absolute left-0 right-0 top-16 h-20">
-        {/* Top rail with gradient shimmer */}
-        <div 
-          className="absolute inset-x-0 top-2 h-1 rounded-full opacity-60"
-          style={{ 
-            background: "linear-gradient(90deg, hsl(var(--border)) 0%, hsl(var(--primary) / 0.3) 50%, hsl(var(--border)) 100%)"
-          }}
-        />
-        {/* Bottom rail */}
-        <div 
-          className="absolute inset-x-0 top-7 h-1 rounded-full opacity-60"
-          style={{ 
-            background: "linear-gradient(90deg, hsl(var(--border)) 0%, hsl(var(--primary) / 0.3) 50%, hsl(var(--border)) 100%)"
-          }}
-        />
-        {/* Cross ties pattern - enhanced */}
-        <div 
-          className="absolute inset-x-0 top-[18px] h-1"
-          style={{
-            background: "repeating-linear-gradient(90deg, hsl(var(--border) / 0.8) 0px, hsl(var(--border) / 0.8) 14px, transparent 14px, transparent 28px)"
-          }}
-        />
-        {/* Subtle glow effect */}
-        <div 
-          className="absolute inset-x-0 top-0 h-full opacity-20"
-          style={{ 
-            background: "radial-gradient(ellipse at center, hsl(var(--primary) / 0.15) 0%, transparent 70%)"
-          }}
-        />
-      </div>
-
-      {/* Grid that fits all items within the available width */}
-      <div
-        className="grid items-start gap-10 pb-8"
-        style={{ gridTemplateColumns: `repeat(auto-fit, minmax(200px, 1fr))` }}
-      >
-        {items.map((item, index) => (
-          <div key={index} className="group relative pt-20">
-            {/* Enhanced connector from track to card */}
-            <div 
-              className="absolute left-1/2 top-10 h-[calc(100%-4rem)] w-0.5 -translate-x-1/2 bg-gradient-to-b from-border via-primary/20 to-border opacity-40 transition-opacity duration-300 group-hover:opacity-70" 
-              aria-hidden 
-            />
-
-            {/* Enhanced dot with glow effect */}
-            <div className="absolute left-1/2 top-0 flex h-12 w-12 -translate-x-1/2 items-center justify-center">
-              {/* Outer glow ring */}
-              <div className="absolute inset-0 rounded-full bg-primary/20 opacity-0 transition-all duration-500 group-hover:opacity-100 group-hover:scale-150 blur-md" />
-              
-              {/* Dot container */}
-              <div className="relative flex h-12 w-12 items-center justify-center rounded-full bg-gradient-to-br from-background to-background shadow-executive transition-all duration-300 group-hover:-translate-y-1 group-hover:shadow-executive-hover ring-2 ring-border/50 group-hover:ring-primary/50">
-                <div className="flex h-9 w-9 items-center justify-center rounded-full bg-gradient-to-br from-primary to-primary/80 text-xs font-bold uppercase tracking-wider text-primary-foreground shadow-inner">
-                  {index + 1}
-                </div>
-              </div>
-            </div>
-
-            {/* Enhanced card with gradient background */}
-            <div className="relative rounded-2xl border-2 border-border/60 bg-gradient-to-br from-card via-card to-card/95 p-6 backdrop-blur-sm shadow-executive transition-all duration-500 group-hover:-translate-y-2 group-hover:border-primary/40 group-hover:shadow-executive-hover">
-              {/* Subtle shine effect on hover */}
-              <div className="absolute inset-0 rounded-2xl bg-gradient-to-br from-primary/5 via-transparent to-transparent opacity-0 transition-opacity duration-500 group-hover:opacity-100" />
-              
-              <div className="relative flex flex-col items-center gap-4 text-center">
-                <span className="inline-flex items-center justify-center rounded-full bg-gradient-to-br from-primary/15 to-primary/5 px-4 py-1.5 text-sm font-bold text-primary ring-1 ring-primary/20 transition-all duration-300 group-hover:ring-primary/40">
-                  {item.year}
-                </span>
-                <span className="text-sm md:text-base font-medium leading-relaxed text-muted-foreground text-balance">
-                  {item.title}
-                </span>
-              </div>
-            </div>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-};
-
-export default Timeline;
