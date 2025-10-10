@@ -1,1 +1,67 @@
-{"error": "the JSON object must be str, bytes or bytearray, not NoneType"}
+import json
+import boto3
+import os
+from datetime import datetime, timezone
+from decimal import Decimal
+
+dynamodb = boto3.resource("dynamodb")
+table = dynamodb.Table(os.environ["RDM_TABLE"])
+
+cors_headers = {
+    "Access-Control-Allow-Origin": "*",
+    "Access-Control-Allow-Methods": "OPTIONS,POST,GET",
+    "Access-Control-Allow-Headers": "Content-Type"
+}
+
+def lambda_handler(event, context):
+    try:
+        raw_body = event.get("body")
+        body = json.loads(raw_body) if raw_body else {}
+
+        rdm = body.get("rdm")
+        status = body.get("status")
+        timestamp = body.get("timestamp")
+
+        if rdm is None or status is None:
+            return {
+                "statusCode": 400,
+                "headers": cors_headers,
+                "body": json.dumps({"error": "Campos obrigatórios: rdm e status"})
+            }
+
+        try:
+            rdm = int(rdm)
+        except ValueError:
+            return {
+                "statusCode": 400,
+                "headers": cors_headers,
+                "body": json.dumps({"error": "O campo 'rdm' deve ser numérico"})
+            }
+
+        if not timestamp:
+            timestamp = datetime.now(timezone.utc).isoformat()
+
+        table.put_item(
+            Item={
+                "rdm": Decimal(rdm),
+                "status": str(status),
+                "timestamp": str(timestamp),
+            }
+        )
+
+        return {
+            "statusCode": 200,
+            "headers": cors_headers,
+            "body": json.dumps({
+                "message": "RDM registrado com sucesso!",
+                "item": {"rdm": rdm, "status": status, "timestamp": timestamp}
+            }),
+        }
+
+    except Exception as e:
+        print("Erro ao processar:", e)
+        return {
+            "statusCode": 500,
+            "headers": cors_headers,
+            "body": json.dumps({"error": str(e)}),
+        }
