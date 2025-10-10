@@ -1,471 +1,3 @@
-import { AreaReport } from "@/components/AreaReport";
-import { HeroMetrics } from "@/components/HeroMetrics";
-import { useState, useRef, useEffect } from "react";
-import { SnakeLine } from "@/components/SnakeLine";
-import RDMTimeline from "@/components/RDMTimeline";
-import type { ProductLine, RDM } from "@/types/rdm";
-import { Separator } from "@/components/ui/separator";
-import { fetchRdms, groupByArea, API_URL } from "@/lib/api";
-import { Search } from "lucide-react";
-import {
-  AREA_PB_NAME,
-  AREA_PBS_NAME,
-  AREA_PSA_NAME,
-  AREA_PSG_NAME,
-  PORTO_BANK_DEPTS,
-  PORTO_SERVICO_DEPTS,
-  PORTO_SAUDE_DEPTS,
-  PORTO_SEGUROS_DEPTS,
-  normalizeKey,
-} from "@/lib/area-groups";
-
-const Index = () => {
-  type Selection = { type: "overview" } | { type: "area"; index: number } | null;
-  const [selection, setSelection] = useState<Selection>(null);
-  const [lineCoords, setLineCoords] = useState<{ startX: number; startY: number; endX: number; endY: number } | null>(null);
-  const cardRefs = useRef<(HTMLDivElement | null)[]>([]);
-  const overviewCardRef = useRef<HTMLDivElement | null>(null);
-  const timelineRef = useRef<HTMLDivElement>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [areas, setAreas] = useState<{
-    area: string;
-    rdms: RDM[];
-  }[]>([]);
-  const [allRdms, setAllRdms] = useState<RDM[]>([]);
-  const [search, setSearch] = useState("");
-  const [searchResultRdmId, setSearchResultRdmId] = useState<string | null>(null);
-
-  const totalReport = {
-    area: "Visão Geral",
-    performance: 85,
-    revenue: String(allRdms.length),
-    status: "excellent" as const,
-    rdmStats: {
-      concluidas: allRdms.filter((r) => r.category === "concluidas").length,
-      emAndamento: allRdms.filter((r) => r.category === "em_andamento").length,
-      abertas: allRdms.filter((r) => r.category === "aberta").length,
-      rollback: allRdms.filter((r) => r.category === "rollback").length,
-      emAprovacao: allRdms.filter((r) => r.category === "em_aprovacao").length,
-      cancelada: allRdms.filter((r) => r.category === "cancelada").length,
-    },
-  };
-
-  // Load data from API once
-  useEffect(() => {
-    const ctrl = new AbortController();
-    (async () => {
-      try {
-        setLoading(true);
-        setError(null);
-        const items = await fetchRdms(ctrl.signal);
-        const grouped = groupByArea(items);
-
-        // Build full RDMS list for overview
-        const all = grouped.flatMap((g) => g.rdms);
-        setAllRdms(all);
-
-        // Synthetic area: Porto Bank (by deptoExecutor)
-        const normalize = normalizeKey;
-        const portoBankDepts = new Set(PORTO_BANK_DEPTS.map(normalize));
-        const isPortoBank = (r: RDM) => portoBankDepts.has(normalize((r.deptoExecutor ?? "") as string));
-        const portoBankRdms = all.filter((r) => isPortoBank(r));
-
-        // Synthetic area: Porto Serviço (by deptoExecutor)
-        const portoServicoDepts = new Set(PORTO_SERVICO_DEPTS.map(normalize));
-        const isPortoServico = (r: RDM) => portoServicoDepts.has(normalize((r.deptoExecutor ?? "") as string));
-        const portoServicoRdms = all.filter((r) => isPortoServico(r) && !isPortoBank(r));
-
-        // Synthetic area: Porto Saúde (by deptoExecutor)
-        const portoSaudeDepts = new Set(PORTO_SAUDE_DEPTS.map(normalize));
-        const isPortoSaude = (r: RDM) => portoSaudeDepts.has(normalize((r.deptoExecutor ?? "") as string));
-        const portoSaudeRdms = all.filter((r) => isPortoSaude(r) && !isPortoBank(r) && !isPortoServico(r));
-
-        // Synthetic area: Porto Seguros (by deptoExecutor or deptoGrupoExecutor)
-        const portoSegurosDepts = new Set(PORTO_SEGUROS_DEPTS.map(normalize));
-        const isPortoSeguros = (r: RDM) => {
-          const d1 = normalize((r.deptoExecutor ?? "") as string);
-          const d2 = normalize((r.deptoGrupoExecutor ?? "") as string);
-          return portoSegurosDepts.has(d1) || portoSegurosDepts.has(d2);
-        };
-        const portoSegurosRdms = all.filter(
-          (r) => isPortoSeguros(r) && !isPortoBank(r) && !isPortoServico(r) && !isPortoSaude(r)
-        );
-
-        // Remove infra RDMs from their original groups to avoid duplication in totals
-        let filtered = grouped
-          .map((g) => ({ name: g.name, rdms: g.rdms.filter((r) => !isPortoBank(r) && !isPortoServico(r) && !isPortoSaude(r) && !isPortoSeguros(r)) }))
-          .filter((g) => g.rdms.length > 0);
-
-        const finalAreas: { area: string; rdms: RDM[] }[] = [];
-
-        // Porto Bank merge/create
-        const PB_NAME = AREA_PB_NAME;
-        const pbIdx = filtered.findIndex(
-          (g) => g.name.trim().toLowerCase() === PB_NAME.toLowerCase()
-        );
-        if (pbIdx >= 0) {
-          const mergedPB = [...filtered[pbIdx].rdms, ...portoBankRdms];
-          if (mergedPB.length > 0) {
-            finalAreas.push({ area: PB_NAME, rdms: mergedPB });
-          }
-          filtered = filtered.filter((_, i) => i !== pbIdx);
-        } else if (portoBankRdms.length > 0) {
-          finalAreas.push({ area: PB_NAME, rdms: portoBankRdms });
-        }
-
-        // Porto Serviço merge/create
-        const PBS_NAME = AREA_PBS_NAME;
-        const pbsIdx = filtered.findIndex(
-          (g) => g.name.trim().toLowerCase() === PBS_NAME.toLowerCase()
-        );
-        if (pbsIdx >= 0) {
-          const mergedPBS = [...filtered[pbsIdx].rdms, ...portoServicoRdms];
-          if (mergedPBS.length > 0) {
-            finalAreas.push({ area: PBS_NAME, rdms: mergedPBS });
-          }
-          filtered = filtered.filter((_, i) => i !== pbsIdx);
-        } else if (portoServicoRdms.length > 0) {
-          finalAreas.push({ area: PBS_NAME, rdms: portoServicoRdms });
-        }
-
-        // Porto Saúde merge/create
-        const PSA_NAME = AREA_PSA_NAME;
-        const psaIdx = filtered.findIndex(
-          (g) => g.name.trim().toLowerCase() === PSA_NAME.toLowerCase()
-        );
-        if (psaIdx >= 0) {
-          const mergedPSA = [...filtered[psaIdx].rdms, ...portoSaudeRdms];
-          if (mergedPSA.length > 0) {
-            finalAreas.push({ area: PSA_NAME, rdms: mergedPSA });
-          }
-          filtered = filtered.filter((_, i) => i !== psaIdx);
-        } else if (portoSaudeRdms.length > 0) {
-          finalAreas.push({ area: PSA_NAME, rdms: portoSaudeRdms });
-        }
-
-        // Porto Seguros merge/create
-        const PSG_NAME = AREA_PSG_NAME;
-        const psgIdx = filtered.findIndex(
-          (g) => g.name.trim().toLowerCase() === PSG_NAME.toLowerCase()
-        );
-        if (psgIdx >= 0) {
-          const mergedPSG = [...filtered[psgIdx].rdms, ...portoSegurosRdms];
-          if (mergedPSG.length > 0) {
-            finalAreas.push({ area: PSG_NAME, rdms: mergedPSG });
-          }
-          filtered = filtered.filter((_, i) => i !== psgIdx);
-        } else if (portoSegurosRdms.length > 0) {
-          finalAreas.push({ area: PSG_NAME, rdms: portoSegurosRdms });
-        }
-
-        setAreas(finalAreas);
-      } catch (e: any) {
-        setError(e?.message ?? "Erro ao carregar dados");
-      } finally {
-        setLoading(false);
-      }
-    })();
-    return () => ctrl.abort();
-  }, []);
-
-  useEffect(() => {
-    const updateCoords = () => {
-      const sourceEl = selection?.type === "overview"
-        ? overviewCardRef.current
-        : selection?.type === "area"
-        ? cardRefs.current[selection.index]
-        : null;
-
-      if (sourceEl && timelineRef.current) {
-        const cardRect = sourceEl.getBoundingClientRect();
-        const timelineRect = timelineRef.current.getBoundingClientRect();
-
-        const clamp = (val: number, min: number, max: number) => Math.min(Math.max(val, min), max);
-        const vw = window.innerWidth;
-        const vh = window.innerHeight;
-
-        setLineCoords({
-          startX: clamp(cardRect.left + cardRect.width / 2, 0, vw),
-          startY: clamp(cardRect.top + cardRect.height, 0, vh),
-          endX: clamp(timelineRect.left + timelineRect.width / 2, 0, vw),
-          endY: clamp(timelineRect.top, 0, vh),
-        });
-      } else {
-        setLineCoords(null);
-      }
-    };
-
-    const raf = requestAnimationFrame(updateCoords);
-    window.addEventListener("resize", updateCoords);
-    window.addEventListener("scroll", updateCoords, { passive: true });
-
-    return () => {
-      cancelAnimationFrame(raf);
-      window.removeEventListener("resize", updateCoords);
-      window.removeEventListener("scroll", updateCoords);
-    };
-  }, [selection]);
-
-  // Keep selected index valid when areas change (e.g., after fetch)
-  useEffect(() => {
-    if (selection?.type === "area" && (selection.index < 0 || selection.index >= areas.length)) {
-      setSelection(null);
-    }
-  }, [areas, selection]);
-
-  // Handle search submit: find RDM by number (ignoring leading zeros)
-  const onSearch = (e: React.FormEvent) => {
-    e.preventDefault();
-    const q = search.trim();
-    if (!q) {
-      setSearchResultRdmId(null);
-      return;
-    }
-    // Normalize number without leading zeros for comparison
-    const norm = q.replace(/^0+/, "");
-    let found: { areaIdx: number; rdmId: string } | null = null;
-    areas.some((a, i) => {
-      const r = a.rdms.find((r) => r.number.replace(/^0+/, "") === norm);
-      if (r) {
-        found = { areaIdx: i, rdmId: r.id };
-        return true;
-      }
-      return false;
-    });
-    if (found) {
-      setSelection({ type: "area", index: found.areaIdx });
-      setTimeout(() => setSearchResultRdmId(found!.rdmId), 0);
-    } else {
-      const rAll = allRdms.find((r) => r.number.replace(/^0+/, "") === norm);
-      if (rAll) {
-        setSelection({ type: "overview" });
-        setTimeout(() => setSearchResultRdmId(rAll.id), 0);
-      } else {
-        setSearchResultRdmId(null);
-      }
-    }
-  };
-
-  const areaReports = areas.map((g) => ({
-    area: g.area,
-    performance: 80,
-    revenue: String(g.rdms.length),
-    status: "good" as const,
-    rdmStats: {
-      concluidas: g.rdms.filter((r) => r.category === "concluidas").length,
-      emAndamento: g.rdms.filter((r) => r.category === "em_andamento").length,
-      abertas: g.rdms.filter((r) => r.category === "aberta").length,
-      rollback: g.rdms.filter((r) => r.category === "rollback").length,
-      emAprovacao: g.rdms.filter((r) => r.category === "em_aprovacao").length,
-      cancelada: g.rdms.filter((r) => r.category === "cancelada").length,
-    },
-  }));
-
-  const buildProductLine = (areaName: string, idx: number): ProductLine => {
-    const colors = [
-      "#00d6fc", "#0046c0", "#001864", "#2ccc8a",
-      "#6b45ff", "#7fa8c3", "#ff5a49", "#c39fd1",
-    ];
-    const area = areas.find((a) => a.area === areaName);
-    const rdms = area?.rdms ?? [];
-    return {
-      id: `produto-${idx + 1}`,
-      name: areaName,
-      color: colors[idx % colors.length],
-      rdms,
-    };
-  };
-
-  const completionRate = allRdms.length > 0 
-    ? Math.round((totalReport.rdmStats.concluidas / allRdms.length) * 100) 
-    : 0;
-
-  return (
-    <div className="min-h-screen bg-gradient-to-br from-[hsl(var(--background))] via-[hsl(var(--neutral-50))] to-[hsl(var(--blue-soft))]">
-      {/* Header */}
-      <header className="bg-white/90 backdrop-blur-md py-3 px-6 shadow-sm sticky top-0 z-20 border-b border-[hsl(var(--border))]">
-        <div className="max-w-7xl mx-auto">
-          <div className="flex justify-center">
-            <img src="/logo.png" alt="Logo" className="h-12 md:h-16 w-auto" />
-          </div>
-        </div>
-      </header>
-
-      <main className="max-w-7xl mx-auto px-4 md:px-6 py-8 md:py-12">
-        {/* Hero Metrics Section - The Visual Highlight */}
-        <section className="mb-12 animate-fade-in">
-          <div
-            className="cursor-pointer focus:outline-none focus:ring-2 focus:ring-primary rounded-xl"
-            role="button"
-            tabIndex={0}
-            ref={overviewCardRef}
-            onClick={() => setSelection({ type: "overview" })}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" || e.key === " ") {
-                e.preventDefault();
-                setSelection({ type: "overview" });
-              }
-            }}
-          >
-            <HeroMetrics
-              totalRdms={allRdms.length}
-              concluidas={totalReport.rdmStats.concluidas}
-              emAndamento={totalReport.rdmStats.emAndamento}
-              abertas={totalReport.rdmStats.abertas}
-              completionRate={completionRate}
-            />
-          </div>
-        </section>
-
-        {/* Search Section */}
-        <section className="mb-12">
-          <form onSubmit={onSearch} className="max-w-2xl mx-auto">
-            <div className="relative">
-              <input
-                className="w-full px-4 py-3 pl-12 rounded-xl border-2 border-[hsl(var(--border))] bg-white shadow-md focus:border-[hsl(var(--blue-medium))] focus:ring-2 focus:ring-[hsl(var(--blue-medium))]/20 transition-all duration-200 text-base"
-                placeholder="Pesquisar RDM por número..."
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-              />
-              <Search className="absolute left-4 top-1/2 -translate-y-1/2 h-5 w-5 text-muted-foreground" />
-              <button
-                type="submit"
-                className="absolute right-2 top-1/2 -translate-y-1/2 px-6 py-2 rounded-lg bg-[hsl(var(--blue-medium))] text-white hover:opacity-90 font-medium shadow-md transition-all duration-200 hover:shadow-lg"
-              >
-                Buscar
-              </button>
-            </div>
-          </form>
-        </section>
-
-        <Separator className="my-8" />
-
-        {/* Area Reports Section */}
-        <section>
-          {loading && (
-            <div className="text-center text-base text-muted-foreground py-12 font-medium">
-              Carregando dados…
-            </div>
-          )}
-          {error && (
-            <div className="text-center text-base text-red-600 py-12 font-medium">{error}</div>
-          )}
-          {!loading && !error && areas.length === 0 && (
-            <div className="text-center text-base text-muted-foreground py-12 font-medium">
-              Nenhum dado encontrado.
-            </div>
-          )}
-          {selection === null ? (
-            <>
-              <div className="mb-10 text-center">
-                <h2 className="text-3xl md:text-4xl font-bold text-foreground mb-3 tracking-tight">
-                  Áreas de Negócio
-                </h2>
-                <p className="text-base text-muted-foreground">
-                  Selecione uma área para visualizar detalhes das RDMs
-                </p>
-              </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-                {areaReports.map((report, index) => (
-                  <div
-                    key={index}
-                    ref={(el) => (cardRefs.current[index] = el)}
-                    role="button"
-                    tabIndex={0}
-                    onClick={() => setSelection({ type: "area", index })}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter" || e.key === " ") {
-                        e.preventDefault();
-                        setSelection({ type: "area", index });
-                      }
-                    }}
-                    className="cursor-pointer focus:outline-none focus:ring-2 focus:ring-primary rounded-xl animate-fade-in"
-                    style={{ animationDelay: `${index * 100}ms` }}
-                  >
-                    <AreaReport {...report} />
-                  </div>
-                ))}
-              </div>
-            </>
-          ) : (
-            <div className="space-y-8 animate-fade-in">
-              <div className="flex flex-col md:flex-row items-start md:items-center justify-between bg-white/80 backdrop-blur-md p-6 rounded-xl border-2 border-[hsl(var(--border))] shadow-lg gap-4">
-                <div className="text-base font-medium text-foreground">
-                  Visualizando detalhes de{" "}
-                  <span className="font-bold text-[hsl(var(--blue-medium))] text-lg">
-                    {selection?.type === "overview"
-                      ? totalReport.area
-                      : selection?.type === "area"
-                      ? areaReports[selection.index]?.area
-                      : ""}
-                  </span>
-                </div>
-                <button
-                  onClick={() => setSelection(null)}
-                  className="text-sm font-semibold px-6 py-3 rounded-lg border-2 border-[hsl(var(--blue-medium))] bg-white hover:bg-[hsl(var(--blue-medium))] hover:text-white transition-all duration-300 shadow-md hover:shadow-xl"
-                >
-                  ← Voltar para visão geral
-                </button>
-              </div>
-              {selection?.type === "overview" ? (
-                <div ref={overviewCardRef} className="mb-6">
-                  <AreaReport {...totalReport} />
-                </div>
-              ) : selection?.type === "area" ? (
-                <div ref={(el) => (cardRefs.current[selection.index] = el)} className="mb-6">
-                  {areaReports[selection.index] && <AreaReport {...areaReports[selection.index]} />}
-                </div>
-              ) : null}
-              <div ref={timelineRef}>
-                <div className="rounded-xl border-2 border-[hsl(var(--border))] bg-card p-6 md:p-8 shadow-xl font-sans antialiased">
-                  {selection?.type === "overview" ? (
-                    <RDMTimeline
-                      productLine={{
-                        id: "produto-overview",
-                        name: totalReport.area,
-                        color: "#0046c0",
-                        rdms: allRdms,
-                      }}
-                      autoOpenRdmId={searchResultRdmId ?? undefined}
-                    />
-                  ) : selection?.type === "area" ? (
-                    <RDMTimeline
-                      productLine={buildProductLine(
-                        areaReports[selection.index]?.area ?? "",
-                        selection.index
-                      )}
-                      autoOpenRdmId={searchResultRdmId ?? undefined}
-                    />
-                  ) : null}
-                </div>
-              </div>
-            </div>
-          )}
-        </section>
-      </main>
-
-      {/* Snake Line Animation */}
-      {lineCoords && (
-        <SnakeLine
-          startX={lineCoords.startX}
-          startY={lineCoords.startY}
-          endX={lineCoords.endX}
-          endY={lineCoords.endY}
-        />
-      )}
-    </div>
-  );
-};
-
-export default Index;
-
-
-
-
-
-
-
 import { Card } from "@/components/ui/card";
 import { CheckCircle2, Clock, AlertCircle, RotateCcw, XCircle, Wrench } from "lucide-react";
 
@@ -623,3 +155,119 @@ export const AreaReport = ({ area, manager: _manager, performance: _performance,
 
 
 
+import { Card } from "@/components/ui/card";
+import { TrendingUp, Activity, CheckCircle2, AlertCircle } from "lucide-react";
+
+interface HeroMetricsProps {
+  totalRdms: number;
+  concluidas: number;
+  emAndamento: number;
+  abertas: number;
+  completionRate: number;
+}
+
+export const HeroMetrics = ({
+  totalRdms,
+  concluidas,
+  emAndamento,
+  abertas,
+  completionRate,
+}: HeroMetricsProps) => {
+  return (
+    <Card className="relative overflow-hidden border-0 shadow-xl">
+      {/* Gradient Background */}
+      <div
+        className="absolute inset-0 opacity-100"
+        style={{
+          background: "var(--gradient-hero)",
+        }}
+      />
+
+      {/* Decorative Elements */}
+      <div className="absolute top-0 right-0 w-96 h-96 bg-white/10 rounded-full blur-3xl" />
+      <div className="absolute bottom-0 left-0 w-80 h-80 bg-white/5 rounded-full blur-3xl" />
+
+      <div className="relative p-8 md:p-12">
+        {/* Header */}
+        <div className="text-center mb-8">
+          <h1 className="text-3xl md:text-5xl font-bold text-white mb-3 tracking-tight">
+            Janela de RDMS
+          </h1>
+          <p className="text-lg md:text-xl text-white/90 font-medium">
+            Visão Executiva - Acompanhamento em Tempo Real
+          </p>
+        </div>
+
+        {/* Main Metric - Center Focus */}
+        <div className="flex justify-center mb-8">
+          <div className="text-center">
+            <div className="inline-flex items-center justify-center w-32 h-32 md:w-40 md:h-40 rounded-full bg-white/20 backdrop-blur-sm border-4 border-white/30 mb-4">
+              <div className="text-center">
+                <p className="text-5xl md:text-6xl font-bold text-white">{totalRdms}</p>
+                <p className="text-sm text-white/90 font-medium mt-1">RDMs</p>
+              </div>
+            </div>
+            <div className="flex items-center justify-center gap-2 text-white/90">
+              <TrendingUp className="h-5 w-5" />
+              <span className="text-lg font-semibold">{completionRate}% Taxa de Conclusão</span>
+            </div>
+          </div>
+        </div>
+
+        {/* Secondary Metrics Grid */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 max-w-4xl mx-auto">
+          {/* Concluídas */}
+          <div className="bg-white/10 backdrop-blur-sm rounded-xl p-6 border border-white/20 hover:bg-white/15 transition-all duration-300">
+            <div className="flex items-start justify-between mb-3">
+              <CheckCircle2 className="h-8 w-8 text-white" />
+              <div className="text-right">
+                <p className="text-3xl font-bold text-white">{concluidas}</p>
+                <p className="text-sm text-white/80 font-medium mt-1">Concluídas</p>
+              </div>
+            </div>
+            <div className="h-2 bg-white/20 rounded-full overflow-hidden">
+              <div
+                className="h-full bg-white/90 rounded-full transition-all duration-1000"
+                style={{ width: `${(concluidas / totalRdms) * 100}%` }}
+              />
+            </div>
+          </div>
+
+          {/* Em Andamento */}
+          <div className="bg-white/10 backdrop-blur-sm rounded-xl p-6 border border-white/20 hover:bg-white/15 transition-all duration-300">
+            <div className="flex items-start justify-between mb-3">
+              <Activity className="h-8 w-8 text-white" />
+              <div className="text-right">
+                <p className="text-3xl font-bold text-white">{emAndamento}</p>
+                <p className="text-sm text-white/80 font-medium mt-1">Em Implantação</p>
+              </div>
+            </div>
+            <div className="h-2 bg-white/20 rounded-full overflow-hidden">
+              <div
+                className="h-full bg-white/90 rounded-full transition-all duration-1000"
+                style={{ width: `${(emAndamento / totalRdms) * 100}%` }}
+              />
+            </div>
+          </div>
+
+          {/* Abertas */}
+          <div className="bg-white/10 backdrop-blur-sm rounded-xl p-6 border border-white/20 hover:bg-white/15 transition-all duration-300">
+            <div className="flex items-start justify-between mb-3">
+              <AlertCircle className="h-8 w-8 text-white" />
+              <div className="text-right">
+                <p className="text-3xl font-bold text-white">{abertas}</p>
+                <p className="text-sm text-white/80 font-medium mt-1">Abertas</p>
+              </div>
+            </div>
+            <div className="h-2 bg-white/20 rounded-full overflow-hidden">
+              <div
+                className="h-full bg-white/90 rounded-full transition-all duration-1000"
+                style={{ width: `${(abertas / totalRdms) * 100}%` }}
+              />
+            </div>
+          </div>
+        </div>
+      </div>
+    </Card>
+  );
+};
