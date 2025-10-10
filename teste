@@ -1,77 +1,10 @@
-import json
-import boto3
-import os
-from datetime import datetime, timezone
-from decimal import Decimal
-
-# ---------- Config ----------
-dynamodb = boto3.resource("dynamodb")
-table = dynamodb.Table(os.environ["RDM_TABLE"])  # Nome da tabela via variável de ambiente
-
-
-def lambda_handler(event, context):
-    """
-    Lambda REST API para registrar RDMs no DynamoDB.
-    Método: POST
-    Campos esperados: rdm (number), status (string), timestamp (string opcional)
-    """
-
-    try:
-        # --- Parse do corpo da requisição ---
-        body = json.loads(event.get("body", "{}"))
-
-        rdm = body.get("rdm")
-        status = body.get("status")
-        timestamp = body.get("timestamp")
-
-        # --- Validação básica ---
-        if rdm is None or status is None:
-            return {
-                "statusCode": 400,
-                "body": json.dumps({"error": "Campos obrigatórios: rdm (number) e status (string)"})
-            }
-
-        # --- Tipo de dado ---
-        try:
-            rdm = int(rdm)
-        except ValueError:
-            return {
-                "statusCode": 400,
-                "body": json.dumps({"error": "O campo 'rdm' deve ser um número inteiro."})
-            }
-
-        # Se não vier timestamp, gera o atual (ISO 8601 UTC)
-        if not timestamp:
-            timestamp = datetime.now(timezone.utc).isoformat()
-
-        # --- Inserção no DynamoDB ---
-        # DynamoDB requer números como Decimal
-        table.put_item(
-            Item={
-                "rdm": Decimal(rdm),
-                "status": str(status),
-                "timestamp": str(timestamp),
-            }
-        )
-
-        # --- Retorno sucesso ---
-        return {
-            "statusCode": 200,
-            "headers": {"Content-Type": "application/json"},
-            "body": json.dumps({
-                "message": "RDM registrado com sucesso!",
-                "item": {
-                    "rdm": rdm,
-                    "status": status,
-                    "timestamp": timestamp
-                }
-            }),
-        }
-
-    except Exception as e:
-        print("Erro ao processar:", e)
-        return {
-            "statusCode": 500,
-            "headers": {"Content-Type": "application/json"},
-            "body": json.dumps({"error": str(e)}),
-        }
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": ["dynamodb:PutItem"],
+      "Resource": "arn:aws:dynamodb:REGION:ACCOUNT_ID:table/RdmTable"
+    }
+  ]
+}
