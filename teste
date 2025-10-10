@@ -1,103 +1,667 @@
-import { ChangeAnalysis } from "@/components/ChangeAnalysis";
-import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import { Card, CardContent } from "@/components/ui/card";
-import { Brain, ShieldAlert, CheckCircle2, TriangleAlert, Download, Info, CalendarDays } from "lucide-react";
+INDEX:
+import { AreaReport } from "@/components/AreaReport";
+import { useState, useRef, useEffect } from "react";
+import { SnakeLine } from "@/components/SnakeLine";
+import RDMTimeline from "@/components/RDMTimeline";
+import type { ProductLine, RDM } from "@/types/rdm";
+import { Separator } from "@/components/ui/separator";
+import { fetchRdms, groupByArea, API_URL } from "@/lib/api";
+import {
+  AREA_PB_NAME,
+  AREA_PBS_NAME,
+  AREA_PSA_NAME,
+  AREA_PSG_NAME,
+  PORTO_BANK_DEPTS,
+  PORTO_SERVICO_DEPTS,
+  PORTO_SAUDE_DEPTS,
+  PORTO_SEGUROS_DEPTS,
+  normalizeKey,
+} from "@/lib/area-groups";
 
 const Index = () => {
+  type Selection = { type: "overview" } | { type: "area"; index: number } | null;
+  const [selection, setSelection] = useState<Selection>(null);
+  const [lineCoords, setLineCoords] = useState<{ startX: number; startY: number; endX: number; endY: number } | null>(null);
+  const cardRefs = useRef<(HTMLDivElement | null)[]>([]);
+  const overviewCardRef = useRef<HTMLDivElement | null>(null);
+  const timelineRef = useRef<HTMLDivElement>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [areas, setAreas] = useState<{
+    area: string;
+    rdms: RDM[];
+  }[]>([]);
+  const [allRdms, setAllRdms] = useState<RDM[]>([]);
+  const [search, setSearch] = useState("");
+  const [searchResultRdmId, setSearchResultRdmId] = useState<string | null>(null);
+
+  const totalReport = {
+    area: "Visão Geral",
+    performance: 85,
+    revenue: String(allRdms.length),
+    status: "excellent" as const,
+    rdmStats: {
+      concluidas: allRdms.filter((r) => r.category === "concluidas").length,
+      emAndamento: allRdms.filter((r) => r.category === "em_andamento").length,
+      abertas: allRdms.filter((r) => r.category === "aberta").length,
+      rollback: allRdms.filter((r) => r.category === "rollback").length,
+      emAprovacao: allRdms.filter((r) => r.category === "em_aprovacao").length,
+      cancelada: allRdms.filter((r) => r.category === "cancelada").length,
+    },
+  };
+
+  // Load data from API once
+  useEffect(() => {
+    const ctrl = new AbortController();
+    (async () => {
+      try {
+        setLoading(true);
+        setError(null);
+        const items = await fetchRdms(ctrl.signal);
+        const grouped = groupByArea(items);
+
+        // Build full RDMS list for overview
+        const all = grouped.flatMap((g) => g.rdms);
+        setAllRdms(all);
+
+        // Synthetic area: Porto Bank (by deptoExecutor)
+        const normalize = normalizeKey;
+        const portoBankDepts = new Set(PORTO_BANK_DEPTS.map(normalize));
+        const isPortoBank = (r: RDM) => portoBankDepts.has(normalize((r.deptoExecutor ?? "") as string));
+        const portoBankRdms = all.filter((r) => isPortoBank(r));
+
+        // Synthetic area: Porto Serviço (by deptoExecutor)
+        const portoServicoDepts = new Set(PORTO_SERVICO_DEPTS.map(normalize));
+        const isPortoServico = (r: RDM) => portoServicoDepts.has(normalize((r.deptoExecutor ?? "") as string));
+        const portoServicoRdms = all.filter((r) => isPortoServico(r) && !isPortoBank(r));
+
+        // Synthetic area: Porto Saúde (by deptoExecutor)
+        const portoSaudeDepts = new Set(PORTO_SAUDE_DEPTS.map(normalize));
+        const isPortoSaude = (r: RDM) => portoSaudeDepts.has(normalize((r.deptoExecutor ?? "") as string));
+        // Precedence: exclude items already captured by previous groups
+        const portoSaudeRdms = all.filter((r) => isPortoSaude(r) && !isPortoBank(r) && !isPortoServico(r));
+
+        // Synthetic area: Porto Seguros (by deptoExecutor or deptoGrupoExecutor)
+        const portoSegurosDepts = new Set(PORTO_SEGUROS_DEPTS.map(normalize));
+        const isPortoSeguros = (r: RDM) => {
+          const d1 = normalize((r.deptoExecutor ?? "") as string);
+          const d2 = normalize((r.deptoGrupoExecutor ?? "") as string);
+          return portoSegurosDepts.has(d1) || portoSegurosDepts.has(d2);
+        };
+        const portoSegurosRdms = all.filter(
+          (r) => isPortoSeguros(r) && !isPortoBank(r) && !isPortoServico(r) && !isPortoSaude(r)
+        );
+
+        // Remove infra RDMs from their original groups to avoid duplication in totals
+        let filtered = grouped
+          .map((g) => ({ name: g.name, rdms: g.rdms.filter((r) => !isPortoBank(r) && !isPortoServico(r) && !isPortoSaude(r) && !isPortoSeguros(r)) }))
+          .filter((g) => g.rdms.length > 0);
+
+        const finalAreas: { area: string; rdms: RDM[] }[] = [];
+        // Skip Infraestrutura/Atendimento/AUTO (não criar nem mesclar)
+
+        // Porto Bank merge/create
+  const PB_NAME = AREA_PB_NAME;
+        const pbIdx = filtered.findIndex(
+          (g) => g.name.trim().toLowerCase() === PB_NAME.toLowerCase()
+        );
+        if (pbIdx >= 0) {
+          const mergedPB = [...filtered[pbIdx].rdms, ...portoBankRdms];
+          if (mergedPB.length > 0) {
+            finalAreas.push({ area: PB_NAME, rdms: mergedPB });
+          }
+          filtered = filtered.filter((_, i) => i !== pbIdx);
+        } else if (portoBankRdms.length > 0) {
+          finalAreas.push({ area: PB_NAME, rdms: portoBankRdms });
+        }
+
+        // Porto Serviço merge/create
+  const PBS_NAME = AREA_PBS_NAME;
+        const pbsIdx = filtered.findIndex(
+          (g) => g.name.trim().toLowerCase() === PBS_NAME.toLowerCase()
+        );
+        if (pbsIdx >= 0) {
+          const mergedPBS = [...filtered[pbsIdx].rdms, ...portoServicoRdms];
+          if (mergedPBS.length > 0) {
+            finalAreas.push({ area: PBS_NAME, rdms: mergedPBS });
+          }
+          filtered = filtered.filter((_, i) => i !== pbsIdx);
+        } else if (portoServicoRdms.length > 0) {
+          finalAreas.push({ area: PBS_NAME, rdms: portoServicoRdms });
+        }
+
+        // Porto Saúde merge/create
+        const PSA_NAME = AREA_PSA_NAME;
+        const psaIdx = filtered.findIndex(
+          (g) => g.name.trim().toLowerCase() === PSA_NAME.toLowerCase()
+        );
+        if (psaIdx >= 0) {
+          const mergedPSA = [...filtered[psaIdx].rdms, ...portoSaudeRdms];
+          if (mergedPSA.length > 0) {
+            finalAreas.push({ area: PSA_NAME, rdms: mergedPSA });
+          }
+          filtered = filtered.filter((_, i) => i !== psaIdx);
+        } else if (portoSaudeRdms.length > 0) {
+          finalAreas.push({ area: PSA_NAME, rdms: portoSaudeRdms });
+        }
+
+        // Porto Seguros merge/create
+        const PSG_NAME = AREA_PSG_NAME;
+        const psgIdx = filtered.findIndex(
+          (g) => g.name.trim().toLowerCase() === PSG_NAME.toLowerCase()
+        );
+        if (psgIdx >= 0) {
+          const mergedPSG = [...filtered[psgIdx].rdms, ...portoSegurosRdms];
+          if (mergedPSG.length > 0) {
+            finalAreas.push({ area: PSG_NAME, rdms: mergedPSG });
+          }
+          filtered = filtered.filter((_, i) => i !== psgIdx);
+        } else if (portoSegurosRdms.length > 0) {
+          finalAreas.push({ area: PSG_NAME, rdms: portoSegurosRdms });
+        }
+
+  // Não incluir outros cards, apenas os quatro acima
+        setAreas(finalAreas);
+      } catch (e: any) {
+        setError(e?.message ?? "Erro ao carregar dados");
+      } finally {
+        setLoading(false);
+      }
+    })();
+    return () => ctrl.abort();
+  }, []);
+
+  useEffect(() => {
+    const updateCoords = () => {
+      const sourceEl = selection?.type === "overview"
+        ? overviewCardRef.current
+        : selection?.type === "area"
+        ? cardRefs.current[selection.index]
+        : null;
+
+      if (sourceEl && timelineRef.current) {
+        const cardRect = sourceEl.getBoundingClientRect();
+        const timelineRect = timelineRef.current.getBoundingClientRect();
+
+        const clamp = (val: number, min: number, max: number) => Math.min(Math.max(val, min), max);
+        const vw = window.innerWidth;
+        const vh = window.innerHeight;
+
+        setLineCoords({
+          startX: clamp(cardRect.left + cardRect.width / 2, 0, vw),
+          startY: clamp(cardRect.top + cardRect.height, 0, vh),
+          endX: clamp(timelineRect.left + timelineRect.width / 2, 0, vw),
+          endY: clamp(timelineRect.top, 0, vh),
+        });
+      } else {
+        setLineCoords(null);
+      }
+    };
+
+    const raf = requestAnimationFrame(updateCoords);
+    window.addEventListener("resize", updateCoords);
+    window.addEventListener("scroll", updateCoords, { passive: true });
+
+    return () => {
+      cancelAnimationFrame(raf);
+      window.removeEventListener("resize", updateCoords);
+      window.removeEventListener("scroll", updateCoords);
+    };
+  }, [selection]);
+
+  // Keep selected index valid when areas change (e.g., after fetch)
+  useEffect(() => {
+    if (selection?.type === "area" && (selection.index < 0 || selection.index >= areas.length)) {
+      setSelection(null);
+    }
+  }, [areas, selection]);
+
+  // Handle search submit: find RDM by number (ignoring leading zeros)
+  const onSearch = (e: React.FormEvent) => {
+    e.preventDefault();
+    const q = search.trim();
+    if (!q) {
+      setSearchResultRdmId(null);
+      return;
+    }
+    // Normalize number without leading zeros for comparison
+    const norm = q.replace(/^0+/, "");
+    let found: { areaIdx: number; rdmId: string } | null = null;
+    areas.some((a, i) => {
+      const r = a.rdms.find((r) => r.number.replace(/^0+/, "") === norm);
+      if (r) {
+        found = { areaIdx: i, rdmId: r.id };
+        return true;
+      }
+      return false;
+    });
+    if (found) {
+      // Open the corresponding area and store rdm id to auto-open modal in timeline
+      setSelection({ type: "area", index: found.areaIdx });
+      // defer setting rdm id until selection applies
+      setTimeout(() => setSearchResultRdmId(found!.rdmId), 0);
+    } else {
+      // Try searching in all RDMs and open in Overview timeline if found
+      const rAll = allRdms.find((r) => r.number.replace(/^0+/, "") === norm);
+      if (rAll) {
+        setSelection({ type: "overview" });
+        setTimeout(() => setSearchResultRdmId(rAll.id), 0);
+      } else {
+        setSearchResultRdmId(null);
+      }
+    }
+  };
+
+  const areaReports = areas.map((g) => ({
+    area: g.area,
+    performance: 80, // placeholder until API provides
+    revenue: String(g.rdms.length),
+    status: "good" as const, // placeholder
+    rdmStats: {
+      concluidas: g.rdms.filter((r) => r.category === "concluidas").length,
+      emAndamento: g.rdms.filter((r) => r.category === "em_andamento").length,
+      abertas: g.rdms.filter((r) => r.category === "aberta").length,
+      rollback: g.rdms.filter((r) => r.category === "rollback").length,
+      emAprovacao: g.rdms.filter((r) => r.category === "em_aprovacao").length,
+      cancelada: g.rdms.filter((r) => r.category === "cancelada").length,
+    },
+  }));
+
+  const buildProductLine = (areaName: string, idx: number): ProductLine => {
+    const colors = [
+      "#00d6fc", "#0046c0", "#001864", "#2ccc8a",
+      "#6b45ff", "#7fa8c3", "#ff5a49", "#c39fd1",
+    ];
+    // find corresponding area group
+    const area = areas.find((a) => a.area === areaName);
+    const rdms = area?.rdms ?? [];
+    return {
+      id: `produto-${idx + 1}`,
+      name: areaName,
+      color: colors[idx % colors.length],
+      rdms,
+    };
+  };
+
   return (
-    <div className="min-h-screen bg-background">
-      {/* Header minimalista (ações) */}
-      <header className="sticky top-0 z-20 border-b bg-background/80 backdrop-blur supports-[backdrop-filter]:bg-background/60">
-        <div className="container mx-auto px-6">
-          <div className="flex h-14 items-center justify-end gap-2">
-            <Button variant="secondary" type="button">
-              <Download className="size-4" />
-              Exportar PDF
-            </Button>
-            <Button type="button">
-              <Brain className="size-4" />
-              Nova análise
-            </Button>
+    <div className="min-h-screen bg-gradient-to-br from-[hsl(var(--background))] via-[hsl(var(--neutral-50))] to-[hsl(var(--blue-soft))]">
+      {/* Header */}
+      <header className="bg-white/80 backdrop-blur-sm py-2 px-6 shadow-sm sticky top-0 z-20 border-b border-[hsl(var(--border))]">
+        <div className="max-w-7xl mx-auto">
+          <div className="flex justify-center">
+            <img src="/logo.png" alt="Logo" className="h-12 md:h-16 w-auto" />
           </div>
         </div>
       </header>
 
-      {/* Conteúdo em coluna estreita (formato vertical) */}
-      <main className="container mx-auto max-w-3xl px-6 py-8 space-y-6">
-        {/* Cabeçalho do Relatório */}
-        <Card className="shadow-card">
-          <CardContent className="p-6">
-            <div className="flex items-start justify-between gap-4">
-              <div>
-                <h1 className="text-2xl font-bold tracking-tight">Score de RDMs - 537702</h1>
-                <p className="mt-1 text-sm text-muted-foreground">
-                  Avaliação de riscos, clareza e conformidade das mudanças.
-                </p>
-                <div className="mt-3 flex flex-wrap items-center gap-2 text-sm">
-                  <Badge variant="default">Medio</Badge>
-                  <div className="flex items-center gap-1 text-muted-foreground">
-                    <CalendarDays className="size-4" />
-                    Última atualização: {new Date().toLocaleDateString("pt-BR", { day: "2-digit", month: "long", year: "numeric" })}
+      <main className="max-w-7xl mx-auto px-6 py-8">
+        
+        {/* Total Report Section */}
+        <section className="mb-12">
+          <div className="mb-8 text-center">
+            <h2 className="text-2xl md:text-3xl font-bold text-foreground mb-2 tracking-tight">
+              Acompanhamento Janela de RDMS
+            </h2>
+          </div>
+          {/* Search bar */}
+          <form onSubmit={onSearch} className="max-w-md mx-auto mb-4 flex gap-2">
+            <input
+              className="flex-1 px-3 py-2 rounded border border-[hsl(var(--border))] bg-white shadow-sm"
+              placeholder="Pesquisar RDM"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+            />
+            <button
+              type="submit"
+              className="px-4 py-2 rounded bg-[hsl(var(--blue-medium))] text-white hover:opacity-90"
+            >
+              Buscar
+            </button>
+          </form>
+          <div
+            className="max-w-md mx-auto animate-fade-in cursor-pointer focus:outline-none focus:ring-2 focus:ring-primary rounded-lg"
+            role="button"
+            tabIndex={0}
+            ref={overviewCardRef}
+            onClick={() => setSelection({ type: "overview" })}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                setSelection({ type: "overview" });
+              }
+            }}
+          >
+            <AreaReport {...totalReport} />
+          </div>
+        </section>
+
+        <Separator className="my-8" />
+
+        {/* Area Reports Section */}
+        <section>
+          {loading && (
+            <div className="text-center text-sm text-muted-foreground py-8">Carregando dados…</div>
+          )}
+          {error && (
+            <div className="text-center text-sm text-red-600 py-8">{error}</div>
+          )}
+          {!loading && !error && areas.length === 0 && (
+            <div className="text-center text-sm text-muted-foreground py-8">Nenhum dado encontrado.</div>
+          )}
+          {selection === null ? (
+            <>
+              <div className="mb-8 text-center">
+                <h2 className="text-2xl md:text-3xl font-bold text-foreground mb-2 tracking-tight">
+                  RDMs por Área de Negócio
+                </h2>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+                {areaReports.map((report, index) => (
+                  <div
+                    key={index}
+                    ref={(el) => (cardRefs.current[index] = el)}
+                    role="button"
+                    tabIndex={0}
+                    onClick={() => setSelection({ type: "area", index })}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault();
+                        setSelection({ type: "area", index });
+                      }
+                    }}
+                    className="cursor-pointer focus:outline-none focus:ring-2 focus:ring-primary rounded-lg animate-fade-in"
+                    style={{ animationDelay: `${index * 80}ms` }}
+                  >
+                    <AreaReport {...report} />
                   </div>
+                ))}
+              </div>
+            </>
+          ) : (
+            <div className="space-y-6 animate-fade-in">
+              <div className="flex items-center justify-between bg-white/50 backdrop-blur-sm p-4 rounded-lg border border-[hsl(var(--border))]">
+                <div className="text-sm font-medium text-foreground">
+                  Mostrando detalhes de {" "}
+                  <span className="font-bold text-[hsl(var(--blue-medium))]">
+                    {selection?.type === "overview"
+                      ? totalReport.area
+                      : selection?.type === "area"
+                      ? areaReports[selection.index]?.area
+                      : ""}
+                  </span>
+                </div>
+                <button
+                  onClick={() => setSelection(null)}
+                  className="text-sm font-medium px-4 py-2 rounded-lg border border-[hsl(var(--border))] bg-white hover:bg-[hsl(var(--blue-soft))] hover:border-[hsl(var(--blue-medium))] transition-all duration-300 shadow-sm hover:shadow-md"
+                >
+                  ← Voltar para todas as áreas
+                </button>
+              </div>
+              {selection?.type === "overview" ? (
+                <div ref={overviewCardRef} className="mb-6">
+                  <AreaReport {...totalReport} />
+                </div>
+              ) : selection?.type === "area" ? (
+                <div ref={(el) => (cardRefs.current[selection.index] = el)} className="mb-6">
+                  {areaReports[selection.index] && <AreaReport {...areaReports[selection.index]} />}
+                </div>
+              ) : null}
+              <div className="">
+                {/* Use shared Card to keep fonts consistent */}
+                <div className="rounded-lg border border-[hsl(var(--border))] bg-card p-6 shadow-lg font-sans antialiased">
+                  {selection?.type === "overview" ? (
+                    <RDMTimeline
+                      productLine={{
+                        id: "produto-overview",
+                        name: totalReport.area,
+                        color: "#0046c0",
+                        rdms: allRdms,
+                      }}
+                      autoOpenRdmId={searchResultRdmId ?? undefined}
+                    />
+                  ) : selection?.type === "area" ? (
+                    <RDMTimeline
+                      productLine={buildProductLine(
+                        areaReports[selection.index]?.area ?? "",
+                        selection.index
+                      )}
+                      autoOpenRdmId={searchResultRdmId ?? undefined}
+                    />
+                  ) : null}
                 </div>
               </div>
             </div>
-          </CardContent>
-        </Card>
-
-        {/* Resumo Executivo */}
-        <Card className="shadow-card">
-          <CardContent className="p-6">
-            <h2 className="text-lg font-semibold">Resumo Executivo</h2>
-            <div className="mt-4 space-y-3">
-              <div className="flex items-center justify-between rounded-md border p-3">
-                <div className="flex items-center gap-2 text-danger">
-                  <ShieldAlert className="size-5" />
-                  <span className="font-medium">Acompanhar</span>
-                </div>
-                <div className="text-xl font-semibold">1</div>
-              </div>
-              <div className="flex items-center justify-between rounded-md border p-3">
-                <div className="flex items-center gap-2 text-warning">
-                  <TriangleAlert className="size-5" />
-                  <span className="font-medium">Atenção</span>
-                </div>
-                <div className="text-xl font-semibold">2</div>
-              </div>
-              <div className="flex items-center justify-between rounded-md border p-3">
-                <div className="flex items-center gap-2 text-success">
-                  <CheckCircle2 className="size-5" />
-                  <span className="font-medium">OK</span>
-                </div>
-                <div className="text-xl font-semibold">2</div>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* Insights */}
-        <Card className="shadow-card">
-          <CardContent className="p-6">
-            <div className="flex items-center gap-2">
-              <Info className="size-4 text-primary" />
-              <h2 className="text-lg font-semibold">Insights (Gerado por IA)</h2>
-            </div>
-            <div className="mt-3 space-y-2 text-sm text-muted-foreground">
-              <p>
-                Foi identificado que houve alguns campos que estão preenchidos de maneira não devida e outros campos preenchidos corretamente. Com isso, a classificação do Score é "Médio"
-              </p>
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* Detalhamento por Campo */}
-        <div className="space-y-2">
-          <ChangeAnalysis />
-        </div>
+          )}
+        </section>
       </main>
+
+      {/* Snake Line Animation */}
+      {lineCoords && (
+        <SnakeLine
+          startX={lineCoords.startX}
+          startY={lineCoords.startY}
+          endX={lineCoords.endX}
+          endY={lineCoords.endY}
+        />
+      )}
     </div>
   );
 };
 
 export default Index;
+
+
+AREAREPORT:
+import { LucideIcon } from "lucide-react";
+import { Card } from "@/components/ui/card";
+import { Progress } from "@/components/ui/progress";
+import { ArrowUp, ArrowDown } from "lucide-react";
+import { cn } from "@/lib/utils";
+
+interface MetricCardProps {
+  title: string;
+  value: string;
+  trend?: "up" | "down";
+  trendValue?: string;
+  icon: LucideIcon;
+  variant?: "primary" | "secondary" | "accent" | "success" | "warning";
+  performance?: number;
+}
+
+const variantStyles = {
+  primary: {
+    iconBg: "bg-[hsl(var(--blue-medium))]/10",
+    iconColor: "text-[hsl(var(--blue-medium))]",
+    progressColor: "bg-[hsl(var(--blue-medium))]",
+    trendBg: "bg-[hsl(var(--blue-soft))]",
+  },
+  secondary: {
+    iconBg: "bg-[hsl(var(--blue-accent))]/10",
+    iconColor: "text-[hsl(var(--blue-accent))]",
+    progressColor: "bg-[hsl(var(--blue-accent))]",
+    trendBg: "bg-[hsl(var(--blue-soft))]",
+  },
+  accent: {
+    iconBg: "bg-[hsl(var(--blue-dark))]/10",
+    iconColor: "text-[hsl(var(--blue-dark))]",
+    progressColor: "bg-[hsl(var(--blue-dark))]",
+    trendBg: "bg-[hsl(var(--neutral-100))]",
+  },
+  success: {
+    iconBg: "bg-[hsl(var(--success-light))]",
+    iconColor: "text-[hsl(var(--success))]",
+    progressColor: "bg-[hsl(var(--success))]",
+    trendBg: "bg-[hsl(var(--success-light))]",
+  },
+  warning: {
+    iconBg: "bg-[hsl(var(--warning-light))]",
+    iconColor: "text-[hsl(var(--warning))]",
+    progressColor: "bg-[hsl(var(--warning))]",
+    trendBg: "bg-[hsl(var(--warning-light))]",
+  },
+};
+
+export const MetricCard = ({
+  title,
+  value,
+  trend,
+  trendValue,
+  icon: Icon,
+  variant = "primary",
+  performance,
+}: MetricCardProps) => {
+  const styles = variantStyles[variant];
+
+  return (
+    <Card className="group relative overflow-hidden border-[hsl(var(--border))] bg-card transition-all duration-300 hover:shadow-[var(--shadow-lg)] hover:-translate-y-1">
+      <div className="absolute inset-0 bg-gradient-to-br from-transparent via-transparent to-[hsl(var(--blue-soft))]/20 opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
+      
+      <div className="relative p-6">
+        <div className="flex items-start justify-between mb-4">
+          <div className={cn(
+            "p-3 rounded-xl transition-transform duration-300 group-hover:scale-110",
+            styles.iconBg
+          )}>
+            <Icon className={cn("h-6 w-6", styles.iconColor)} />
+          </div>
+        </div>
+
+        <div className="space-y-1 mb-4">
+          <h3 className="text-sm font-medium text-muted-foreground tracking-wide uppercase">
+            {title}
+          </h3>
+          <p className="text-3xl font-bold text-foreground tracking-tight">
+            {value}
+          </p>
+        </div>
+
+        {typeof performance === "number" && (
+          <div className="space-y-2 pt-4 border-t border-[hsl(var(--border))]">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+                Performance
+              </span>
+              <span className={cn(
+                "text-sm font-bold tabular-nums",
+                styles.iconColor
+              )}>
+                {Math.round(performance)}%
+              </span>
+            </div>
+            <div className="relative h-2 bg-[hsl(var(--neutral-100))] rounded-full overflow-hidden">
+              <div
+                className={cn(
+                  "h-full rounded-full transition-all duration-1000 ease-out",
+                  styles.progressColor
+                )}
+                style={{ width: `${performance}%` }}
+              />
+            </div>
+          </div>
+        )}
+      </div>
+    </Card>
+  );
+};
+
+
+
+AREAREPORT:
+import { Card } from "@/components/ui/card";
+import { CheckCircle2, Clock, AlertCircle, RotateCcw, XCircle, Wrench } from "lucide-react";
+
+interface AreaReportProps {
+  area: string;
+  manager?: string;
+  performance: number;
+  revenue: string;
+  status: "excellent" | "good" | "attention";
+  rdmStats: {
+    concluidas: number;
+    emAndamento: number;
+    abertas: number;
+    rollback: number;
+    emAprovacao?: number;
+    cancelada?: number;
+  };
+  areaColor?: string;
+  borderColor?: string;
+  accentColor?: string;
+}
+
+export const AreaReport = ({ area, manager: _manager, performance: _performance, revenue, status: _status, rdmStats, areaColor = "blue-medium", borderColor, accentColor }: AreaReportProps) => {
+
+  return (
+    <Card
+      className="group relative overflow-hidden bg-card transition-all duration-300 hover:shadow-lg hover:-translate-y-1"
+      style={{ borderColor: borderColor ?? "hsl(var(--border))", borderWidth: "2px" }}
+    >
+      <div 
+        className="absolute inset-0 opacity-0 group-hover:opacity-60 transition-opacity duration-500" 
+        style={{ background: `linear-gradient(135deg, transparent 0%, ${accentColor ?? "hsl(var(--blue-soft))"} 100%)` }}
+      />
+      
+  <div className="relative p-5 flex flex-col h-full">
+
+        {/* Centered title and RDM number */}
+        <div className="flex-1 flex flex-col items-center justify-center text-center gap-1 mb-4">
+          <h3 className="text-sm font-medium text-muted-foreground tracking-wide uppercase">{area}</h3>
+          <p className="text-3xl font-bold text-foreground tracking-tight">{revenue}</p>
+        </div>
+
+        {/* RDM Stats */}
+        <div className="grid grid-cols-2 gap-3 pt-4 border-t border-[hsl(var(--border))]">
+          <div className="flex items-center gap-2">
+            <CheckCircle2 className="h-4 w-4 text-[hsl(var(--success))]" />
+            <div>
+              <p className="text-sm font-bold text-foreground">{rdmStats.concluidas}</p>
+              <p className="text-xs text-muted-foreground">Concluídas</p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <Wrench className="h-4 w-4 text-[hsl(var(--warning))]" />
+            <div>
+              <p className="text-sm font-bold text-foreground">{rdmStats.emAndamento}</p>
+              <p className="text-xs text-muted-foreground">Em Implantação</p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <AlertCircle className="h-4 w-4 text-[hsl(var(--blue-accent))]" />
+            <div>
+              <p className="text-sm font-bold text-foreground">{rdmStats.abertas}</p>
+              <p className="text-xs text-muted-foreground">Abertas</p>
+            </div>
+          </div>
+          {typeof rdmStats.emAprovacao === "number" && (
+            <div className="flex items-center gap-2">
+              <Clock className="h-4 w-4 text-[hsl(var(--blue-medium))]" />
+              <div>
+                <p className="text-sm font-bold text-foreground">{rdmStats.emAprovacao}</p>
+                <p className="text-xs text-muted-foreground">Em Aprovação</p>
+              </div>
+            </div>
+          )}
+          {typeof rdmStats.cancelada === "number" && (
+            <div className="flex items-center gap-2">
+              <XCircle className="h-4 w-4 text-red-500" />
+              <div>
+                <p className="text-sm font-bold text-foreground">{rdmStats.cancelada}</p>
+                <p className="text-xs text-muted-foreground">Cancelada</p>
+              </div>
+            </div>
+          )}
+          <div className="flex items-center gap-2">
+            <RotateCcw className="h-4 w-4 text-[hsl(var(--destructive))]" />
+            <div>
+              <p className="text-sm font-bold text-foreground">{rdmStats.rollback}</p>
+              <p className="text-xs text-muted-foreground">Rollback</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </Card>
+  );
+};
+
+
+
