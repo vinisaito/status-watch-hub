@@ -1,108 +1,66 @@
-import { AreaReport } from "@/components/AreaReport";
-import { useState } from "react";
-import Timeline from "@/components/Timeline";
+import json
+import boto3
+import os
+from datetime import datetime, timezone
 
-const Index = () => {
-  const [search, setSearch] = useState("");
+# ---------- Config ----------
+dynamodb = boto3.resource("dynamodb")
+table = dynamodb.Table(os.environ["RDM_TABLE"])  # Nome da tabela vindo da variável de ambiente
 
-  const totalReport = {
-    area: "Visão Geral",
-    performance: 85,
-    revenue: "142",
-    status: "excellent" as const,
-    rdmStats: {
-      concluidas: 85,
-      emAndamento: 32,
-      abertas: 18,
-      rollback: 5,
-      emAprovacao: 2,
-      cancelada: 0,
-    },
-  };
 
-  // Sample timeline data
-  const timelineItems = [
-    { year: 2024, title: "Fase de Planejamento e Análise" },
-    { year: 2024, title: "Desenvolvimento e Testes" },
-    { year: 2024, title: "Homologação e Ajustes" },
-    { year: 2025, title: "Deploy em Produção" },
-    { year: 2025, title: "Monitoramento e Otimização" },
-  ];
+def lambda_handler(event, context):
+    """
+    Lambda REST API para registrar RDMs no DynamoDB.
+    Método: POST
+    Campos esperados: number (string), status (string), timestamp (string opcional)
+    """
 
-  const onSearch = (e: React.FormEvent) => {
-    e.preventDefault();
-    // Search functionality placeholder
-    console.log("Searching for:", search);
-  };
+    try:
+        # --- Parse do corpo da requisição ---
+        body = json.loads(event.get("body", "{}"))
 
-  return (
-    <div className="min-h-screen bg-gradient-to-br from-[hsl(var(--background))] via-[hsl(210_25%_97%)] to-[hsl(221_83%_97%)] relative overflow-hidden">
-      {/* Decorative background elements for warmth */}
-      <div className="absolute inset-0 overflow-hidden pointer-events-none">
-        <div className="absolute -top-40 -right-40 w-96 h-96 bg-gradient-to-br from-primary/10 to-transparent rounded-full blur-3xl" />
-        <div className="absolute top-1/2 -left-32 w-80 h-80 bg-gradient-to-tr from-info/10 to-transparent rounded-full blur-3xl" />
-        <div className="absolute bottom-20 right-1/4 w-64 h-64 bg-gradient-to-tl from-success/10 to-transparent rounded-full blur-3xl" />
-      </div>
+        number = body.get("number")
+        status = body.get("status")
+        timestamp = body.get("timestamp")
 
-      {/* Header */}
-      <header className="bg-white/90 backdrop-blur-md py-4 px-6 shadow-lg sticky top-0 z-20 border-b-2 border-primary/10">
-        <div className="max-w-7xl mx-auto">
-          <div className="flex justify-center">
-            <div className="h-14 md:h-18 flex items-center">
-              <span className="text-2xl md:text-3xl font-bold bg-gradient-to-r from-primary to-primary/70 bg-clip-text text-transparent">
-                RDM Dashboard
-              </span>
-            </div>
-          </div>
-        </div>
-      </header>
+        # --- Validação básica ---
+        if not number or not status:
+            return {
+                "statusCode": 400,
+                "body": json.dumps({"error": "Campos obrigatórios: number e status"})
+            }
 
-      <main className="max-w-7xl mx-auto px-6 py-12 relative">
-        {/* Título e busca */}
-        <section className="mb-12">
-          <div className="mb-8 text-center">
-            <h2 className="text-3xl md:text-4xl font-bold bg-gradient-to-r from-foreground to-foreground/70 bg-clip-text text-transparent tracking-tight mb-3">
-              Acompanhamento da Janela de RDMs
-            </h2>
-            <p className="text-base md:text-lg text-muted-foreground">
-              Visão Geral executiva — status consolidado e linha do tempo
-            </p>
-          </div>
+        # Se não vier timestamp, gera o atual em formato ISO 8601 (UTC)
+        if not timestamp:
+            timestamp = datetime.now(timezone.utc).isoformat()
 
-          <form onSubmit={onSearch} className="max-w-2xl mx-auto mb-8">
-            <div className="flex gap-3 p-2 bg-white/80 backdrop-blur-sm rounded-2xl shadow-executive border-2 border-border/50 hover:border-primary/30 transition-all duration-300">
-              <input
-                className="flex-1 px-5 py-3 rounded-xl border-0 bg-transparent text-base focus:outline-none focus:ring-0 placeholder:text-muted-foreground/60"
-                placeholder="Pesquisar RDM por número (ex.: 123)"
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-              />
-              <button
-                type="submit"
-                className="px-6 py-3 rounded-xl bg-gradient-to-r from-primary to-primary/90 text-white font-semibold hover:shadow-lg hover:scale-[1.02] transition-all duration-300 shadow-md"
-              >
-                Buscar
-              </button>
-            </div>
-          </form>
+        # --- Inserção no DynamoDB ---
+        table.put_item(
+            Item={
+                "number": str(number),
+                "status": str(status),
+                "timestamp": str(timestamp),
+            }
+        )
 
-          <div className="max-w-4xl mx-auto animate-fade-in">
-            <AreaReport {...totalReport} />
-          </div>
-        </section>
+        # --- Retorno sucesso ---
+        return {
+            "statusCode": 200,
+            "headers": {"Content-Type": "application/json"},
+            "body": json.dumps({
+                "message": "RDM registrado com sucesso!",
+                "item": {
+                    "number": number,
+                    "status": status,
+                    "timestamp": timestamp
+                }
+            }),
+        }
 
-        {/* Timeline */}
-        <section>
-          <div className="rounded-2xl border-2 border-border/50 bg-white/80 backdrop-blur-sm p-8 shadow-executive hover:shadow-executive-hover transition-shadow duration-500">
-            <h3 className="text-2xl font-bold text-foreground mb-6 text-center">
-              Linha do Tempo de Desenvolvimento
-            </h3>
-            <Timeline items={timelineItems} />
-          </div>
-        </section>
-      </main>
-    </div>
-  );
-};
-
-export default Index;
+    except Exception as e:
+        print("Erro ao processar:", e)
+        return {
+            "statusCode": 500,
+            "headers": {"Content-Type": "application/json"},
+            "body": json.dumps({"error": str(e)}),
+        }
