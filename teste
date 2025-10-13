@@ -1,394 +1,4 @@
-dashboard:
-import { useState, useEffect } from 'react';
-import {
-  Settings,
-  Sun,
-  Moon,
-  AlertTriangle,
-  FileText,
-  MessageSquare,
-  BookOpen,
-  Shield
-} from 'lucide-react';
-import { Button } from '@/components/ui/button';
-import { SidebarProvider } from '@/components/ui/sidebar';
-import { toast } from '@/hooks/use-toast';
-import { MonitoringCards } from './MonitoringCards';
-import { ActionTable } from './ActionTable';
-import { CriticalIncidents } from './CriticalIncidents';
-import { RDMTracker } from './RDMTracker';
-import { ShiftNotes } from './ShiftNotes';
-import { WebhookConfig } from './WebhookConfig';
-import { InstructionsSection } from './InstructionsSection';
-import { Sheet, SheetContent } from "@/components/ui/sheet";
-import OutageManager, { Outage } from './OutageManager';
-import  MaintenancePage  from './MaintenancePage';
-
-export interface AlertData {
-  id: string;
-  chamado: string;
-  tipo_chamado: string;
-  grupo_chamado: string;
-  status_chamado: string;
-  abertura_chamado: string;
-  resumo_chamado: string;
-  severidade_chamado: string;
-  acionado: string;
-  chat: boolean;
-  link_chamado: string;
-  timestamp_chat?: string;
-  sending_chat?: boolean;
-}
-
-const Dashboard = () => {
-  const [isDarkMode, setIsDarkMode] = useState(true);
-  const [showWebhookConfig, setShowWebhookConfig] = useState(false);
-  const [alertData, setAlertData] = useState<AlertData[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [activeSection, setActiveSection] = useState<'incidents' | 'rdm' | 'notes' | 'instructions' | 'security' | null>(null);
-  const [filter, setFilter] = useState<string | null>(null);
-  const [outages, setOutages] = useState<Outage[]>([]);
-  
-
-  const fetchAlertData = async () => {
-    setLoading(true);
-    try {
-      const response = await fetch('https://f6ffk8e9fe.execute-api.us-east-1.amazonaws.com/prod/dados');
-
-      if (!response.ok) {
-        throw new Error(`HTTP error! status_chamado: ${response.status}`);
-      }
-
-      const data = await response.json();
-      console.log("data from API:", data);
-
-      // Se a API já retorna array
-      const apiData = Array.isArray(data)
-        ? data
-        : data.body
-          ? JSON.parse(data.body)
-          : [];
-
-      if (!apiData || apiData.length === 0) {
-        throw new Error("Nenhum dado encontrado");
-      }
-
-  const transformedData: AlertData[] = apiData.map((item: any, index: number) => ({
-        id: `alert-${index}`,
-        tipo_chamado: item.tipo_chamado || 'N/A',
-        chamado: item.chamado || 'N/A',
-        grupo_chamado: item.grupo_chamado || 'N/A',
-        status_chamado: item.status_chamado || 'N/A',
-        abertura_chamado: item.dat_abertura_chamado || item.abertura_chamado || item.data_abertura || '',
-        resumo_chamado: item.resumo_chamado || 'Título não disponível',
-        severidade_chamado: item.severidade_chamado || 'N/A',
-        acionado: item.acionado || 'N/A',
-        chat: false,
-        link_chamado: item.link_chamado || '',
-        // Novos campos de chat (se existirem na API)
-        timestamp_chat: item.timestamp_chat || item.chat_timestamp || undefined,
-        // Normaliza sending_chat para boolean (aceita booleano, string "true"/"false", 1/0)
-        sending_chat:
-          typeof item.sending_chat === 'boolean'
-            ? item.sending_chat
-            : typeof item.sending_chat === 'string'
-              ? item.sending_chat.trim().toLowerCase() === 'true'
-              : typeof item.sending_chat === 'number'
-                ? item.sending_chat === 1
-                : undefined,
-      }));
-
-      setAlertData(transformedData);
-
-      const unacknowledged = transformedData.filter(alert => !alert.acionado);
-      if (unacknowledged.length > 0) {
-        playAlertSound();
-      }
-    } catch (error) {
-      console.error('Error fetching data:', error);
-      toast({
-        title: "Erro ao buscar dados",
-        description: "Não foi possível conectar com a API",
-        variant: "destructive",
-      });
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const playAlertSound = () => {
-    const audio = new Audio('data:audio/wav;base64,UklGRnoGAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQoGAACBhYqFbF1fdJivrJBhNjVgodDbq2EcBj+a2/LDciUFLIHO8tiJNwgZaLvt559NEAxQp+PwtmMcBjiR1/LMeSwFJHfH8N2QQAoUXrTp66hVFApGn+Dqu2sgBDR+w/PCaWEbEBOa5rWgdyoEKAA=');
-    audio.play().catch(() => {
-      console.log('Alert sound could not be played');
-    });
-  };
-
-  const toggleTheme = () => {
-    setIsDarkMode(!isDarkMode);
-    if (isDarkMode) {
-      document.documentElement.classList.remove('dark');
-      document.documentElement.classList.add('light');
-    } else {
-      document.documentElement.classList.remove('light');
-      document.documentElement.classList.add('dark');
-    }
-  };
-
-  const updateAlertAcknowledgment = (alertId: string, acknowledged: boolean) => {
-    setAlertData(prev =>
-      prev.map(alert =>
-        alert.id === alertId
-          ? { ...alert, chat: acknowledged }
-          : alert
-      )
-    );
-  };
-
-  useEffect(() => {
-    fetchAlertData();
-    const interval = setInterval(fetchAlertData, 600000);
-    return () => clearInterval(interval);
-  }, []);
-
-  useEffect(() => {
-    document.documentElement.classList.add('dark');
-  }, []);
-
-  // Persistência dos outages (localStorage) + migração simples
-  useEffect(() => {
-    try {
-      const raw = localStorage.getItem('outages');
-      if (raw) {
-        const parsed: any[] = JSON.parse(raw);
-        if (Array.isArray(parsed)) {
-          // Migração: se vierem objetos com expiresAt/startAt ausente, converte para novo formato
-          const mapped: Outage[] = parsed.map((o: any) => {
-            if (typeof o.startAt === 'number' && typeof o.endAt === 'number') return o as Outage;
-            const created = typeof o.createdAt === 'number' ? o.createdAt : Date.now();
-            const startAt = created;
-            const endAt = typeof o.expiresAt === 'number' ? o.expiresAt : created + 30 * 60000;
-            return { id: o.id || `outage-${created}`, title: o.title, startAt, endAt, createdAt: created } as Outage;
-          });
-          setOutages(mapped);
-        } else {
-          setOutages([]);
-        }
-      }
-    } catch {}
-  }, []);
-
-  useEffect(() => {
-    try {
-      localStorage.setItem('outages', JSON.stringify(outages));
-    } catch {}
-  }, [outages]);
-
-  // Limpeza periódica de expirados
-  useEffect(() => {
-    const id = setInterval(() => {
-      const now = Date.now();
-      setOutages((prev) => prev.filter((o) => now <= o.endAt));
-    }, 60000);
-    return () => clearInterval(id);
-  }, []);
-
-  const addOutage = (title: string, startAt: number, endAt: number) => {
-    const id = `outage-${startAt}-${Math.random().toString(36).slice(2, 8)}`;
-    setOutages((prev) => [
-      ...prev.filter(o => o.title !== title || !(startAt <= o.endAt && endAt >= o.startAt)),
-      { id, title, startAt, endAt, createdAt: Date.now() }
-    ]);
-  };
-
-  const removeOutage = (id: string) => {
-    setOutages((prev) => prev.filter((o) => o.id !== id));
-  };
-
-  const sidebarItems = [
-    { title: "Incidentes Críticos", icon: AlertTriangle, key: 'incidents' as const },
-    { title: "Acompanhamento RDMs", icon: FileText, key: 'rdm' as const },
-    { title: "Recados do Turno", icon: MessageSquare, key: 'notes' as const },
-    { title: "Instruções Operacionais", icon: BookOpen, key: 'instructions' as const },
-  ];
-
-  const nowTs = Date.now();
-  const activeOutages = outages.filter(o => nowTs >= o.startAt && nowTs <= o.endAt);
-
-  const filteredData = filter
-    ? alertData.filter(alert => {
-      if (filter === 'SEV4_INCIDENT') {
-        return alert.tipo_chamado.toLowerCase().includes('incidente')
-          && alert.severidade_chamado.includes('4')
-      }
-      if (filter === 'SEV4_INCIDENT_TOTAL') {
-        return alert.tipo_chamado.toLowerCase().includes('incidente')
-          && alert.severidade_chamado.includes('4');
-      }
-      if (filter === 'SEV4_ALERT') {
-        return alert.tipo_chamado.toLowerCase().includes('alerta')
-          && alert.severidade_chamado.includes('4')
-          && alert.acionado !== 'OK'
-      }
-      if (filter === 'SEV4_ALERT_TOTAL') {
-        return alert.tipo_chamado.toLowerCase().includes('alerta')
-          && alert.severidade_chamado.includes('4');
-      }
-      if (filter === 'SEV3_INCIDENT') {
-        return alert.tipo_chamado.toLowerCase().includes('incidente')
-          && alert.severidade_chamado.includes('3')
-      }
-      if (filter === 'SEV3_INCIDENT_TOTAL') {
-        return alert.tipo_chamado.toLowerCase().includes('incidente')
-          && alert.severidade_chamado.includes('3');
-      }
-      return true;
-    })
-    : alertData;
-
-  // Aplica filtro de outages (oculta itens cujo título contenha o termo)
-  const outageFilteredData = filteredData.filter(alert => {
-    const title = (alert.resumo_chamado || '').trim().toLowerCase();
-    return !activeOutages.some(o => title === String(o.title || '').trim().toLowerCase());
-  });
-
-  return (
-    <div className="min-h-screen flex bg-background text-foreground">
-      {/* Conteúdo principal */}
-      <div className="flex-1 flex flex-col">
-        {/* Header */}
-        <div className="bg-dashboard-bg border-b border-border p-6 text-center">
-          <h1
-            className="text-3xl font-bold mb-2"
-            style={{
-              color: isDarkMode ? '#d2d3d8ff' : '#4a90e2',
-            }}
-          >
-            PAINEL CIOPS - MONITORAÇÃO
-          </h1>
-        </div>
-
-        {/* Main */}
-        <div className="flex-1 bg-dashboard-bg">
-          <div className="container mx-auto p-6 max-w-7xl">
-            <div className="space-y-8">
-              {/* Cards */}
-              <div className="text-center">
-                <MonitoringCards
-                  alertData={alertData}
-                  onFilterSelect={(filterKey) => setFilter(prev => prev === filterKey ? null : filterKey)}
-                />
-              </div>
-
-              {/* Table */}
-              <ActionTable
-                alertData={outageFilteredData}
-                onUpdateAcknowledgment={updateAlertAcknowledgment}
-                loading={loading}
-              />
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* Sidebar Enhanced */}
-      <div className="w-20 bg-gradient-to-b from-sidebar-background to-sidebar-background/95 border-l border-sidebar-border/50 backdrop-blur-sm flex flex-col justify-between sticky top-0 h-screen shadow-lg" style={{ background: 'var(--sidebar-gradient)', boxShadow: 'var(--sidebar-glow)' }}>
-        {/* Parte superior - Menu items */}
-        <div className="flex flex-col gap-3 p-3 flex-1">
-          {sidebarItems.map((item) => (
-            <Button
-              key={item.key}
-              variant="ghost"
-              size="icon"
-              onClick={() => setActiveSection(activeSection === item.key ? null : item.key)}
-              className={`w-14 h-14 rounded-xl transition-all duration-300 relative group ${activeSection === item.key
-                ? 'bg-gradient-to-br from-sidebar-primary to-sidebar-primary/90 text-sidebar-primary-foreground shadow-lg scale-105'
-                : 'text-sidebar-foreground hover:bg-sidebar-accent/80 hover:text-sidebar-accent-foreground hover:scale-105'
-                }`}
-              style={activeSection === item.key ? { boxShadow: 'var(--sidebar-active-glow)' } : { transition: 'all 0.3s ease' }}
-              title={item.title}
-            >
-              <item.icon className="h-6 w-6 transition-transform duration-300 group-hover:scale-110" />
-              {/* Active indicator */}
-              {activeSection === item.key && (
-                <div className="absolute -right-1 top-1/2 transform -translate-y-1/2 w-1 h-8 bg-sidebar-primary-foreground rounded-full opacity-80"></div>
-              )}
-            </Button>
-          ))}
-        </div>
-
-        {/* Parte inferior - Security + Settings */}
-        <div className="flex flex-col gap-3 p-3 border-t border-sidebar-border/30">
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={() => setActiveSection('security')}
-            className="w-14 h-14 rounded-xl text-sidebar-foreground hover:bg-sidebar-accent/80 hover:text-sidebar-accent-foreground transition-all duration-300 hover:scale-105 group"
-            title="Segurança"
-            style={{ transition: 'all 0.3s ease' }}
-          >
-            <Shield className="h-5 w-5 transition-transform duration-300 group-hover:scale-110" />
-          </Button>
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={() => setShowWebhookConfig(true)}
-            className="w-14 h-14 rounded-xl text-sidebar-foreground hover:bg-sidebar-accent/80 hover:text-sidebar-accent-foreground transition-all duration-300 hover:scale-105 group"
-            title="Configuração de Webhooks"
-            style={{ transition: 'all 0.3s ease' }}
-          >
-            <Settings className="h-5 w-5 transition-transform duration-300 group-hover:rotate-90" />
-          </Button>
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={toggleTheme}
-            className="w-14 h-14 rounded-xl text-sidebar-foreground hover:bg-sidebar-accent/80 hover:text-sidebar-accent-foreground transition-all duration-300 hover:scale-105 group"
-            title="Trocar Tema"
-            style={{ transition: 'all 0.3s ease' }}
-          >
-            <div className="transition-transform duration-500 group-hover:rotate-180">
-              {isDarkMode ? <Sun className="h-5 w-5" /> : <Moon className="h-5 w-5" />}
-            </div>
-          </Button>
-        </div>
-      </div>
-
-      {/* Drawer */}
-      <Sheet open={!!activeSection} onOpenChange={() => setActiveSection(null)}>
-        <SheetContent
-          side="right"
-          className="w-full"
-          style={{ width: '50vw', maxWidth: '1000px' }}
-        >
-          <div className="mt-4">
-            {activeSection === 'incidents' && <CriticalIncidents />}
-            {activeSection === 'rdm' && <RDMTracker />}
-            {activeSection === 'notes' && <ShiftNotes />}
-            {activeSection === 'instructions' && <InstructionsSection />}
-            {activeSection === 'security' && (
-              <OutageManager
-                outages={outages}
-                onAdd={addOutage}
-                onRemove={removeOutage}
-              />
-            )}
-          </div>
-        </SheetContent>
-      </Sheet>
-
-      {/* Webhook Config Modal */}
-      <WebhookConfig
-        open={showWebhookConfig}
-        onOpenChange={setShowWebhookConfig}
-      />
-    </div>
-  );
-};
-
-export default Dashboard;
-
-MonitoringCards:
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+MONITORING CARds:
 import { useState } from 'react';
 import { AlertTriangle, AlertCircle, Clock, Timer, UserCheck, BarChart3, MessageCircle, CheckCircle2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
@@ -404,6 +14,7 @@ interface AlertData {
   severidade_chamado: string;
   acionado: string;
   chat: boolean;
+  sending_chat?: boolean;
 }
 
 interface MonitoringCardsProps {
@@ -414,9 +25,6 @@ interface MonitoringCardsProps {
 export const MonitoringCards = ({ alertData, onFilterSelect }: MonitoringCardsProps) => {
   const [activeFilter, setActiveFilter] = useState<string | null>(null);
 
-  // Usando o hook para obter os chamados acionados
-
-  // Função toggle do filtro
   const handleCardClick = (filterKey: string) => {
     if (activeFilter === filterKey) {
       setActiveFilter(null);
@@ -427,46 +35,39 @@ export const MonitoringCards = ({ alertData, onFilterSelect }: MonitoringCardsPr
     }
   };
 
-  // Função para calcular tempo restante em minutos
   const getTimeRemaining = (openingTime: string) => {
     const now = new Date();
     const opening = new Date(openingTime);
     const diffMs = now.getTime() - opening.getTime();
     const diffMinutes = Math.floor(diffMs / (1000 * 60));
-
-    // Assumindo SLA de 60 minutos para alertas críticos
     const slaMinutes = 60;
     return slaMinutes - diffMinutes;
   };
 
-  // Métricas básicas
   const total = alertData.length;
+  const pendenteEnvioChat = alertData.filter(a => a.sending_chat === false || a.sending_chat === undefined).length;
+  const confirmados = alertData.filter(a => a.sending_chat === true).length;
 
-  const pendenteEnvioChat = alertData.filter.length;
-
-  const confirmados = alertData.filter
-  .length;
-
-  // Métricas baseadas em tempo
   const tempoExpirado = alertData.filter(alert => {
     const timeRemaining = getTimeRemaining(alert.abertura_chamado);
+    return timeRemaining < 0;
   }).length;
 
   const dezMinutosRestantes = alertData.filter(alert => {
     const timeRemaining = getTimeRemaining(alert.abertura_chamado);
-    }).length;
+    return timeRemaining >= 0 && timeRemaining <= 10;
+  }).length;
 
   const cincoMinutosRestantes = alertData.filter(alert => {
     const timeRemaining = getTimeRemaining(alert.abertura_chamado);
+    return timeRemaining >= 0 && timeRemaining <= 5;
   }).length;
 
-  const comOperador = alertData.filter.length;
-
-  const cenariosCrise = alertData.filter.length;
+  const comOperador = alertData.filter(a => a.acionado === 'OK').length;
+  const cenariosCrise = alertData.filter(a => a.severidade_chamado === '1' || a.severidade_chamado === '2').length;
 
   return (
-    <div className="grid grid-cols-1 md:grid-cols-4 lg:grid-cols-8 gap-4 w-full max-w-none">
-      {/* Total */}
+    <div className="flex flex-col gap-3 w-full">
       <CompactCard
         title="Total"
         count={total}
@@ -478,7 +79,6 @@ export const MonitoringCards = ({ alertData, onFilterSelect }: MonitoringCardsPr
         onClick={() => handleCardClick('TOTAL')}
       />
 
-      {/* Cenários de Crise */}
       <CompactCard
         title="Cenários de Crise"
         count={cenariosCrise}
@@ -490,7 +90,6 @@ export const MonitoringCards = ({ alertData, onFilterSelect }: MonitoringCardsPr
         onClick={() => handleCardClick('CENARIOS_CRISE')}
       />
 
-      {/* Tempo Expirado */}
       <CompactCard
         title="Tempo Expirado"
         count={tempoExpirado}
@@ -502,7 +101,6 @@ export const MonitoringCards = ({ alertData, onFilterSelect }: MonitoringCardsPr
         onClick={() => handleCardClick('TEMPO_EXPIRADO')}
       />
 
-      {/* Pendente Envio Chat */}
       <CompactCard
         title="Pendente Envio Chat"
         count={pendenteEnvioChat}
@@ -514,7 +112,6 @@ export const MonitoringCards = ({ alertData, onFilterSelect }: MonitoringCardsPr
         onClick={() => handleCardClick('PENDENTE_ENVIO_CHAT')}
       />
 
-      {/* 5 Minutos Restantes */}
       <CompactCard
         title="5min Restantes"
         count={cincoMinutosRestantes}
@@ -526,7 +123,6 @@ export const MonitoringCards = ({ alertData, onFilterSelect }: MonitoringCardsPr
         onClick={() => handleCardClick('CINCO_MINUTOS')}
       />
 
-      {/* 10 Minutos Restantes */}
       <CompactCard
         title="10min Restantes"
         count={dezMinutosRestantes}
@@ -538,7 +134,6 @@ export const MonitoringCards = ({ alertData, onFilterSelect }: MonitoringCardsPr
         onClick={() => handleCardClick('DEZ_MINUTOS')}
       />
 
-      {/* Com Operador */}
       <CompactCard
         title="Com Operador"
         count={comOperador}
@@ -550,7 +145,6 @@ export const MonitoringCards = ({ alertData, onFilterSelect }: MonitoringCardsPr
         onClick={() => handleCardClick('COM_OPERADOR')}
       />
 
-      {/* Confirmados */}
       <CompactCard
         title="Confirmados"
         count={confirmados}
@@ -642,7 +236,7 @@ function CompactCard({ title, count, totalCount, icon: Icon, type, isActive, onC
     <div
       onClick={onClick}
       className={cn(
-        "p-6 rounded-lg border-2 cursor-pointer transition-all duration-300 hover:scale-105",
+        "p-4 rounded-lg border-2 cursor-pointer transition-all duration-300 hover:scale-102 relative",
         style.bg,
         style.border,
         style.hover,
@@ -650,26 +244,27 @@ function CompactCard({ title, count, totalCount, icon: Icon, type, isActive, onC
         isActive && "ring-2 ring-primary/50 ring-offset-2 ring-offset-background"
       )}
     >
-      <div className="flex flex-col items-center text-center space-y-3">
-        <div className={cn("p-2 rounded-lg bg-black/20", style.text)}>
-          <Icon size={20} />
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex items-center gap-3 flex-1 min-w-0">
+          <div className={cn("p-2 rounded-lg bg-black/20 flex-shrink-0", style.text)}>
+            <Icon size={18} />
+          </div>
+          
+          <div className="flex-1 min-w-0">
+            <div className={cn("text-xs font-medium uppercase tracking-wide truncate", style.text)}>
+              {title}
+            </div>
+            <div className="text-xs text-muted-foreground truncate">
+              {count === 0 ? "Nenhum" : `${count}/${totalCount}`}
+            </div>
+          </div>
         </div>
 
-        <div className={cn("text-3xl font-bold", style.text)}>
+        <div className={cn("text-2xl font-bold flex-shrink-0", style.text)}>
           {count}
-        </div>
-
-        <div className="space-y-1">
-          <div className={cn("text-xs font-medium uppercase tracking-wide", style.text)}>
-            {title}
-          </div>
-          <div className="text-xs text-muted-foreground">
-            {count === 0 ? "Nenhum pendente" : `${count} de ${totalCount}`}
-          </div>
         </div>
       </div>
 
-      {/* Active indicator */}
       {isActive && (
         <div className="absolute top-2 right-2 w-2 h-2 bg-primary rounded-full animate-pulse" />
       )}
@@ -677,44 +272,375 @@ function CompactCard({ title, count, totalCount, icon: Icon, type, isActive, onC
   );
 }
 
-interface CompactSubCardProps {
-  label: string;
-  count: number;
-  type: string;
-  filterKey: string;
-  isActive: boolean;
-  onClick: () => void;
+
+
+DASHBOARD:
+import { useState, useEffect } from 'react';
+import {
+  Settings,
+  Sun,
+  Moon,
+  AlertTriangle,
+  FileText,
+  MessageSquare,
+  BookOpen,
+  Shield
+} from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { toast } from '@/hooks/use-toast';
+import { MonitoringCards } from '@/components/MonitoringCards';
+import { ActionTable } from '@/components/ActionTable';
+import { CriticalIncidents } from '@/components/CriticalIncidents';
+import { RDMTracker } from '@/components/RDMTracker';
+import { ShiftNotes } from '@/components/ShiftNotes';
+import { WebhookConfig } from '@/components/WebhookConfig';
+import { InstructionsSection } from '@/components/InstructionsSection';
+import { Sheet, SheetContent } from "@/components/ui/sheet";
+import OutageManager, { Outage } from '@/components/OutageManager';
+
+export interface AlertData {
+  id: string;
+  chamado: string;
+  tipo_chamado: string;
+  grupo_chamado: string;
+  status_chamado: string;
+  abertura_chamado: string;
+  resumo_chamado: string;
+  severidade_chamado: string;
+  acionado: string;
+  chat: boolean;
+  link_chamado: string;
+  timestamp_chat?: string;
+  sending_chat?: boolean;
 }
 
-function CompactSubCard({ label, count, type, isActive, onClick }: CompactSubCardProps) {
-  const typeStyles = {
-    'total': 'text-blue-600 border-blue-500/20 hover:border-blue-500/40',
-    'pendente-chat': 'text-orange-600 border-orange-500/20 hover:border-orange-500/40',
-    'confirmados': 'text-green-600 border-green-500/20 hover:border-green-500/40',
-    'tempo-expirado': 'text-red-600 border-red-500/20 hover:border-red-500/40',
-    'dez-minutos': 'text-yellow-600 border-yellow-500/20 hover:border-yellow-500/40',
-    'cinco-minutos': 'text-amber-600 border-amber-500/20 hover:border-amber-500/40',
-    'com-operador': 'text-emerald-600 border-emerald-500/20 hover:border-emerald-500/40',
-    'cenarios-crise': 'text-purple-600 border-purple-500/20 hover:border-purple-500/40',
+const Dashboard = () => {
+  const [isDarkMode, setIsDarkMode] = useState(true);
+  const [showWebhookConfig, setShowWebhookConfig] = useState(false);
+  const [alertData, setAlertData] = useState<AlertData[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [activeSection, setActiveSection] = useState<'incidents' | 'rdm' | 'notes' | 'instructions' | 'security' | null>(null);
+  const [filter, setFilter] = useState<string | null>(null);
+  const [outages, setOutages] = useState<Outage[]>([]);
+  
+
+  const fetchAlertData = async () => {
+    setLoading(true);
+    try {
+      const response = await fetch('https://f6ffk8e9fe.execute-api.us-east-1.amazonaws.com/prod/dados');
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status_chamado: ${response.status}`);
+      }
+
+      const data = await response.json();
+      console.log("data from API:", data);
+
+      const apiData = Array.isArray(data)
+        ? data
+        : data.body
+          ? JSON.parse(data.body)
+          : [];
+
+      if (!apiData || apiData.length === 0) {
+        throw new Error("Nenhum dado encontrado");
+      }
+
+      const transformedData: AlertData[] = apiData.map((item: any, index: number) => ({
+        id: `alert-${index}`,
+        tipo_chamado: item.tipo_chamado || 'N/A',
+        chamado: item.chamado || 'N/A',
+        grupo_chamado: item.grupo_chamado || 'N/A',
+        status_chamado: item.status_chamado || 'N/A',
+        abertura_chamado: item.dat_abertura_chamado || item.abertura_chamado || item.data_abertura || '',
+        resumo_chamado: item.resumo_chamado || 'Título não disponível',
+        severidade_chamado: item.severidade_chamado || 'N/A',
+        acionado: item.acionado || 'N/A',
+        chat: false,
+        link_chamado: item.link_chamado || '',
+        timestamp_chat: item.timestamp_chat || item.chat_timestamp || undefined,
+        sending_chat:
+          typeof item.sending_chat === 'boolean'
+            ? item.sending_chat
+            : typeof item.sending_chat === 'string'
+              ? item.sending_chat.trim().toLowerCase() === 'true'
+              : typeof item.sending_chat === 'number'
+                ? item.sending_chat === 1
+                : undefined,
+      }));
+
+      setAlertData(transformedData);
+
+      const unacknowledged = transformedData.filter(alert => !alert.acionado);
+      if (unacknowledged.length > 0) {
+        playAlertSound();
+      }
+    } catch (error) {
+      console.error('Error fetching data:', error);
+      toast({
+        title: "Erro ao buscar dados",
+        description: "Não foi possível conectar com a API",
+        variant: "destructive",
+      });
+    } finally {
+      setLoading(false);
+    }
   };
 
+  const playAlertSound = () => {
+    const audio = new Audio('data:audio/wav;base64,UklGRnoGAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQoGAACBhYqFbF1fdJivrJBhNjVgodDbq2EcBj+a2/LDciUFLIHO8tiJNwgZaLvt559NEAxQp+PwtmMcBjiR1/LMeSwFJHfH8N2QQAoUXrTp66hVFApGn+Dqu2sgBDR+w/PCaWEbEBOa5rWgdyoEKAA=');
+    audio.play().catch(() => {
+      console.log('Alert sound could not be played');
+    });
+  };
+
+  const toggleTheme = () => {
+    setIsDarkMode(!isDarkMode);
+    if (isDarkMode) {
+      document.documentElement.classList.remove('dark');
+      document.documentElement.classList.add('light');
+    } else {
+      document.documentElement.classList.remove('light');
+      document.documentElement.classList.add('dark');
+    }
+  };
+
+  const updateAlertAcknowledgment = (alertId: string, acknowledged: boolean) => {
+    setAlertData(prev =>
+      prev.map(alert =>
+        alert.id === alertId
+          ? { ...alert, chat: acknowledged }
+          : alert
+      )
+    );
+  };
+
+  useEffect(() => {
+    fetchAlertData();
+    const interval = setInterval(fetchAlertData, 600000);
+    return () => clearInterval(interval);
+  }, []);
+
+  useEffect(() => {
+    document.documentElement.classList.add('dark');
+  }, []);
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem('outages');
+      if (raw) {
+        const parsed: any[] = JSON.parse(raw);
+        if (Array.isArray(parsed)) {
+          const mapped: Outage[] = parsed.map((o: any) => {
+            if (typeof o.startAt === 'number' && typeof o.endAt === 'number') return o as Outage;
+            const created = typeof o.createdAt === 'number' ? o.createdAt : Date.now();
+            const startAt = created;
+            const endAt = typeof o.expiresAt === 'number' ? o.expiresAt : created + 30 * 60000;
+            return { id: o.id || `outage-${created}`, title: o.title, startAt, endAt, createdAt: created } as Outage;
+          });
+          setOutages(mapped);
+        } else {
+          setOutages([]);
+        }
+      }
+    } catch {}
+  }, []);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('outages', JSON.stringify(outages));
+    } catch {}
+  }, [outages]);
+
+  useEffect(() => {
+    const id = setInterval(() => {
+      const now = Date.now();
+      setOutages((prev) => prev.filter((o) => now <= o.endAt));
+    }, 60000);
+    return () => clearInterval(id);
+  }, []);
+
+  const addOutage = (title: string, startAt: number, endAt: number) => {
+    const id = `outage-${startAt}-${Math.random().toString(36).slice(2, 8)}`;
+    setOutages((prev) => [
+      ...prev.filter(o => o.title !== title || !(startAt <= o.endAt && endAt >= o.startAt)),
+      { id, title, startAt, endAt, createdAt: Date.now() }
+    ]);
+  };
+
+  const removeOutage = (id: string) => {
+    setOutages((prev) => prev.filter((o) => o.id !== id));
+  };
+
+  const sidebarItems = [
+    { title: "Incidentes Críticos", icon: AlertTriangle, key: 'incidents' as const },
+    { title: "Acompanhamento RDMs", icon: FileText, key: 'rdm' as const },
+    { title: "Recados do Turno", icon: MessageSquare, key: 'notes' as const },
+    { title: "Instruções Operacionais", icon: BookOpen, key: 'instructions' as const },
+  ];
+
+  const nowTs = Date.now();
+  const activeOutages = outages.filter(o => nowTs >= o.startAt && nowTs <= o.endAt);
+
+  const filteredData = filter
+    ? alertData.filter(alert => {
+      if (filter === 'SEV4_INCIDENT') {
+        return alert.tipo_chamado.toLowerCase().includes('incidente')
+          && alert.severidade_chamado.includes('4')
+      }
+      if (filter === 'SEV4_INCIDENT_TOTAL') {
+        return alert.tipo_chamado.toLowerCase().includes('incidente')
+          && alert.severidade_chamado.includes('4');
+      }
+      if (filter === 'SEV4_ALERT') {
+        return alert.tipo_chamado.toLowerCase().includes('alerta')
+          && alert.severidade_chamado.includes('4')
+          && alert.acionado !== 'OK'
+      }
+      if (filter === 'SEV4_ALERT_TOTAL') {
+        return alert.tipo_chamado.toLowerCase().includes('alerta')
+          && alert.severidade_chamado.includes('4');
+      }
+      if (filter === 'SEV3_INCIDENT') {
+        return alert.tipo_chamado.toLowerCase().includes('incidente')
+          && alert.severidade_chamado.includes('3')
+      }
+      if (filter === 'SEV3_INCIDENT_TOTAL') {
+        return alert.tipo_chamado.toLowerCase().includes('incidente')
+          && alert.severidade_chamado.includes('3');
+      }
+      return true;
+    })
+    : alertData;
+
+  const outageFilteredData = filteredData.filter(alert => {
+    const title = (alert.resumo_chamado || '').trim().toLowerCase();
+    return !activeOutages.some(o => title === String(o.title || '').trim().toLowerCase());
+  });
+
   return (
-    <div
-      onClick={onClick}
-      className={cn(
-        "p-3 rounded-lg bg-panel-bg/50 border cursor-pointer transition-all duration-200 hover:scale-105",
-        typeStyles[type as keyof typeof typeStyles],
-        isActive && "ring-2 ring-primary/50 ring-offset-1 ring-offset-background"
-      )}
-    >
-      <div className="flex items-center justify-between">
-        <span className="text-sm text-muted-foreground">{label}</span>
-        <span className={cn("text-lg font-semibold", typeStyles[type as keyof typeof typeStyles].split(' ')[0])}>
-          {count}
-        </span>
+    <div className="min-h-screen flex flex-col bg-background text-foreground">
+      {/* Header */}
+      <header className="bg-dashboard-bg border-b border-border p-6 text-center">
+        <h1
+          className="text-3xl font-bold mb-2"
+          style={{
+            color: isDarkMode ? '#d2d3d8ff' : '#4a90e2',
+          }}
+        >
+          PAINEL CIOPS - MONITORAÇÃO
+        </h1>
+      </header>
+
+      {/* Main Layout: 3 colunas */}
+      <div className="flex-1 flex bg-dashboard-bg overflow-hidden">
+        {/* Coluna Esquerda - Cards/Filtros */}
+        <aside className="w-64 bg-dashboard-bg border-r border-border overflow-y-auto p-4">
+          <MonitoringCards
+            alertData={alertData}
+            onFilterSelect={(filterKey) => setFilter(prev => prev === filterKey ? null : filterKey)}
+          />
+        </aside>
+
+        {/* Coluna Central - Tabela */}
+        <main className="flex-1 overflow-y-auto p-6">
+          <ActionTable
+            alertData={outageFilteredData}
+            onUpdateAcknowledgment={updateAlertAcknowledgment}
+            loading={loading}
+          />
+        </main>
+
+        {/* Coluna Direita - Sidebar */}
+        <aside className="w-20 bg-gradient-to-b from-sidebar-background to-sidebar-background/95 border-l border-sidebar-border/50 backdrop-blur-sm flex flex-col justify-between shadow-lg">
+          {/* Parte superior - Menu items */}
+          <div className="flex flex-col gap-3 p-3 flex-1">
+            {sidebarItems.map((item) => (
+              <Button
+                key={item.key}
+                variant="ghost"
+                size="icon"
+                onClick={() => setActiveSection(activeSection === item.key ? null : item.key)}
+                className={`w-14 h-14 rounded-xl transition-all duration-300 relative group ${activeSection === item.key
+                  ? 'bg-gradient-to-br from-sidebar-primary to-sidebar-primary/90 text-sidebar-primary-foreground shadow-lg scale-105'
+                  : 'text-sidebar-foreground hover:bg-sidebar-accent/80 hover:text-sidebar-accent-foreground hover:scale-105'
+                  }`}
+                title={item.title}
+              >
+                <item.icon className="h-6 w-6 transition-transform duration-300 group-hover:scale-110" />
+                {activeSection === item.key && (
+                  <div className="absolute -right-1 top-1/2 transform -translate-y-1/2 w-1 h-8 bg-sidebar-primary-foreground rounded-full opacity-80"></div>
+                )}
+              </Button>
+            ))}
+          </div>
+
+          {/* Parte inferior - Security + Settings */}
+          <div className="flex flex-col gap-3 p-3 border-t border-sidebar-border/30">
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => setActiveSection('security')}
+              className="w-14 h-14 rounded-xl text-sidebar-foreground hover:bg-sidebar-accent/80 hover:text-sidebar-accent-foreground transition-all duration-300 hover:scale-105 group"
+              title="Segurança"
+            >
+              <Shield className="h-5 w-5 transition-transform duration-300 group-hover:scale-110" />
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => setShowWebhookConfig(true)}
+              className="w-14 h-14 rounded-xl text-sidebar-foreground hover:bg-sidebar-accent/80 hover:text-sidebar-accent-foreground transition-all duration-300 hover:scale-105 group"
+              title="Configuração de Webhooks"
+            >
+              <Settings className="h-5 w-5 transition-transform duration-300 group-hover:rotate-90" />
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={toggleTheme}
+              className="w-14 h-14 rounded-xl text-sidebar-foreground hover:bg-sidebar-accent/80 hover:text-sidebar-accent-foreground transition-all duration-300 hover:scale-105 group"
+              title="Trocar Tema"
+            >
+              <div className="transition-transform duration-500 group-hover:rotate-180">
+                {isDarkMode ? <Sun className="h-5 w-5" /> : <Moon className="h-5 w-5" />}
+              </div>
+            </Button>
+          </div>
+        </aside>
       </div>
+
+      {/* Drawer */}
+      <Sheet open={!!activeSection} onOpenChange={() => setActiveSection(null)}>
+        <SheetContent
+          side="right"
+          className="w-full"
+          style={{ width: '50vw', maxWidth: '1000px' }}
+        >
+          <div className="mt-4">
+            {activeSection === 'incidents' && <CriticalIncidents />}
+            {activeSection === 'rdm' && <RDMTracker />}
+            {activeSection === 'notes' && <ShiftNotes />}
+            {activeSection === 'instructions' && <InstructionsSection />}
+            {activeSection === 'security' && (
+              <OutageManager
+                outages={outages}
+                onAdd={addOutage}
+                onRemove={removeOutage}
+              />
+            )}
+          </div>
+        </SheetContent>
+      </Sheet>
+
+      {/* Webhook Config Modal */}
+      <WebhookConfig
+        open={showWebhookConfig}
+        onOpenChange={setShowWebhookConfig}
+      />
     </div>
   );
-}
+};
 
+export default Dashboard;
 
