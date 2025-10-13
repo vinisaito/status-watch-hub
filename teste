@@ -1,14 +1,17 @@
+import { ActionTableMobileCard } from './ActionTableMobileCard';
+import { TableBody, TableCell, TableRow } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Card } from '@/components/ui/card';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
-import { Timer, Settings, User, Send, Clock, AlertTriangle } from 'lucide-react';
+import { Timer, Settings, User, Send, Eye, Loader2 } from 'lucide-react';
 import type { AlertData } from './types';
 
-interface ActionTableMobileCardProps {
-  alert: AlertData;
-  chatStatus: { timestamp_chat: string; sending_chat: boolean } | undefined;
-  timerState: any;
+interface ActionTableResponsiveProps {
+  loading: boolean;
+  sortedAndPaginatedData: AlertData[];
+  searchTerm: string;
+  chatStatusMap: Map<string, { timestamp_chat: string; sending_chat: boolean }>;
+  timers: Map<number, any>;
   chatSentLocal: Set<string>;
   getCurrentActiveLevel: (chamado: number) => number | null;
   getRemainingTime: (chamado: number, level: number) => number;
@@ -25,10 +28,12 @@ interface ActionTableMobileCardProps {
   LEVEL_NAMES: Record<number, string>;
 }
 
-export const ActionTableMobileCard = ({
-  alert,
-  chatStatus,
-  timerState,
+export const ActionTableResponsive = ({
+  loading,
+  sortedAndPaginatedData,
+  searchTerm,
+  chatStatusMap,
+  timers,
   chatSentLocal,
   getCurrentActiveLevel,
   getRemainingTime,
@@ -43,155 +48,263 @@ export const ActionTableMobileCard = ({
   handleOpenTimerManagement,
   handleAcknowledgment,
   LEVEL_NAMES,
-}: ActionTableMobileCardProps) => {
-  const chamadoNum = parseInt(alert.chamado);
-  const currentLevel = getCurrentActiveLevel(chamadoNum);
-  const remainingTime = currentLevel ? getRemainingTime(chamadoNum, currentLevel) : 0;
+}: ActionTableResponsiveProps) => {
+  if (loading) {
+    return (
+      <>
+        {/* Loading para Desktop */}
+        <TableBody className="hidden md:table-row-group">
+          <TableRow>
+            <TableCell colSpan={9} className="h-32 text-center">
+              <div className="flex items-center justify-center">
+                <Loader2 className="h-6 w-6 animate-spin mr-2" />
+                <span className="text-muted-foreground">Carregando dados...</span>
+              </div>
+            </TableCell>
+          </TableRow>
+        </TableBody>
+        {/* Loading para Mobile */}
+        <div className="md:hidden flex items-center justify-center py-12">
+          <Loader2 className="h-6 w-6 animate-spin mr-2" />
+          <span className="text-muted-foreground">Carregando dados...</span>
+        </div>
+      </>
+    );
+  }
 
-  const wsChatRaw: any = timerState?.sending_chat ?? timerState?.sending;
-  const sentFlagRaw: any =
-    typeof wsChatRaw !== 'undefined'
-      ? wsChatRaw
-      : typeof chatStatus?.sending_chat !== 'undefined'
-        ? chatStatus?.sending_chat
-        : (alert as any).sending_chat;
-
-  const sentNormalized =
-    typeof sentFlagRaw === 'boolean'
-      ? sentFlagRaw
-      : typeof sentFlagRaw === 'string'
-        ? sentFlagRaw.trim().toLowerCase() === 'true'
-        : typeof sentFlagRaw === 'number'
-          ? sentFlagRaw === 1
-          : false;
-
-  const isChatSent = sentNormalized || chatSentLocal.has(alert.chamado) || alert.acionado === 'true' || alert.chat;
-  const responsavelAtual = timerState?.ResponsavelAcompanhamento || '';
+  if (sortedAndPaginatedData.length === 0) {
+    return (
+      <>
+        {/* Empty State para Desktop */}
+        <TableBody className="hidden md:table-row-group">
+          <TableRow>
+            <TableCell colSpan={9} className="h-32 text-center">
+              <p className="text-muted-foreground">
+                {searchTerm ? 'Nenhum chamado encontrado com os critérios de busca.' : 'Nenhum chamado disponível.'}
+              </p>
+            </TableCell>
+          </TableRow>
+        </TableBody>
+        {/* Empty State para Mobile */}
+        <div className="md:hidden text-center py-12">
+          <p className="text-muted-foreground">
+            {searchTerm ? 'Nenhum chamado encontrado com os critérios de busca.' : 'Nenhum chamado disponível.'}
+          </p>
+        </div>
+      </>
+    );
+  }
 
   return (
-    <Card 
-      className="p-4 mb-3 bg-card border-border hover:bg-accent/50 transition-colors cursor-pointer"
-      onClick={() => handleOpenChamadoDetails(alert)}
-    >
-      {/* Header: Chamado + Severidade */}
-      <div className="flex items-center justify-between mb-3">
-        <div className="flex items-center gap-2">
-          <span className="text-lg font-bold text-foreground">#{alert.chamado}</span>
-          <Badge className={getSeverityColor(alert.severidade_chamado)}>
-            {alert.severidade_chamado}
-          </Badge>
-        </div>
-        
-        {/* Status do Chat */}
-        <div onClick={(e) => e.stopPropagation()}>
-          {isChatSent ? (
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <div className="flex items-center gap-1 text-green-600 text-xs">
-                  <Send className="h-4 w-4" />
-                  <span>Enviado</span>
-                </div>
-              </TooltipTrigger>
-              <TooltipContent>Chat já acionado</TooltipContent>
-            </Tooltip>
-          ) : (
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => handleAcknowledgment(alert)}
-              disabled={!isChatConnected}
-              className="h-8"
-            >
-              <Send className="h-4 w-4 mr-1" />
-              Chat
-            </Button>
-          )}
-        </div>
+    <>
+      {/* Visualização em CARDS para MOBILE */}
+      <div className="md:hidden space-y-3">
+        {sortedAndPaginatedData.map((alert) => {
+          const chamadoNum = parseInt(alert.chamado);
+          const timerState = timers.get(chamadoNum);
+          const chatStatus = chatStatusMap.get(alert.chamado);
+
+          return (
+            <ActionTableMobileCard
+              key={alert.id}
+              alert={alert}
+              chatStatus={chatStatus}
+              timerState={timerState}
+              chatSentLocal={chatSentLocal}
+              getCurrentActiveLevel={getCurrentActiveLevel}
+              getRemainingTime={getRemainingTime}
+              getTimerColor={getTimerColor}
+              getSeverityColor={getSeverityColor}
+              formatDate={formatDate}
+              isConnected={isConnected}
+              isChatConnected={isChatConnected}
+              handleOpenChamadoDetails={handleOpenChamadoDetails}
+              handleOpenAssumeOperator={handleOpenAssumeOperator}
+              handleStartTimer={handleStartTimer}
+              handleOpenTimerManagement={handleOpenTimerManagement}
+              handleAcknowledgment={handleAcknowledgment}
+              LEVEL_NAMES={LEVEL_NAMES}
+            />
+          );
+        })}
       </div>
 
-      {/* Título do Chamado */}
-      <div className="mb-3">
-        <p className="text-sm font-medium text-foreground line-clamp-2">
-          {alert.resumo_chamado}
-        </p>
-      </div>
+      {/* Visualização em TABELA para DESKTOP */}
+      <TableBody className="hidden md:table-row-group">
+        {sortedAndPaginatedData.map((alert) => {
+          const chamadoNum = parseInt(alert.chamado);
+          const timerState = timers.get(chamadoNum);
+          const currentLevel = getCurrentActiveLevel(chamadoNum);
+          const remainingTime = currentLevel ? getRemainingTime(chamadoNum, currentLevel) : 0;
 
-      {/* Informações do Chamado */}
-      <div className="space-y-2 mb-3 text-xs">
-        <div className="flex items-center gap-2">
-          <span className="text-muted-foreground">Tipo:</span>
-          <span className="text-foreground font-medium">{alert.tipo_chamado}</span>
-        </div>
-        <div className="flex items-center gap-2">
-          <span className="text-muted-foreground">Grupo:</span>
-          <span className="text-foreground font-medium">{alert.grupo_chamado}</span>
-        </div>
-        <div className="flex items-center gap-2">
-          <Clock className="h-3 w-3 text-muted-foreground" />
-          <span className="text-muted-foreground">{formatDate(alert.abertura_chamado)}</span>
-        </div>
-      </div>
+          const wsChatRaw: any = timerState?.sending_chat ?? timerState?.sending;
+          const localChatState = chatStatusMap.get(alert.chamado);
+          const sentFlagRaw: any =
+            typeof wsChatRaw !== 'undefined'
+              ? wsChatRaw
+              : typeof localChatState?.sending_chat !== 'undefined'
+                ? localChatState?.sending_chat
+                : (alert as any).sending_chat;
 
-      {/* Timer e Responsável */}
-      <div className="flex items-center justify-between pt-3 border-t border-border" onClick={(e) => e.stopPropagation()}>
-        {/* Responsável */}
-        <div className="flex items-center gap-2">
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => handleOpenAssumeOperator(alert.chamado)}
-                className="h-8 px-2"
-              >
-                <User className="h-4 w-4 mr-1" />
-                <span className="text-xs">
-                  {responsavelAtual || 'Assumir'}
-                </span>
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>
-              {responsavelAtual ? 'Alterar responsável' : 'Assumir chamado'}
-            </TooltipContent>
-          </Tooltip>
-        </div>
+          const sentNormalized =
+            typeof sentFlagRaw === 'boolean'
+              ? sentFlagRaw
+              : typeof sentFlagRaw === 'string'
+                ? sentFlagRaw.trim().toLowerCase() === 'true'
+                : typeof sentFlagRaw === 'number'
+                  ? sentFlagRaw === 1
+                  : false;
 
-        {/* Timer */}
-        <div className="flex items-center gap-2">
-          {currentLevel ? (
-            <>
-              <div className="text-right">
-                <div className={`text-sm font-bold ${getTimerColor(remainingTime)}`}>
-                  <Timer className="h-3 w-3 inline mr-1" />
-                  {Math.floor(remainingTime / 60)}:{String(remainingTime % 60).padStart(2, '0')}
-                </div>
-                <div className="text-xs text-muted-foreground">
-                  {LEVEL_NAMES[currentLevel as keyof typeof LEVEL_NAMES]}
-                </div>
-              </div>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => handleOpenTimerManagement(alert.chamado)}
-                className="h-8 w-8 p-0"
-              >
-                <Settings className="h-4 w-4" />
-              </Button>
-            </>
-          ) : (
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => handleStartTimer(alert.chamado, alert)}
-              disabled={!isConnected}
-              className="h-8"
-            >
-              <Timer className="h-4 w-4 mr-1" />
-              Iniciar
-            </Button>
-          )}
-        </div>
-      </div>
-    </Card>
+          const isChatSent = sentNormalized || chatSentLocal.has(alert.chamado) || alert.acionado === 'true' || alert.chat;
+          const responsavelAtual = timerState?.ResponsavelAcompanhamento || '';
+
+          return (
+            <TableRow key={alert.id} className="border-border hover:bg-accent/50 transition-colors">
+              {/* Chamado */}
+              <TableCell className="font-medium">
+                <Button
+                  variant="link"
+                  onClick={() => handleOpenChamadoDetails(alert)}
+                  className="p-0 h-auto font-bold text-primary hover:text-primary/80"
+                >
+                  {alert.chamado}
+                </Button>
+              </TableCell>
+
+              {/* Tipo/Classificação */}
+              <TableCell className="hidden md:table-cell">
+                <span className="text-sm">{alert.tipo_chamado}</span>
+              </TableCell>
+
+              {/* Grupo */}
+              <TableCell className="hidden lg:table-cell">
+                <span className="text-sm">{alert.grupo_chamado}</span>
+              </TableCell>
+
+              {/* Abertura */}
+              <TableCell className="hidden xl:table-cell">
+                <span className="text-xs text-muted-foreground">{formatDate(alert.abertura_chamado)}</span>
+              </TableCell>
+
+              {/* Título/Resumo */}
+              <TableCell className="max-w-[300px]">
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <p className="text-sm truncate cursor-pointer">{alert.resumo_chamado}</p>
+                  </TooltipTrigger>
+                  <TooltipContent className="max-w-md">
+                    <p>{alert.resumo_chamado}</p>
+                  </TooltipContent>
+                </Tooltip>
+              </TableCell>
+
+              {/* Severidade */}
+              <TableCell className="hidden sm:table-cell">
+                <Badge className={getSeverityColor(alert.severidade_chamado)}>
+                  {alert.severidade_chamado}
+                </Badge>
+              </TableCell>
+
+              {/* Responsável */}
+              <TableCell className="text-center">
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => handleOpenAssumeOperator(alert.chamado)}
+                      className="h-8 px-2"
+                    >
+                      <User className="h-4 w-4 mr-1" />
+                      <span className="text-xs max-w-[80px] truncate">
+                        {responsavelAtual || 'Assumir'}
+                      </span>
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    {responsavelAtual ? `Responsável: ${responsavelAtual}` : 'Assumir chamado'}
+                  </TooltipContent>
+                </Tooltip>
+              </TableCell>
+
+              {/* Timer */}
+              <TableCell className="text-center">
+                {currentLevel ? (
+                  <div className="flex items-center justify-center gap-2">
+                    <div className="text-right">
+                      <div className={`text-sm font-bold ${getTimerColor(remainingTime)}`}>
+                        <Timer className="h-3 w-3 inline mr-1" />
+                        {Math.floor(remainingTime / 60)}:{String(remainingTime % 60).padStart(2, '0')}
+                      </div>
+                      <div className="text-xs text-muted-foreground">
+                        {LEVEL_NAMES[currentLevel as keyof typeof LEVEL_NAMES]}
+                      </div>
+                    </div>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => handleOpenTimerManagement(alert.chamado)}
+                          className="h-8 w-8 p-0"
+                        >
+                          <Settings className="h-4 w-4" />
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent>Gerenciar timer</TooltipContent>
+                    </Tooltip>
+                  </div>
+                ) : (
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => handleStartTimer(alert.chamado, alert)}
+                        disabled={!isConnected}
+                        className="h-8"
+                      >
+                        <Timer className="h-4 w-4 mr-1" />
+                        Iniciar
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>Iniciar primeiro acionamento</TooltipContent>
+                  </Tooltip>
+                )}
+              </TableCell>
+
+              {/* Chat */}
+              <TableCell className="text-center">
+                {isChatSent ? (
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <div className="flex items-center justify-center gap-1 text-green-600 text-xs">
+                        <Send className="h-4 w-4" />
+                      </div>
+                    </TooltipTrigger>
+                    <TooltipContent>Chat já enviado</TooltipContent>
+                  </Tooltip>
+                ) : (
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => handleAcknowledgment(alert)}
+                        disabled={!isChatConnected}
+                        className="h-8 w-8 p-0"
+                      >
+                        <Send className="h-4 w-4" />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>Enviar para Google Chat</TooltipContent>
+                  </Tooltip>
+                )}
+              </TableCell>
+            </TableRow>
+          );
+        })}
+      </TableBody>
+    </>
   );
 };
