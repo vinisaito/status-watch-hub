@@ -1,2 +1,38 @@
-import { ActionTableResponsive } from '@/components/ActionTable/ActionTableResponsive';
-import type { AlertData } from '@/components/ActionTable/types';
+<div className="w-full overflow-hidden">
+  <div className="hidden md:block">
+    <Table className="w-full">
+      <TableHeader>
+        {/* ... mantenha seus TableHead existentes ... */}
+      </TableHeader>
+      
+      <ActionTableResponsive
+        loading={loading}
+        sortedAndPaginatedData={sortedAndPaginatedData}
+        searchTerm={searchTerm}
+        chatStatusMap={chatStatusMap}
+        timers={timers}
+        chatSentLocal={chatSentLocal}
+        getCurrentActiveLevel={getCurrentActiveLevel}
+        getRemainingTime={getRemainingTime}
+        getTimerColor={getTimerColor}
+        getSeverityColor={getSeverityColor}
+        formatDate={formatDate}
+        isConnected={isConnected}
+        isChatConnected={isChatConnected}
+        handleOpenChamadoDetails={handleOpenChamadoDetails}
+        handleOpenAssumeOperator={handleOpenAssumeOperator}
+        handleStartTimer={handleStartTimer}
+        handleOpenTimerManagement={handleOpenTimerManagement}
+        handleAcknowledgment={handleAcknowledgment}
+        LEVEL_NAMES={LEVEL_NAMES}
+      />
+    </Table>
+  </div>
+  
+  {/* Mobile Cards */}
+  <div className="md:hidden">
+    <ActionTableResponsive
+      {/* ... mesmos props ... */}
+    />
+  </div>
+</div>
