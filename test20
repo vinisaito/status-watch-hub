@@ -1,358 +1,206 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { toast } from '@/hooks/use-toast';
+import { useState } from 'react';
+import { Clock, Timer, AlertTriangle } from 'lucide-react';
+import { cn } from '@/lib/utils';
 
-type UpdateChatPayload = {
-  action: 'updateChat';
-  chamado: number;
-  timestamp_chat: string;
-  sending_chat: boolean;
+interface AlertData {
+  id: string;
+  chamado: string;
+  tipo_chamado: string;
+  grupo_chamado: string;
+  status_chamado: string;
+  abertura_chamado: string;
+  resumo_chamado: string;
+  severidade_chamado: string;
+  acionado: string;
+  chat: boolean;
+}
+
+interface MonitoringCardsProps {
+  alertData: AlertData[];
+  onFilterSelect: (filter: string | null) => void;
+}
+
+export const MonitoringCards = ({ alertData, onFilterSelect }: MonitoringCardsProps) => {
+  const [activeFilter, setActiveFilter] = useState<string | null>(null);
+
+  const handleCardClick = (filterKey: string) => {
+    if (activeFilter === filterKey) {
+      setActiveFilter(null);
+      onFilterSelect(null);
+    } else {
+      setActiveFilter(filterKey);
+      onFilterSelect(filterKey);
+    }
+  };
+
+  const getTimeRemaining = (openingTime: string) => {
+    const now = new Date();
+    const opening = new Date(openingTime);
+    const diffMs = now.getTime() - opening.getTime();
+    const diffMinutes = Math.floor(diffMs / (1000 * 60));
+    const slaMinutes = 60;
+    return slaMinutes - diffMinutes;
+  };
+
+  const tempoExpirado = alertData.filter(alert => getTimeRemaining(alert.abertura_chamado) <= 0).length;
+  const cincoMinRest = alertData.filter(alert => {
+    const remaining = getTimeRemaining(alert.abertura_chamado);
+    return remaining > 0 && remaining <= 5;
+  }).length;
+  const dezMinRest = alertData.filter(alert => {
+    const remaining = getTimeRemaining(alert.abertura_chamado);
+    return remaining > 5 && remaining <= 10;
+  }).length;
+
+  return (
+    <div className="h-full flex flex-col justify-center gap-3 p-2">
+      {/* 5 Minutos Card - Warning */}
+      <MonitoringCard
+        title="5 Minutos Restantes"
+        count={cincoMinRest}
+        icon={Timer}
+        variant="warning"
+        filterKey="CINCO_MINUTOS"
+        isActive={activeFilter === 'CINCO_MINUTOS'}
+        onClick={() => handleCardClick('CINCO_MINUTOS')}
+      />
+
+      {/* Tempo Expirado Card - Critical (Larger) */}
+      <MonitoringCard
+        title="Tempo Expirado"
+        count={tempoExpirado}
+        icon={AlertTriangle}
+        variant="critical"
+        filterKey="TEMPO_EXPIRADO"
+        isActive={activeFilter === 'TEMPO_EXPIRADO'}
+        onClick={() => handleCardClick('TEMPO_EXPIRADO')}
+        large
+      />
+
+      {/* 10 Minutos Card - Info */}
+      <MonitoringCard
+        title="10 Minutos Restantes"
+        count={dezMinRest}
+        icon={Clock}
+        variant="info"
+        filterKey="DEZ_MINUTOS"
+        isActive={activeFilter === 'DEZ_MINUTOS'}
+        onClick={() => handleCardClick('DEZ_MINUTOS')}
+      />
+    </div>
+  );
 };
 
-export const useChat = () => {
-  const [isConnected, setIsConnected] = useState(false);
-  const [lastError, setLastError] = useState<string | null>(null);
-  const ws = useRef<WebSocket | null>(null);
-  const reconnectAttempts = useRef(0);
-  const reconnectTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
+interface MonitoringCardProps {
+  title: string;
+  count: number;
+  icon: React.ComponentType<any>;
+  variant: 'warning' | 'critical' | 'info';
+  filterKey: string;
+  isActive: boolean;
+  onClick: () => void;
+  large?: boolean;
+}
 
-  const WS_URL = 'wss://rsgjd6wsza.execute-api.us-east-1.amazonaws.com/dev';
-  const WEBHOOKS_API = 'https://f6ffk8e9fe.execute-api.us-east-1.amazonaws.com/prod/webhook';
-
-  // Cache de webhooks para reduzir chamadas
-  const webhooksCacheRef = useRef<{ data: any | null; fetchedAt: number | null }>({ data: null, fetchedAt: null });
-
-  const fetchWebhooks = useCallback(async () => {
-    try {
-      // TTL de 10 minutos
-      const now = Date.now();
-      const ttlMs = 10 * 60 * 1000;
-      if (webhooksCacheRef.current.data && webhooksCacheRef.current.fetchedAt && (now - webhooksCacheRef.current.fetchedAt) < ttlMs) {
-        return webhooksCacheRef.current.data;
-      }
-      const res = await fetch(WEBHOOKS_API, { method: 'GET' });
-      if (!res.ok) throw new Error(`Falha ao consultar webhooks (${res.status})`);
-      const json = await res.json();
-      webhooksCacheRef.current = { data: json, fetchedAt: now };
-      return json;
-    } catch (err: any) {
-      toast({
-        title: 'Erro ao consultar webhooks',
-        description: err?.message || 'Não foi possível obter os webhooks dos grupos.',
-        variant: 'destructive',
-      });
-      throw err;
-    }
-  }, []);
-
-  const normalize = (s: string) => s.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
-
-  const findWebhookForGroup = useCallback(async (groupName: string): Promise<string | null> => {
-    const data = await fetchWebhooks();
-    const grupos = Array.isArray(data?.grupos) ? data.grupos : [];
-    const target = normalize(groupName);
-
-    // Match exato normalizado
-    let group = grupos.find((g: any) => normalize(g.grupo_chamado || '') === target);
-    // Fallback: inclui/contém
-    if (!group) group = grupos.find((g: any) => normalize(g.grupo_chamado || '').includes(target) || target.includes(normalize(g.grupo_chamado || '')));
-    if (!group) return null;
-
-    const webhooks = Array.isArray(group.webhooks) ? group.webhooks : [];
-    const ativo = webhooks.find((w: any) => w?.ativo && typeof w?.url === 'string');
-    return ativo?.url || null;
-  }, [fetchWebhooks]);
-
-  const sendToGoogleChat = useCallback(async (webhookUrl: string, payload: any) => {
-    try {
-      const res = await fetch(webhookUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(
-          typeof payload === 'string' ? { text: payload } : payload
-        ),
-        mode: 'cors',
-      });
-      if (!res.ok) {
-        const text = await res.text().catch(() => '');
-        throw new Error(`Falha ao enviar para Google Chat (${res.status}): ${text}`);
-      }
-      return true;
-    } catch (err: any) {
-      toast({
-        title: 'Erro ao enviar para Google Chat',
-        description: err?.message || 'Não foi possível postar a mensagem no webhook.',
-        variant: 'destructive',
-      });
-      return false;
-    }
-  }, []);
-
-  const clearReconnectTimeout = () => {
-    if (reconnectTimeout.current) {
-      clearTimeout(reconnectTimeout.current);
-      reconnectTimeout.current = null;
-    }
+function MonitoringCard({ 
+  title, 
+  count, 
+  icon: Icon, 
+  variant, 
+  isActive, 
+  onClick,
+  large = false 
+}: MonitoringCardProps) {
+  const variantStyles = {
+    warning: {
+      gradient: 'bg-gradient-warning',
+      shadow: 'shadow-warning',
+      border: 'border-monitoring-warning/30',
+      text: 'text-white',
+      iconBg: 'bg-white/20',
+      hoverScale: 'hover:scale-[1.02]',
+      glow: count > 0 ? 'animate-pulse-glow' : '',
+    },
+    critical: {
+      gradient: 'bg-gradient-critical',
+      shadow: 'shadow-critical',
+      border: 'border-monitoring-critical/30',
+      text: 'text-white',
+      iconBg: 'bg-white/20',
+      hoverScale: 'hover:scale-[1.02]',
+      glow: count > 0 ? 'animate-pulse-glow' : '',
+    },
+    info: {
+      gradient: 'bg-gradient-info',
+      shadow: 'shadow-info',
+      border: 'border-monitoring-info/30',
+      text: 'text-white',
+      iconBg: 'bg-white/20',
+      hoverScale: 'hover:scale-[1.02]',
+      glow: '',
+    },
   };
 
-  const connect = useCallback(() => {
-    try {
-      if (ws.current && (ws.current.readyState === WebSocket.OPEN || ws.current.readyState === WebSocket.CONNECTING)) {
-        return;
-      }
+  const style = variantStyles[variant];
+  const heightClass = large ? 'min-h-[140px]' : 'min-h-[90px]';
 
-      ws.current = new WebSocket(WS_URL);
-      const current = ws.current;
+  return (
+    <div
+      onClick={onClick}
+      className={cn(
+        "relative rounded-xl border-2 cursor-pointer transition-all duration-300 overflow-hidden backdrop-blur-sm",
+        heightClass,
+        style.gradient,
+        style.shadow,
+        style.border,
+        style.hoverScale,
+        style.glow,
+        isActive && "ring-4 ring-white/40 ring-offset-2 ring-offset-background scale-[1.02]",
+        "group"
+      )}
+    >
+      {/* Background pattern */}
+      <div className="absolute inset-0 opacity-10">
+        <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_120%,rgba(255,255,255,0.3),transparent)]" />
+      </div>
 
-      const connectionTimeout = setTimeout(() => {
-        if (current && current.readyState === WebSocket.CONNECTING) {
-          current.close();
-          setLastError('Timeout de conexão');
-        }
-      }, 10000);
+      {/* Content */}
+      <div className="relative h-full flex flex-col items-center justify-center p-4 space-y-2">
+        {/* Icon */}
+        <div className={cn(
+          "p-2.5 rounded-lg transition-transform duration-300 group-hover:scale-110",
+          style.iconBg
+        )}>
+          <Icon className={cn("w-5 h-5", style.text)} />
+        </div>
 
-      current.onopen = () => {
-        clearTimeout(connectionTimeout);
-        setIsConnected(true);
-        setLastError(null);
-        reconnectAttempts.current = 0;
-      };
+        {/* Count */}
+        <div className={cn(
+          "font-inter font-bold transition-transform duration-300 group-hover:scale-105",
+          large ? "text-5xl" : "text-3xl",
+          style.text
+        )}>
+          {count}
+        </div>
 
-      current.onclose = (event) => {
-        clearTimeout(connectionTimeout);
-        setIsConnected(false);
+        {/* Title */}
+        <div className={cn(
+          "font-inter font-semibold text-center uppercase tracking-wide leading-tight",
+          large ? "text-sm" : "text-xs",
+          style.text,
+          "drop-shadow-lg"
+        )}>
+          {title}
+        </div>
+      </div>
 
-        // Reconexão exponencial simples (máx ~30s)
-        if (event.code !== 1000) {
-          const attempt = Math.min(reconnectAttempts.current + 1, 6);
-          reconnectAttempts.current = attempt;
-          const delay = Math.min(1000 * Math.pow(2, attempt), 30000);
-          clearReconnectTimeout();
-          reconnectTimeout.current = setTimeout(() => connect(), delay);
-        }
-      };
+      {/* Active indicator */}
+      {isActive && (
+        <div className="absolute top-3 right-3 w-3 h-3 bg-white rounded-full shadow-lg animate-pulse" />
+      )}
 
-      current.onerror = () => {
-        clearTimeout(connectionTimeout);
-        setLastError('Erro no WebSocket');
-      };
-
-      current.onmessage = () => {
-        // Para o chat, não precisamos tratar mensagens por enquanto.
-      };
-    } catch (err) {
-      setLastError('Falha ao iniciar WebSocket');
-    }
-  }, [WS_URL]);
-
-  const disconnect = useCallback(() => {
-    clearReconnectTimeout();
-    if (ws.current) {
-      try {
-        ws.current.close(1000, 'Client closed');
-      } catch {}
-      ws.current = null;
-    }
-    setIsConnected(false);
-  }, []);
-
-  const waitForOpen = useCallback(async (timeoutMs = 5000) => {
-    if (!ws.current) return false;
-    if (ws.current.readyState === WebSocket.OPEN) return true;
-    return new Promise<boolean>((resolve) => {
-      const start = Date.now();
-      const check = () => {
-        if (!ws.current) return resolve(false);
-        if (ws.current.readyState === WebSocket.OPEN) return resolve(true);
-        if (Date.now() - start > timeoutMs) return resolve(false);
-        setTimeout(check, 100);
-      };
-      check();
-    });
-  }, []);
-
-  const sendUpdateChat = useCallback(async (
-    chamado: number,
-    opts?: { timestamp?: string; sending?: boolean }
-  ) => {
-    try {
-      if (!ws.current || ws.current.readyState !== WebSocket.OPEN) {
-        connect();
-        const ok = await waitForOpen(7000);
-        if (!ok) {
-          toast({
-            title: 'Conexão indisponível',
-            description: 'Não foi possível conectar ao WebSocket para acionar o chat.',
-            variant: 'destructive',
-          });
-          return false;
-        }
-      }
-
-      const payload: UpdateChatPayload = {
-        action: 'updateChat',
-        chamado: Number(chamado),
-        timestamp_chat: opts?.timestamp ?? new Date().toISOString(),
-        sending_chat: opts?.sending ?? true,
-      };
-      ws.current!.send(JSON.stringify(payload));
-
-      toast({
-        title: 'Chat acionado',
-        description: `Solicitação de chat enviada para o chamado ${chamado}.`,
-      });
-      return true;
-    } catch (err: any) {
-      toast({
-        title: 'Erro ao acionar chat',
-        description: err?.message || 'Falha ao enviar a mensagem.',
-        variant: 'destructive',
-      });
-      return false;
-    }
-  }, [connect, waitForOpen]);
-
-  const sendToGroupChat = useCallback(async (groupName: string, message: string, chamado?: number) => {
-    const webhook = await findWebhookForGroup(groupName);
-    if (!webhook) {
-      toast({
-        title: 'Webhook não encontrado',
-        description: `Não há webhook ativo cadastrado para o grupo "${groupName}".`,
-        variant: 'destructive',
-      });
-      return false;
-    }
-    const ok = await sendToGoogleChat(webhook, message);
-    return ok;
-  }, [findWebhookForGroup, sendToGoogleChat]);
-
-  type AlertLike = {
-    chamado: string;
-    severidade_chamado?: string;
-    resumo_chamado?: string;
-    abertura_chamado?: string;
-    grupo_chamado?: string;
-    tipo_chamado?: string;
-  };
-
-  const TIME_MESSAGES = {
-    seven: 'tempo de 7 minutos',
-    twenty: 'tempo de 20 minutos',
-  } as const;
-
-  const buildAlertCardPayload = useCallback((alert: AlertLike) => {
-    const tipoRaw = alert.tipo_chamado ?? '';
-    const tipoNorm = normalize(tipoRaw);
-    const sevMatch = (alert.severidade_chamado ?? '').toString().match(/\d+/);
-    const sevNum = sevMatch ? parseInt(sevMatch[0], 10) : NaN;
-
-    const isIncident = tipoNorm.includes('incidente') || tipoNorm.includes('incident');
-    const isAlerta = tipoNorm.includes('alerta') || tipoNorm.includes('alert');
-
-    let tempoMensagem = '';
-    if (isIncident) {
-      if (sevNum === 4 || sevNum === 5) tempoMensagem = TIME_MESSAGES.seven;
-      else if (sevNum === 3) tempoMensagem = TIME_MESSAGES.twenty;
-    } else if (isAlerta) {
-      if (sevNum === 4) tempoMensagem = TIME_MESSAGES.twenty;
-    }
-
-    // Determinar emoji colorido e identificador único
-    let identificador = `EVT-${alert.chamado}`;
-    let icone = '⚪';
-    
-    if (isAlerta && sevNum === 4) {
-      identificador = `ALERTA-SEV4-${alert.chamado}`;
-      icone = '🟠';
-    } else if (isIncident && sevNum === 3) {
-      identificador = `INC-SEV3-${alert.chamado}`;
-      icone = '🟡';
-    } else if (isIncident && (sevNum === 4 || sevNum === 5)) {
-      identificador = `INC-SEV${sevNum}-${alert.chamado}`;
-      icone = '🔴';
-    }
-
-    return {
-      cards: [
-        {
-          header: {
-            title: `<b>${icone} 🚨 O CIOPs precisa da sua atenção!</b>`,
-            subtitle: `ID: ${identificador}`
-          },
-          sections: [
-            {
-              widgets: [
-                {
-                  textParagraph: {
-                    text: 'É necessário confirmação de recebimento e ciência pelo grupo responsável.'
-                  }
-                }
-              ]
-            },
-            {
-              widgets: [
-                {
-                  textParagraph: {
-                    text:
-                      '<b>Detalhes do Evento:</b><br><br>' +
-                      '<b>📌 Chamado: </b>' + alert.chamado + '<br><br>' +
-                      '<b>⚠️ Severidade: </b>' + (alert.severidade_chamado ?? '-') + '<br><br>' +
-                      '<b>📰 Título: </b>' + (alert.resumo_chamado ?? '-') + '<br><br>' +
-                      '<b>📅 Abertura: </b>' + (alert.abertura_chamado ?? '-') + '<br><br>' +
-                      '<b>👥 Grupo: </b>' + (alert.grupo_chamado ?? '-')
-                  }
-                }
-              ]
-            },
-            {
-              widgets: [
-                {
-                  textParagraph: {
-                    text: (
-                      '<b>⚠️ Atenção: </b> Na ausência de confirmação, o CIOPs dará início ao processo de escalonamento, conforme procedimento padrão. ' +
-                      (tempoMensagem
-                        ? ('O tempo de resposta para aguardo para confirmação é de: <b>' + tempoMensagem + '</b>')
-                        : '')
-                    )
-                  }
-                }
-              ]
-            }
-          ]
-        }
-      ]
-    };
-  }, []);
-
-  const sendAlertCardToGroupChat = useCallback(async (alert: AlertLike & { grupo_chamado: string }) => {
-    const webhook = await findWebhookForGroup(alert.grupo_chamado);
-    if (!webhook) {
-      toast({
-        title: 'Webhook não encontrado',
-        description: `Não há webhook ativo cadastrado para o grupo "${alert.grupo_chamado}".`,
-        variant: 'destructive',
-      });
-      return false;
-    }
-    const payload = buildAlertCardPayload(alert);
-    const ok = await sendToGoogleChat(webhook, payload);
-    return ok;
-  }, [buildAlertCardPayload, findWebhookForGroup, sendToGoogleChat]);
-
-  useEffect(() => {
-    connect();
-    return () => disconnect();
-  }, [connect, disconnect]);
-
-  return {
-    isConnected,
-    lastError,
-    connect,
-    disconnect,
-    sendUpdateChat,
-    fetchWebhooks,
-    sendToGroupChat,
-    sendAlertCardToGroupChat,
-  };
-};
-
-export default useChat;
+      {/* Hover effect overlay */}
+      <div className="absolute inset-0 bg-white/0 group-hover:bg-white/5 transition-colors duration-300" />
+    </div>
+  );
+}
