@@ -1,320 +1,445 @@
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { toast } from '@/hooks/use-toast';
 
-import json
-import boto3
-import os
-import uuid
-from datetime import datetime, timezone
-from decimal import Decimal
+type UpdateChatPayload = {
+  action: 'updateChat';
+  chamado: number;
+  timestamp_chat: string;
+  sending_chat: boolean;
+};
 
-# ---------- Config ----------
-dynamodb = boto3.resource("dynamodb")
-table = dynamodb.Table(os.environ["CHAMADOS_TABLE"])  # Tabela principal (chamados)
-conn_table = dynamodb.Table(os.environ["CONNECTIONS_TABLE"])  # Tabela de conexões
-apigw = boto3.client(
-    "apigatewaymanagementapi",
-    endpoint_url=f"https://{os.environ['WS_API_ID']}.execute-api.{os.environ['AWS_REGION']}.amazonaws.com/{os.environ['WS_STAGE']}"
-)
+export const useChat = () => {
+  const [isConnected, setIsConnected] = useState(false);
+  const [lastError, setLastError] = useState<string | null>(null);
+  const ws = useRef<WebSocket | null>(null);
+  const reconnectAttempts = useRef(0);
+  const reconnectTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-# ---------- Helpers ----------
-class DecimalEncoder(json.JSONEncoder):
-    def default(self, o):
-        if isinstance(o, Decimal):
-            if o % 1 == 0:
-                return int(o)
-            return float(o)
-        return super(DecimalEncoder, self).default(o)
+  const WS_URL = 'wss://rsgjd6wsza.execute-api.us-east-1.amazonaws.com/dev';
+  const WEBHOOKS_API = 'https://f6ffk8e9fe.execute-api.us-east-1.amazonaws.com/prod/webhook';
 
-def log(trace, msg, **kwargs):
-    print(json.dumps({"trace": trace, "msg": msg, **kwargs}, cls=DecimalEncoder, default=str))
+  // Cache de webhooks para reduzir chamadas
+  const webhooksCacheRef = useRef<{ data: any | null; fetchedAt: number | null }>({ data: null, fetchedAt: null });
 
-def send_to_connection(conn_id, data):
-    """Envia mensagem para uma conexão específica"""
-    try:
-        apigw.post_to_connection(
-            ConnectionId=conn_id,
-            Data=json.dumps(data, cls=DecimalEncoder).encode("utf-8")
-        )
-    except apigw.exceptions.GoneException:
-        # Conexão morta -> remover
-        conn_table.delete_item(Key={"connectionId": conn_id})
-        log("broadcast", "Conexão removida (GoneException)", connectionId=conn_id)
-
-def broadcast(data):
-    """Envia mensagem para todos conectados"""
-    conns = conn_table.scan().get("Items", [])
-    for c in conns:
-        send_to_connection(c["connectionId"], data)
-
-def update_chamado(trace, chamado, update):
-    log(trace, "Atualizando chamado", chamado=chamado, update=update)
-    table.update_item(
-        Key={"chamado": chamado},
-        UpdateExpression="SET " + ", ".join(f"#{k} = :{k}" for k in update.keys()),
-        ExpressionAttributeNames={f"#{k}": k for k in update.keys()},
-        ExpressionAttributeValues={f":{k}": v for k, v in update.items()},
-    )
-
-    # 🔑 Buscar o estado completo do DynamoDB
-    resp = table.get_item(Key={"chamado": chamado})
-    state = resp.get("Item", {})
-    log(trace, "Chamado atualizado (state completo)", state=state)
-    return state
-
-def _to_int_if_possible(x):
-    try:
-        # Evita converter boolean por engano (True -> 1)
-        if isinstance(x, bool):
-            return x
-        return int(str(x).strip())
-    except Exception:
-        return x
-
-def _apply_relationships(body, update):
-    """Injeta 'pai' e 'filhos' no update quando presentes no body."""
-    if "pai" in body and body["pai"] is not None:
-        update["pai"] = _to_int_if_possible(body["pai"])
-
-    if "filhos" in body and body["filhos"] is not None:
-        filhos_val = body["filhos"]
-        if isinstance(filhos_val, list):
-            normalized = [_to_int_if_possible(v) for v in filhos_val]
-            seen = set()
-            dedup = []
-            for v in normalized:
-                key = (type(v), v)
-                if key not in seen:
-                    seen.add(key)
-                    dedup.append(v)
-            update["filhos"] = dedup
-        else:
-            update["filhos"] = filhos_val
-
-# ---------- Handlers ----------
-def handle_connect(event, trace):
-    conn_id = event["requestContext"]["connectionId"]
-    conn_table.put_item(Item={"connectionId": conn_id, "connectedAt": datetime.now(timezone.utc).isoformat()})
-    log(trace, "Novo cliente conectado", connectionId=conn_id)
-    return {"statusCode": 200}
-
-def handle_disconnect(event, trace):
-    conn_id = event["requestContext"]["connectionId"]
-    conn_table.delete_item(Key={"connectionId": conn_id})
-    log(trace, "Cliente desconectado", connectionId=conn_id)
-    return {"statusCode": 200}
-
-def handle_start_timer(event, trace, body):
-    chamado = int(body["chamado"])
-    level = int(body["level"])
-
-    if "duration" in body:
-        duration = int(body["duration"])
-    else:
-        duration = 1200 if level == 1 else 600  # 20 min no nível 1, senão 10 min
-
-    now = datetime.now(timezone.utc).isoformat()
-
-    update = {
-        f"level{level}_timerStart": now,
-        f"level{level}_duration": duration,
-        f"level{level}_status": "running"
+  const fetchWebhooks = useCallback(async () => {
+    try {
+      // TTL de 10 minutos
+      const now = Date.now();
+      const ttlMs = 10 * 60 * 1000;
+      if (webhooksCacheRef.current.data && webhooksCacheRef.current.fetchedAt && (now - webhooksCacheRef.current.fetchedAt) < ttlMs) {
+        return webhooksCacheRef.current.data;
+      }
+      const res = await fetch(WEBHOOKS_API, { method: 'GET' });
+      if (!res.ok) throw new Error(`Falha ao consultar webhooks (${res.status})`);
+      const json = await res.json();
+      webhooksCacheRef.current = { data: json, fetchedAt: now };
+      return json;
+    } catch (err: any) {
+      toast({
+        title: 'Erro ao consultar webhooks',
+        description: err?.message || 'Não foi possível obter os webhooks dos grupos.',
+        variant: 'destructive',
+      });
+      throw err;
     }
-    _apply_relationships(body, update)
+  }, []);
 
-    state = update_chamado(trace, chamado, update)
+  const normalize = (s: string) => s.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
 
-    broadcast({
-        "event": "startTimer",
-        "chamado": chamado,
-        "level": level,
-        "state": state
-    })
+  const findWebhookForGroup = useCallback(async (groupName: string): Promise<string | null> => {
+    const data = await fetchWebhooks();
+    const grupos = Array.isArray(data?.grupos) ? data.grupos : [];
+    const target = normalize(groupName);
+
+    // Match exato normalizado
+    let group = grupos.find((g: any) => normalize(g.grupo_chamado || '') === target);
+    // Fallback: inclui/contém
+    if (!group) group = grupos.find((g: any) => normalize(g.grupo_chamado || '').includes(target) || target.includes(normalize(g.grupo_chamado || '')));
+    if (!group) return null;
+
+    const webhooks = Array.isArray(group.webhooks) ? group.webhooks : [];
+    const ativo = webhooks.find((w: any) => w?.ativo && typeof w?.url === 'string');
+    return ativo?.url || null;
+  }, [fetchWebhooks]);
+
+  const sendToGoogleChat = useCallback(async (webhookUrl: string, payload: any) => {
+    try {
+      const res = await fetch(webhookUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(
+          typeof payload === 'string' ? { text: payload } : payload
+        ),
+        mode: 'cors',
+      });
+      if (!res.ok) {
+        const text = await res.text().catch(() => '');
+        throw new Error(`Falha ao enviar para Google Chat (${res.status}): ${text}`);
+      }
+      return true;
+    } catch (err: any) {
+      toast({
+        title: 'Erro ao enviar para Google Chat',
+        description: err?.message || 'Não foi possível postar a mensagem no webhook.',
+        variant: 'destructive',
+      });
+      return false;
+    }
+  }, []);
+
+  const clearReconnectTimeout = () => {
+    if (reconnectTimeout.current) {
+      clearTimeout(reconnectTimeout.current);
+      reconnectTimeout.current = null;
+    }
+  };
+
+  const connect = useCallback(() => {
+    try {
+      if (ws.current && (ws.current.readyState === WebSocket.OPEN || ws.current.readyState === WebSocket.CONNECTING)) {
+        return;
+      }
+
+      ws.current = new WebSocket(WS_URL);
+      const current = ws.current;
+
+      const connectionTimeout = setTimeout(() => {
+        if (current && current.readyState === WebSocket.CONNECTING) {
+          current.close();
+          setLastError('Timeout de conexão');
+        }
+      }, 10000);
+
+      current.onopen = () => {
+        clearTimeout(connectionTimeout);
+        setIsConnected(true);
+        setLastError(null);
+        reconnectAttempts.current = 0;
+      };
+
+      current.onclose = (event) => {
+        clearTimeout(connectionTimeout);
+        setIsConnected(false);
+
+        // Reconexão exponencial simples (máx ~30s)
+        if (event.code !== 1000) {
+          const attempt = Math.min(reconnectAttempts.current + 1, 6);
+          reconnectAttempts.current = attempt;
+          const delay = Math.min(1000 * Math.pow(2, attempt), 30000);
+          clearReconnectTimeout();
+          reconnectTimeout.current = setTimeout(() => connect(), delay);
+        }
+      };
+
+      current.onerror = () => {
+        clearTimeout(connectionTimeout);
+        setLastError('Erro no WebSocket');
+      };
+
+      current.onmessage = () => {
+        // Para o chat, não precisamos tratar mensagens por enquanto.
+      };
+    } catch (err) {
+      setLastError('Falha ao iniciar WebSocket');
+    }
+  }, [WS_URL]);
+
+  const disconnect = useCallback(() => {
+    clearReconnectTimeout();
+    if (ws.current) {
+      try {
+        ws.current.close(1000, 'Client closed');
+      } catch {}
+      ws.current = null;
+    }
+    setIsConnected(false);
+  }, []);
+
+  const waitForOpen = useCallback(async (timeoutMs = 5000) => {
+    if (!ws.current) return false;
+    if (ws.current.readyState === WebSocket.OPEN) return true;
+    return new Promise<boolean>((resolve) => {
+      const start = Date.now();
+      const check = () => {
+        if (!ws.current) return resolve(false);
+        if (ws.current.readyState === WebSocket.OPEN) return resolve(true);
+        if (Date.now() - start > timeoutMs) return resolve(false);
+        setTimeout(check, 100);
+      };
+      check();
+    });
+  }, []);
+
+  const sendUpdateChat = useCallback(async (
+    chamado: number,
+    opts?: { timestamp?: string; sending?: boolean }
+  ) => {
+    try {
+      if (!ws.current || ws.current.readyState !== WebSocket.OPEN) {
+        connect();
+        const ok = await waitForOpen(7000);
+        if (!ok) {
+          toast({
+            title: 'Conexão indisponível',
+            description: 'Não foi possível conectar ao WebSocket para acionar o chat.',
+            variant: 'destructive',
+          });
+          return false;
+        }
+      }
+
+      const payload: UpdateChatPayload = {
+        action: 'updateChat',
+        chamado: Number(chamado),
+        timestamp_chat: opts?.timestamp ?? new Date().toISOString(),
+        sending_chat: opts?.sending ?? true,
+      };
+      ws.current!.send(JSON.stringify(payload));
+
+      toast({
+        title: 'Chat acionado',
+        description: `Solicitação de chat enviada para o chamado ${chamado}.`,
+      });
+      return true;
+    } catch (err: any) {
+      toast({
+        title: 'Erro ao acionar chat',
+        description: err?.message || 'Falha ao enviar a mensagem.',
+        variant: 'destructive',
+      });
+      return false;
+    }
+  }, [connect, waitForOpen]);
+
+  const sendToGroupChat = useCallback(async (groupName: string, message: string, chamado?: number) => {
+    const webhook = await findWebhookForGroup(groupName);
+    if (!webhook) {
+      toast({
+        title: 'Webhook não encontrado',
+        description: `Não há webhook ativo cadastrado para o grupo "${groupName}".`,
+        variant: 'destructive',
+      });
+      return false;
+    }
+    const ok = await sendToGoogleChat(webhook, message);
+    return ok;
+  }, [findWebhookForGroup, sendToGoogleChat]);
+
+  type AlertLike = {
+    chamado: string;
+    severidade_chamado?: string;
+    resumo_chamado?: string;
+    abertura_chamado?: string;
+    grupo_chamado?: string;
+    tipo_chamado?: string;
+  };
+
+  const TIME_MESSAGES = {
+    seven: 'tempo de 7 minutos',
+    twenty: 'tempo de 20 minutos',
+  } as const;
+
+  const buildAlertCardPayload = useCallback((alert: AlertLike) => {
+    const tipoRaw = alert.tipo_chamado ?? '';
+    const tipoNorm = normalize(tipoRaw);
+    const sevMatch = (alert.severidade_chamado ?? '').toString().match(/\d+/);
+    const sevNum = sevMatch ? parseInt(sevMatch[0], 10) : NaN;
+
+    const isIncident = tipoNorm.includes('incidente') || tipoNorm.includes('incident');
+    const isAlerta = tipoNorm.includes('alerta') || tipoNorm.includes('alert');
+
+    // Definir tempo de resposta baseado em tipo e severidade
+    let tempoMensagem = '';
+    if (isIncident) {
+      if (sevNum === 4 || sevNum === 5) tempoMensagem = TIME_MESSAGES.seven;
+      else if (sevNum === 3) tempoMensagem = TIME_MESSAGES.twenty;
+    } else if (isAlerta) {
+      if (sevNum === 4) tempoMensagem = TIME_MESSAGES.twenty;
+    }
+
+    // Definir identificador único, cor e ícone baseado em tipo e severidade
+    let identificador = '';
+    let corImagem = '';
+    let icone = '';
+    let titulo = '';
+    
+    if (isAlerta && sevNum === 4) {
+      identificador = `ALERTA-SEV4-${alert.chamado}`;
+      corImagem = 'https://via.placeholder.com/800x100/FF9800/FFFFFF?text=ALERTA+SEVERIDADE+4';
+      icone = '🟧';
+      titulo = '<b>🟧 ALERTA SEVERIDADE 4</b>';
+    } else if (isIncident && sevNum === 3) {
+      identificador = `INC-SEV3-${alert.chamado}`;
+      corImagem = 'https://via.placeholder.com/800x100/FFC107/FFFFFF?text=INCIDENTE+SEVERIDADE+3';
+      icone = '🟨';
+      titulo = '<b>🟨 INCIDENTE SEVERIDADE 3</b>';
+    } else if (isIncident && (sevNum === 4 || sevNum === 5)) {
+      identificador = `INC-SEV${sevNum}-${alert.chamado}`;
+      corImagem = 'https://via.placeholder.com/800x100/F44336/FFFFFF?text=INCIDENTE+SEVERIDADE+' + sevNum;
+      icone = '🟥';
+      titulo = `<b>🟥 INCIDENTE SEVERIDADE ${sevNum}</b>`;
+    } else {
+      // Fallback para outros casos
+      identificador = `EVT-${alert.chamado}`;
+      corImagem = 'https://via.placeholder.com/800x100/9E9E9E/FFFFFF?text=EVENTO';
+      icone = '⚪';
+      titulo = '<b>⚪ EVENTO</b>';
+    }
 
     return {
-        "statusCode": 200,
-        "body": json.dumps({"msg": f"Timer iniciado ({duration//60} min)"}, cls=DecimalEncoder)
+      cards: [
+        {
+          header: {
+            title: '<b>🚨 CIOPs - Ação Necessária</b>',
+            subtitle: identificador,
+            imageUrl: corImagem,
+            imageStyle: 'IMAGE'
+          },
+          sections: [
+            {
+              header: titulo,
+              widgets: [
+                {
+                  decoratedText: {
+                    topLabel: 'Identificador do Evento',
+                    text: `<b>${identificador}</b>`,
+                    startIcon: {
+                      knownIcon: 'BOOKMARK'
+                    }
+                  }
+                },
+                {
+                  divider: {}
+                }
+              ]
+            },
+            {
+              header: '<b>📋 Detalhes do Evento</b>',
+              collapsible: false,
+              widgets: [
+                {
+                  decoratedText: {
+                    topLabel: 'Número do Chamado',
+                    text: `<b>${alert.chamado}</b>`,
+                    startIcon: {
+                      knownIcon: 'TICKET'
+                    }
+                  }
+                },
+                {
+                  decoratedText: {
+                    topLabel: 'Tipo',
+                    text: tipoRaw || '-',
+                    startIcon: {
+                      knownIcon: 'DESCRIPTION'
+                    }
+                  }
+                },
+                {
+                  decoratedText: {
+                    topLabel: 'Severidade',
+                    text: `<b>${icone} ${alert.severidade_chamado ?? '-'}</b>`,
+                    startIcon: {
+                      knownIcon: 'STAR'
+                    }
+                  }
+                },
+                {
+                  decoratedText: {
+                    topLabel: 'Título',
+                    text: alert.resumo_chamado ?? '-',
+                    startIcon: {
+                      knownIcon: 'DESCRIPTION'
+                    },
+                    wrapText: true
+                  }
+                },
+                {
+                  decoratedText: {
+                    topLabel: 'Data de Abertura',
+                    text: alert.abertura_chamado ?? '-',
+                    startIcon: {
+                      knownIcon: 'CLOCK'
+                    }
+                  }
+                },
+                {
+                  decoratedText: {
+                    topLabel: 'Grupo Responsável',
+                    text: `<b>${alert.grupo_chamado ?? '-'}</b>`,
+                    startIcon: {
+                      knownIcon: 'MULTIPLE_PEOPLE'
+                    }
+                  }
+                },
+                {
+                  divider: {}
+                }
+              ]
+            },
+            {
+              header: '<b>⏱️ Tempo de Resposta</b>',
+              widgets: [
+                {
+                  textParagraph: {
+                    text: tempoMensagem 
+                      ? `${icone} <b>Confirmação necessária em: ${tempoMensagem}</b>` 
+                      : `${icone} Aguardando definição de SLA`
+                  }
+                },
+                {
+                  divider: {}
+                }
+              ]
+            },
+            {
+              header: '<b>⚠️ Ação Requerida</b>',
+              widgets: [
+                {
+                  textParagraph: {
+                    text: 
+                      '<font color="#d32f2f"><b>É necessária a confirmação de recebimento e ciência pelo grupo responsável.</b></font><br><br>' +
+                      'Na ausência de confirmação dentro do prazo estabelecido, o CIOPs iniciará automaticamente o processo de <b>escalonamento</b> conforme procedimento operacional padrão.'
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    };
+  }, []);
+
+  const sendAlertCardToGroupChat = useCallback(async (alert: AlertLike & { grupo_chamado: string }) => {
+    const webhook = await findWebhookForGroup(alert.grupo_chamado);
+    if (!webhook) {
+      toast({
+        title: 'Webhook não encontrado',
+        description: `Não há webhook ativo cadastrado para o grupo "${alert.grupo_chamado}".`,
+        variant: 'destructive',
+      });
+      return false;
     }
+    const payload = buildAlertCardPayload(alert);
+    const ok = await sendToGoogleChat(webhook, payload);
+    return ok;
+  }, [buildAlertCardPayload, findWebhookForGroup, sendToGoogleChat]);
 
-def handle_update_observacao(event, trace, body):
-    chamado = int(body["chamado"])
-    level = int(body.get("level", 1))
-    observacao = body["observacao"]
+  useEffect(() => {
+    connect();
+    return () => disconnect();
+  }, [connect, disconnect]);
 
-    update = {f"level{level}_observacao": observacao}
-    _apply_relationships(body, update)
+  return {
+    isConnected,
+    lastError,
+    connect,
+    disconnect,
+    sendUpdateChat,
+    fetchWebhooks,
+    sendToGroupChat,
+    sendAlertCardToGroupChat,
+  };
+};
 
-    state = update_chamado(trace, chamado, update)
-
-    broadcast({"event": "updateObservacao", "chamado": chamado, "state": state})
-    return {"statusCode": 200, "body": json.dumps({"msg": f"Observação do level {level} atualizada"}, cls=DecimalEncoder)}
-
-def handle_update_operador(event, trace, body):
-    chamado = int(body["chamado"])
-    responsavel = body["ResponsavelAcompanhamento"]
-    timestamp_responsavel = datetime.now(timezone.utc).isoformat()
-
-    update = {
-        "ResponsavelAcompanhamento": responsavel,
-        "timestamp_responsavel": timestamp_responsavel
-    }
-    _apply_relationships(body, update)
-
-    state = update_chamado(trace, chamado, update)
-
-    payload = {
-        "event": "updateOperador",
-        "chamado": chamado,
-        "ResponsavelAcompanhamento": responsavel,
-        "timestamp_responsavel": timestamp_responsavel,
-        "state": state
-    }
-    broadcast(payload)
-
-    return {
-        "statusCode": 200,
-        "body": json.dumps(payload, cls=DecimalEncoder)
-    }
-
-def handle_update_status_final(event, trace, body):
-    chamado = int(body["chamado"])
-    status = body["status"]
-    level_raw = body.get("level")
-    level = int(level_raw) if level_raw is not None else None
-    now = datetime.now(timezone.utc).isoformat()
-
-    resp = table.get_item(Key={"chamado": chamado})
-    state_atual = resp.get("Item", {})
-
-    update = {"statusFinal": status, "statusFinal_updatedAt": now}
-
-    if level is not None:
-        update[f"level{level}_status"] = status
-        update[f"level{level}_updatedAt"] = now
-    else:
-        for i in range(1, 6):
-            if state_atual.get(f"level{i}_status") == "running":
-                update[f"level{i}_status"] = status
-                update[f"level{i}_updatedAt"] = now
-                break
-
-    _apply_relationships(body, update)
-
-    state = update_chamado(trace, chamado, update)
-    broadcast({"event": "updateStatusFinal", "chamado": chamado, "state": state})
-    return {"statusCode": 200, "body": json.dumps({"msg": "Status final atualizado"}, cls=DecimalEncoder)}
-
-def handle_update_acionamento(event, trace, body):
-    chamado = int(body["chamado"])
-    level = int(body.get("level", 1))
-    now = datetime.now(timezone.utc).isoformat()
-
-    observacao = body.get("observacao")
-    pessoa_acionada = body.get("pessoaAcionada")
-    status_acionamento = body.get("statusAcionamento")
-    operador = body.get("operador")
-
-    update = {f"level{level}_updatedAt": now}
-
-    if observacao is not None:
-        update[f"level{level}_observacao"] = observacao
-    if pessoa_acionada is not None:
-        update[f"level{level}_pessoaAcionada"] = pessoa_acionada
-    if status_acionamento is not None:
-        update[f"level{level}_statusAcionamento"] = status_acionamento
-    if operador is not None:
-        update[f"level{level}_operador"] = operador
-
-    _apply_relationships(body, update)
-
-    state = update_chamado(trace, chamado, update)
-
-    broadcast({
-        "event": "updateAcionamento",
-        "chamado": chamado,
-        "level": level,
-        "state": state
-    })
-    return {"statusCode": 200, "body": json.dumps({"msg": f"Dados do acionamento do level {level} atualizados"}, cls=DecimalEncoder)}
-
-def handle_get_state(event, trace, body):
-    chamado = int(body["chamado"])
-    resp = table.get_item(Key={"chamado": chamado})
-    state = resp.get("Item", {})
-    log(trace, "Estado retornado", chamado=chamado, state=state)
-
-    conn_id = event["requestContext"]["connectionId"]
-    payload = {"event": "getState", "chamado": chamado, "state": state}
-    send_to_connection(conn_id, payload)
-    return {"statusCode": 200, "body": json.dumps({"msg": "Estado enviado"}, cls=DecimalEncoder)}
-
-# ---------- 🆕 NOVA ROTA: updateOutage ----------
-def handle_update_outage(event, trace, body):
-    chamado = int(body["chamado"])
-    outage_title = body.get("outage_title")
-    outage_timestamp = body.get("outage_timestamp")
-    outage_start = body.get("outage_start")
-    outage_end = body.get("outage_end")
-
-    update = {
-        "outage_title": outage_title,
-        "outage_timestamp": outage_timestamp,
-        "outage_start": outage_start,
-        "outage_end": outage_end,
-        "outage_updatedAt": datetime.now(timezone.utc).isoformat()
-    }
-
-    _apply_relationships(body, update)
-
-    state = update_chamado(trace, chamado, update)
-
-    payload = {
-        "event": "updateOutage",
-        "chamado": chamado,
-        "state": state
-    }
-
-    broadcast(payload)
-    return {"statusCode": 200, "body": json.dumps(payload, cls=DecimalEncoder)}
-
-# ---------- Main ----------
-def lambda_handler(event, context):
-    trace = str(uuid.uuid4())[:8]
-    req_ctx = event.get("requestContext", {})
-    route = req_ctx.get("routeKey", "UNKNOWN")
-    conn_id = req_ctx.get("connectionId", "N/A")
-
-    log(trace, "invoke", routeKey=route, connectionId=conn_id, body=event.get("body"))
-
-    try:
-        if route == "$connect":
-            return handle_connect(event, trace)
-        elif route == "$disconnect":
-            return handle_disconnect(event, trace)
-        else:
-            body = json.loads(event.get("body") or "{}")
-            if route == "startTimer":
-                return handle_start_timer(event, trace, body)
-            elif route == "updateObservacao":
-                return handle_update_observacao(event, trace, body)
-            elif route == "updateOperador":
-                return handle_update_operador(event, trace, body)
-            elif route == "updateStatusFinal":
-                return handle_update_status_final(event, trace, body)
-            elif route == "updateAcionamento":
-                return handle_update_acionamento(event, trace, body)
-            elif route == "getState":
-                return handle_get_state(event, trace, body)
-            elif route == "updateOutage":  # ✅ nova rota adicionada
-                return handle_update_outage(event, trace, body)
-            else:
-                log(trace, "Rota inválida", route=route)
-                return {"statusCode": 400, "body": json.dumps({"error": "Invalid route"}, cls=DecimalEncoder)}
-    except Exception as e:
-        log(trace, "Erro na execução", error=str(e))
-        return {"statusCode": 500, "body": json.dumps({"error": str(e)}, cls=DecimalEncoder)}
-
-
----
-
-Deseja que eu também adicione validações obrigatórias (por exemplo, erro 400 se faltar outage_title ou outage_start)?
-Posso incluir isso direto dentro do handle_update_outage.
-
+export default useChat;
