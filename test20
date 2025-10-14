@@ -1,208 +1,174 @@
-import { Card } from "@/components/ui/card";
-import { RDMTimeline } from "./RDMTimeline";
-import { mockProductLines } from "@/data/mockData";
-import { Calendar, CheckCircle2, XCircle, Clock, Loader, Ban } from "lucide-react";
+import json
+import boto3
+import os
+import uuid
+from datetime import datetime, timezone
+from decimal import Decimal
 
-export const Dashboard = () => {
-  const yesterday = new Date();
-  yesterday.setDate(yesterday.getDate() - 1);
+# ---------- Config ----------
+dynamodb = boto3.resource("dynamodb")
+table = dynamodb.Table(os.environ["CHAMADOS_TABLE"])  # Tabela principal (chamados)
+conn_table = dynamodb.Table(os.environ["CONNECTIONS_TABLE"])  # Tabela de conexões
+apigw = boto3.client(
+    "apigatewaymanagementapi",
+    endpoint_url=f"https://{os.environ['WS_API_ID']}.execute-api.{os.environ['AWS_REGION']}.amazonaws.com/{os.environ['WS_STAGE']}"
+)
 
-  const products = [
-    {
-      name: "AZUL PORTO",
-      rgb: "0 | 161 | 252",
-      hex: "#00a1fc",
-      bgColor: "bg-[#00a1fc]",
-      textColor: "text-white"
-    },
-    {
-      name: "AZUL ESCURO",
-      rgb: "0 | 70 | 192",
-      hex: "#0046c0",
-      bgColor: "bg-[#0046c0]",
-      textColor: "text-white"
-    },
-    {
-      name: "WHITE",
-      rgb: "235 | 241 | 238",
-      hex: "#eff1ef",
-      bgColor: "bg-[#eff1ef]",
-      textColor: "text-gray-800",
-      border: true
-    },
-    {
-      name: "BRANCO",
-      rgb: "255 | 255 | 255",
-      hex: "#ffffff",
-      bgColor: "bg-white",
-      textColor: "text-gray-800",
-      border: true
-    },
-    {
-      name: "PRETO",
-      rgb: "0 | 0 | 0",
-      hex: "#000000",
-      bgColor: "bg-black",
-      textColor: "text-white"
-    },
-    {
-      name: "CINZA ESCURO",
-      rgb: "64 | 64 | 64",
-      hex: "#404040",
-      bgColor: "bg-[#404040]",
-      textColor: "text-white"
-    },
-    {
-      name: "CINZA",
-      rgb: "128 | 128 | 128",
-      hex: "#808080",
-      bgColor: "bg-[#808080]",
-      textColor: "text-white"
-    },
-    {
-      name: "CINZA CLARO",
-      rgb: "192 | 192 | 192",
-      hex: "#c0c0c0",
-      bgColor: "bg-[#c0c0c0]",
-      textColor: "text-gray-800"
+
+# ---------- Helpers ----------
+class DecimalEncoder(json.JSONEncoder):
+    def default(self, o):
+        if isinstance(o, Decimal):
+            return int(o) if o % 1 == 0 else float(o)
+        return super().default(o)
+
+def log(trace, msg, **kwargs):
+    print(json.dumps({"trace": trace, "msg": msg, **kwargs}, cls=DecimalEncoder, default=str))
+
+def send_to_connection(conn_id, data):
+    try:
+        apigw.post_to_connection(
+            ConnectionId=conn_id,
+            Data=json.dumps(data, cls=DecimalEncoder).encode("utf-8")
+        )
+    except apigw.exceptions.GoneException:
+        conn_table.delete_item(Key={"connectionId": conn_id})
+        log("broadcast", "Conexão removida (GoneException)", connectionId=conn_id)
+
+def broadcast(data):
+    conns = conn_table.scan().get("Items", [])
+    for c in conns:
+        send_to_connection(c["connectionId"], data)
+
+def update_chamado(trace, chamado, update):
+    log(trace, "Atualizando chamado", chamado=chamado, update=update)
+    table.update_item(
+        Key={"chamado": chamado},
+        UpdateExpression="SET " + ", ".join(f"#{k} = :{k}" for k in update.keys()),
+        ExpressionAttributeNames={f"#{k}": k for k in update.keys()},
+        ExpressionAttributeValues={f":{k}": v for k, v in update.items()},
+    )
+    resp = table.get_item(Key={"chamado": chamado})
+    state = resp.get("Item", {})
+    log(trace, "Chamado atualizado (state completo)", state=state)
+    return state
+
+def _to_int_if_possible(x):
+    try:
+        if isinstance(x, bool):
+            return x
+        return int(str(x).strip())
+    except Exception:
+        return x
+
+def _apply_relationships(body, update):
+    if "pai" in body and body["pai"] is not None:
+        update["pai"] = _to_int_if_possible(body["pai"])
+    if "filhos" in body and body["filhos"] is not None:
+        filhos_val = body["filhos"]
+        if isinstance(filhos_val, list):
+            normalized = [_to_int_if_possible(v) for v in filhos_val]
+            seen, dedup = set(), []
+            for v in normalized:
+                key = (type(v), v)
+                if key not in seen:
+                    seen.add(key)
+                    dedup.append(v)
+            update["filhos"] = dedup
+        else:
+            update["filhos"] = filhos_val
+
+
+# ---------- NOVA ROTA: updateOutage ----------
+def handle_update_outage(event, trace, body):
+    """
+    Atualiza informações de outage de um chamado.
+    Espera os campos:
+      - chamado (int)
+      - outage_title (str)
+      - outage_timestamp (str ou auto)
+      - outage_start (str)
+      - outage_end (str)
+    """
+    chamado = int(body["chamado"])
+    outage_title = body.get("outage_title")
+    outage_timestamp = body.get("outage_timestamp") or datetime.now(timezone.utc).isoformat()
+    outage_start = body.get("outage_start")
+    outage_end = body.get("outage_end")
+
+    update = {
+        "outage_title": outage_title,
+        "outage_timestamp": outage_timestamp,
+        "outage_start": outage_start,
+        "outage_end": outage_end,
     }
-  ];
 
-  const totalRDMs = mockProductLines.reduce((acc, line) => acc + line.rdms.length, 0);
-  const executedRDMs = mockProductLines.reduce(
-    (acc, line) => acc + line.rdms.filter(rdm => rdm.status === 'executed').length, 
-    0
-  );
-  const failedRDMs = mockProductLines.reduce(
-    (acc, line) => acc + line.rdms.filter(rdm => rdm.status === 'failed').length, 
-    0
-  );
+    _apply_relationships(body, update)
+    state = update_chamado(trace, chamado, update)
 
-  return (
-    <div className="min-h-screen bg-background">
-      {/* Logo and Product Colors Section */}
-      <div className="border-b bg-card shadow-sm py-12">
-        <div className="container mx-auto px-6">
-          <div className="relative max-w-7xl mx-auto">
-            {/* Logo + connector lines */}
-            <div className="relative flex justify-center">
-              {/* Centered logo */}
-              <img
-                src="/porto.svg"
-                alt="Porto"
-                className="h-10 md:h-12 select-none"
-                draggable={false}
-              />
-              {/* Vertical line from logo bottom center */}
-              <div
-                className="absolute left-1/2 top-full -translate-x-1/2 h-12 w-px bg-gray-300"
-                aria-hidden="true"
-              />
-            </div>
+    payload = {
+        "event": "updateOutage",
+        "chamado": chamado,
+        "outage_title": outage_title,
+        "outage_timestamp": outage_timestamp,
+        "outage_start": outage_start,
+        "outage_end": outage_end,
+        "state": state
+    }
 
-            {/* Horizontal line that connects to products */}
-            <div className="relative h-8 mt-12">
-              <div className="absolute left-0 right-0 top-0 mx-[6%] md:mx-[4%] lg:mx-[2%] h-px bg-gray-300" aria-hidden="true" />
-            </div>
+    broadcast(payload)
+    return {"statusCode": 200, "body": json.dumps(payload, cls=DecimalEncoder)}
 
-            {/* 8 Product Color Squares */}
-            <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-4 relative z-10">
-              {products.map((product, index) => (
-                <div 
-                  key={index} 
-                  className="flex flex-col items-center animate-fade-in relative"
-                  style={{ animationDelay: `${index * 0.1}s` }}
-                >
-                  {/* small vertical connector from horizontal line to center top of product box */}
-                  <div className="absolute -top-8 left-1/2 -translate-x-1/2 h-8 w-px bg-gray-300" aria-hidden="true" />
-                  <div 
-                    className={`w-full aspect-square rounded-lg ${product.bgColor} ${product.border ? 'border-2 border-gray-300' : ''} flex flex-col items-center justify-center p-4 shadow-md hover:shadow-lg transition-all hover:-translate-y-1`}
-                  >
-                    <span className={`text-xs font-bold ${product.textColor} text-center mb-2`}>
-                      {product.name}
-                    </span>
-                    <span className={`text-[10px] ${product.textColor} opacity-80 text-center`}>
-                      RGB {product.rgb}
-                    </span>
-                    <span className={`text-[10px] ${product.textColor} opacity-80 text-center mt-1`}>
-                      HEX {product.hex}
-                    </span>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-      </div>
 
-      {/* Rest of Dashboard */}
-      <div className="container mx-auto px-6 py-6">
+# ---------- Handlers já existentes ----------
+def handle_connect(event, trace):
+    conn_id = event["requestContext"]["connectionId"]
+    conn_table.put_item(Item={"connectionId": conn_id, "connectedAt": datetime.now(timezone.utc).isoformat()})
+    log(trace, "Novo cliente conectado", connectionId=conn_id)
+    return {"statusCode": 200}
 
-        {/* Quick Stats */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-          <Card className="p-4">
-            <div className="text-sm text-muted-foreground">Total de RDMs</div>
-            <div className="text-2xl font-bold mt-1">{totalRDMs}</div>
-          </Card>
-          <Card className="p-4">
-            <div className="text-sm text-muted-foreground">Executadas</div>
-            <div className="text-2xl font-bold mt-1 text-success">{executedRDMs}</div>
-          </Card>
-          <Card className="p-4">
-            <div className="text-sm text-muted-foreground">Falhas</div>
-            <div className="text-2xl font-bold mt-1 text-destructive">{failedRDMs}</div>
-          </Card>
-        </div>
+def handle_disconnect(event, trace):
+    conn_id = event["requestContext"]["connectionId"]
+    conn_table.delete_item(Key={"connectionId": conn_id})
+    log(trace, "Cliente desconectado", connectionId=conn_id)
+    return {"statusCode": 200}
 
-        {/* Legend */}
-        <Card className="p-4 mb-6 shadow-sm">
-          <h3 className="text-sm font-semibold mb-3">Legenda</h3>
-          <div className="flex flex-wrap gap-6">
-            <div className="flex items-center gap-2">
-              <div className="w-8 h-8 rounded-full border-4 border-success/30 bg-success/10 flex items-center justify-center">
-                <CheckCircle2 className="w-4 h-4 text-success" />
-              </div>
-              <span className="text-sm">Executada</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <div className="w-8 h-8 rounded-full border-4 border-destructive/30 bg-destructive/10 flex items-center justify-center">
-                <XCircle className="w-4 h-4 text-destructive" />
-              </div>
-              <span className="text-sm">Falha</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <div className="w-8 h-8 rounded-full border-4 border-muted-foreground/30 bg-muted flex items-center justify-center">
-                <Clock className="w-4 h-4 text-muted-foreground" />
-              </div>
-              <span className="text-sm">Pendente</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <div className="w-8 h-8 rounded-full border-4 border-warning/30 bg-warning/10 flex items-center justify-center">
-                <Loader className="w-4 h-4 text-warning" />
-              </div>
-              <span className="text-sm">Em Andamento</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <div className="w-8 h-8 rounded-full border-4 border-muted-foreground/20 bg-muted/50 flex items-center justify-center">
-                <Ban className="w-4 h-4 text-muted-foreground" />
-              </div>
-              <span className="text-sm">Cancelada</span>
-            </div>
-          </div>
-        </Card>
 
-        {/* Timeline Section */}
-        <section>
-          <h2 className="text-xl font-semibold mb-6">Linha do Tempo das RDMs por Produto</h2>
-          <div className="space-y-6">
-            {mockProductLines.map((productLine) => (
-              <Card key={productLine.id} className="p-4 shadow-sm hover:shadow-md transition-shadow">
-                <RDMTimeline productLine={productLine} />
-              </Card>
-            ))}
-          </div>
-        </section>
-      </div>
-    </div>
-  );
-};
+# ---------- Main ----------
+def lambda_handler(event, context):
+    trace = str(uuid.uuid4())[:8]
+    req_ctx = event.get("requestContext", {})
+    route = req_ctx.get("routeKey", "UNKNOWN")
+    conn_id = req_ctx.get("connectionId", "N/A")
+
+    log(trace, "invoke", routeKey=route, connectionId=conn_id, body=event.get("body"))
+
+    try:
+        if route == "$connect":
+            return handle_connect(event, trace)
+        elif route == "$disconnect":
+            return handle_disconnect(event, trace)
+        else:
+            body = json.loads(event.get("body") or "{}")
+
+            if route == "updateOutage":
+                return handle_update_outage(event, trace, body)
+            elif route == "startTimer":
+                return handle_start_timer(event, trace, body)
+            elif route == "updateObservacao":
+                return handle_update_observacao(event, trace, body)
+            elif route == "updateOperador":
+                return handle_update_operador(event, trace, body)
+            elif route == "updateStatusFinal":
+                return handle_update_status_final(event, trace, body)
+            elif route == "updateAcionamento":
+                return handle_update_acionamento(event, trace, body)
+            elif route == "getState":
+                return handle_get_state(event, trace, body)
+            else:
+                log(trace, "Rota inválida", route=route)
+                return {"statusCode": 400, "body": json.dumps({"error": "Invalid route"}, cls=DecimalEncoder)}
+
+    except Exception as e:
+        log(trace, "Erro na execução", error=str(e))
+        return {"statusCode": 500, "body": json.dumps({"error": str(e)}, cls=DecimalEncoder)}
