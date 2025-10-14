@@ -1,197 +1,292 @@
-import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
-import { Card } from '@/components/ui/card';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
-import { Timer, Settings, User, Send, Clock, AlertTriangle } from 'lucide-react';
-import type { AlertData } from './types';
+import json
+import boto3
+import os
+import uuid
+from datetime import datetime, timezone
+from decimal import Decimal
 
-interface ActionTableMobileCardProps {
-  alert: AlertData;
-  chatStatus: { timestamp_chat: string; sending_chat: boolean } | undefined;
-  timerState: any;
-  chatSentLocal: Set<string>;
-  getCurrentActiveLevel: (chamado: number) => number | null;
-  getRemainingTime: (chamado: number, level: number) => number;
-  getTimerColor: (remainingTime: number) => string;
-  getSeverityColor: (severity: string) => string;
-  formatDate: (dateString: string) => string;
-  isConnected: boolean;
-  isChatConnected: boolean;
-  handleOpenChamadoDetails: (alert: AlertData) => void;
-  handleOpenAssumeOperator: (chamado: string) => void;
-  handleStartTimer: (chamado: string, alert: AlertData) => void;
-  handleOpenTimerManagement: (chamado: string) => void;
-  handleAcknowledgment: (alert: AlertData) => void;
-  LEVEL_NAMES: Record<number, string>;
-}
+# ---------- Config ----------
+dynamodb = boto3.resource("dynamodb")
+table = dynamodb.Table(os.environ["CHAMADOS_TABLE"])  # Tabela principal (chamados)
+conn_table = dynamodb.Table(os.environ["CONNECTIONS_TABLE"])  # Tabela de conexões
+apigw = boto3.client(
+    "apigatewaymanagementapi",
+    endpoint_url=f"https://{os.environ['WS_API_ID']}.execute-api.{os.environ['AWS_REGION']}.amazonaws.com/{os.environ['WS_STAGE']}"
+)
 
-export const ActionTableMobileCard = ({
-  alert,
-  chatStatus,
-  timerState,
-  chatSentLocal,
-  getCurrentActiveLevel,
-  getRemainingTime,
-  getTimerColor,
-  getSeverityColor,
-  formatDate,
-  isConnected,
-  isChatConnected,
-  handleOpenChamadoDetails,
-  handleOpenAssumeOperator,
-  handleStartTimer,
-  handleOpenTimerManagement,
-  handleAcknowledgment,
-  LEVEL_NAMES,
-}: ActionTableMobileCardProps) => {
-  const chamadoNum = parseInt(alert.chamado);
-  const currentLevel = getCurrentActiveLevel(chamadoNum);
-  const remainingTime = currentLevel ? getRemainingTime(chamadoNum, currentLevel) : 0;
 
-  const wsChatRaw: any = timerState?.sending_chat ?? timerState?.sending;
-  const sentFlagRaw: any =
-    typeof wsChatRaw !== 'undefined'
-      ? wsChatRaw
-      : typeof chatStatus?.sending_chat !== 'undefined'
-        ? chatStatus?.sending_chat
-        : (alert as any).sending_chat;
+# ---------- Helpers ----------
+class DecimalEncoder(json.JSONEncoder):
+    def default(self, o):
+        if isinstance(o, Decimal):
+            if o % 1 == 0:
+                return int(o)
+            return float(o)
+        return super(DecimalEncoder, self).default(o)
 
-  const sentNormalized =
-    typeof sentFlagRaw === 'boolean'
-      ? sentFlagRaw
-      : typeof sentFlagRaw === 'string'
-        ? sentFlagRaw.trim().toLowerCase() === 'true'
-        : typeof sentFlagRaw === 'number'
-          ? sentFlagRaw === 1
-          : false;
+def log(trace, msg, **kwargs):
+    print(json.dumps({"trace": trace, "msg": msg, **kwargs}, cls=DecimalEncoder, default=str))
 
-  const isChatSent = sentNormalized || chatSentLocal.has(alert.chamado) || alert.acionado === 'true' || alert.chat;
-  const responsavelAtual = timerState?.ResponsavelAcompanhamento || '';
+def send_to_connection(conn_id, data):
+    """Envia mensagem para uma conexão específica"""
+    try:
+        apigw.post_to_connection(
+            ConnectionId=conn_id,
+            Data=json.dumps(data, cls=DecimalEncoder).encode("utf-8")
+        )
+    except apigw.exceptions.GoneException:
+        # Conexão morta -> remover
+        conn_table.delete_item(Key={"connectionId": conn_id})
+        log("broadcast", "Conexão removida (GoneException)", connectionId=conn_id)
 
-  return (
-    <Card 
-      className="p-4 mb-3 bg-card border-border hover:bg-accent/50 transition-colors cursor-pointer"
-      onClick={() => handleOpenChamadoDetails(alert)}
-    >
-      {/* Header: Chamado + Severidade */}
-      <div className="flex items-center justify-between mb-3">
-        <div className="flex items-center gap-2">
-          <span className="text-lg font-bold text-foreground">#{alert.chamado}</span>
-          <Badge className={getSeverityColor(alert.severidade_chamado)}>
-            {alert.severidade_chamado}
-          </Badge>
-        </div>
-        
-        {/* Status do Chat */}
-        <div onClick={(e) => e.stopPropagation()}>
-          {isChatSent ? (
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <div className="flex items-center gap-1 text-green-600 text-xs">
-                  <Send className="h-4 w-4" />
-                  <span>Enviado</span>
-                </div>
-              </TooltipTrigger>
-              <TooltipContent>Chat já acionado</TooltipContent>
-            </Tooltip>
-          ) : (
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => handleAcknowledgment(alert)}
-              disabled={!isChatConnected}
-              className="h-8"
-            >
-              <Send className="h-4 w-4 mr-1" />
-              Chat
-            </Button>
-          )}
-        </div>
-      </div>
+def broadcast(data):
+    """Envia mensagem para todos conectados"""
+    conns = conn_table.scan().get("Items", [])
+    for c in conns:
+        send_to_connection(c["connectionId"], data)
 
-      {/* Título do Chamado */}
-      <div className="mb-3">
-        <p className="text-sm font-medium text-foreground line-clamp-2">
-          {alert.resumo_chamado}
-        </p>
-      </div>
+def update_chamado(trace, chamado, update):
+    log(trace, "Atualizando chamado", chamado=chamado, update=update)
+    table.update_item(
+        Key={"chamado": chamado},
+        UpdateExpression="SET " + ", ".join(f"#{k} = :{k}" for k in update.keys()),
+        ExpressionAttributeNames={f"#{k}": k for k in update.keys()},
+        ExpressionAttributeValues={f":{k}": v for k, v in update.items()},
+    )
 
-      {/* Informações do Chamado */}
-      <div className="space-y-2 mb-3 text-xs">
-        <div className="flex items-center gap-2">
-          <span className="text-muted-foreground">Tipo:</span>
-          <span className="text-foreground font-medium">{alert.tipo_chamado}</span>
-        </div>
-        <div className="flex items-center gap-2">
-          <span className="text-muted-foreground">Grupo:</span>
-          <span className="text-foreground font-medium">{alert.grupo_chamado}</span>
-        </div>
-        <div className="flex items-center gap-2">
-          <Clock className="h-3 w-3 text-muted-foreground" />
-          <span className="text-muted-foreground">{formatDate(alert.abertura_chamado)}</span>
-        </div>
-      </div>
+    # 🔑 Buscar o estado completo do DynamoDB
+    resp = table.get_item(Key={"chamado": chamado})
+    state = resp.get("Item", {})
+    log(trace, "Chamado atualizado (state completo)", state=state)
+    return state
 
-      {/* Timer e Responsável */}
-      <div className="flex items-center justify-between pt-3 border-t border-border" onClick={(e) => e.stopPropagation()}>
-        {/* Responsável */}
-        <div className="flex items-center gap-2">
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => handleOpenAssumeOperator(alert.chamado)}
-                className="h-8 px-2"
-              >
-                <User className="h-4 w-4 mr-1" />
-                <span className="text-xs">
-                  {responsavelAtual || 'Assumir'}
-                </span>
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>
-              {responsavelAtual ? 'Alterar responsável' : 'Assumir chamado'}
-            </TooltipContent>
-          </Tooltip>
-        </div>
+def _to_int_if_possible(x):
+    try:
+        # Evita converter boolean por engano (True -> 1)
+        if isinstance(x, bool):
+            return x
+        return int(str(x).strip())
+    except Exception:
+        return x
 
-        {/* Timer */}
-        <div className="flex items-center gap-2">
-          {currentLevel ? (
-            <>
-              <div className="text-right">
-                <div className={`text-sm font-bold ${getTimerColor(remainingTime)}`}>
-                  <Timer className="h-3 w-3 inline mr-1" />
-                  {Math.floor(remainingTime / 60)}:{String(remainingTime % 60).padStart(2, '0')}
-                </div>
-                <div className="text-xs text-muted-foreground">
-                  {LEVEL_NAMES[currentLevel as keyof typeof LEVEL_NAMES]}
-                </div>
-              </div>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => handleOpenTimerManagement(alert.chamado)}
-                className="h-8 w-8 p-0"
-              >
-                <Settings className="h-4 w-4" />
-              </Button>
-            </>
-          ) : (
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => handleStartTimer(alert.chamado, alert)}
-              disabled={!isConnected}
-              className="h-8"
-            >
-              <Timer className="h-4 w-4 mr-1" />
-              Iniciar
-            </Button>
-          )}
-        </div>
-      </div>
-    </Card>
-  );
-};
+def _apply_relationships(body, update):
+    """
+    Injeta 'pai' e 'filhos' no update quando presentes no body.
+    - pai: tenta converter para int se possível (senão mantém como string/valor original)
+    - filhos: espera lista; normaliza cada item para int quando possível; remove duplicados preservando ordem
+    """
+    if "pai" in body and body["pai"] is not None:
+        update["pai"] = _to_int_if_possible(body["pai"])
+
+    if "filhos" in body and body["filhos"] is not None:
+        filhos_val = body["filhos"]
+        if isinstance(filhos_val, list):
+            normalized = [_to_int_if_possible(v) for v in filhos_val]
+            # remove duplicados mantendo ordem
+            seen = set()
+            dedup = []
+            for v in normalized:
+                key = (type(v), v)
+                if key not in seen:
+                    seen.add(key)
+                    dedup.append(v)
+            update["filhos"] = dedup
+        else:
+            # Se não vier lista, persiste como veio (ex.: string), mas recomenda-se enviar lista
+            update["filhos"] = filhos_val
+
+# ---------- Handlers ----------
+def handle_connect(event, trace):
+    conn_id = event["requestContext"]["connectionId"]
+    conn_table.put_item(Item={"connectionId": conn_id, "connectedAt": datetime.now(timezone.utc).isoformat()})
+    log(trace, "Novo cliente conectado", connectionId=conn_id)
+    return {"statusCode": 200}
+
+def handle_disconnect(event, trace):
+    conn_id = event["requestContext"]["connectionId"]
+    conn_table.delete_item(Key={"connectionId": conn_id})
+    log(trace, "Cliente desconectado", connectionId=conn_id)
+    return {"statusCode": 200}
+
+def handle_start_timer(event, trace, body):
+    chamado = int(body["chamado"])
+    level = int(body["level"])
+
+    # Se veio duration no body, usa ele. Senão aplica regra por nível.
+    if "duration" in body:
+        duration = int(body["duration"])
+    else:
+        duration = 1200 if level == 1 else 600  # 20 min no nível 1, senão 10 min
+
+    now = datetime.now(timezone.utc).isoformat()
+
+    update = {
+        f"level{level}_timerStart": now,
+        f"level{level}_duration": duration,
+        f"level{level}_status": "running"
+    }
+    _apply_relationships(body, update)
+
+    state = update_chamado(trace, chamado, update)
+
+    broadcast({
+        "event": "startTimer",
+        "chamado": chamado,
+        "level": level,
+        "state": state
+    })
+
+    return {
+        "statusCode": 200,
+        "body": json.dumps({"msg": f"Timer iniciado ({duration//60} min)"}, cls=DecimalEncoder)
+    }
+
+def handle_update_observacao(event, trace, body):
+    """Atualiza a observação de um level de um chamado"""
+    chamado = int(body["chamado"])
+    level = int(body.get("level", 1))
+    observacao = body["observacao"]
+
+    update = {f"level{level}_observacao": observacao}
+    _apply_relationships(body, update)
+
+    state = update_chamado(trace, chamado, update)
+
+    broadcast({"event": "updateObservacao", "chamado": chamado, "state": state})
+    return {"statusCode": 200, "body": json.dumps({"msg": f"Observação do level {level} atualizada"}, cls=DecimalEncoder)}
+
+def handle_update_operador(event, trace, body):
+    chamado = int(body["chamado"])
+    responsavel = body["ResponsavelAcompanhamento"]
+    timestamp_responsavel = datetime.now(timezone.utc).isoformat()
+
+    update = {
+        "ResponsavelAcompanhamento": responsavel,
+        "timestamp_responsavel": timestamp_responsavel
+    }
+    _apply_relationships(body, update)
+
+    state = update_chamado(trace, chamado, update)
+
+    payload = {
+        "event": "updateOperador",
+        "chamado": chamado,
+        "ResponsavelAcompanhamento": responsavel,
+        "timestamp_responsavel": timestamp_responsavel,
+        "state": state
+    }
+    broadcast(payload)
+
+    return {
+        "statusCode": 200,
+        "body": json.dumps(payload, cls=DecimalEncoder)
+    }
+
+def handle_update_status_final(event, trace, body):
+    chamado = int(body["chamado"])
+    status = body["status"]
+    level_raw = body.get("level")  # opcional
+    level = int(level_raw) if level_raw is not None else None
+    now = datetime.now(timezone.utc).isoformat()
+
+    # Pega o estado atual do chamado
+    resp = table.get_item(Key={"chamado": chamado})
+    state_atual = resp.get("Item", {})
+
+    update = {"statusFinal": status, "statusFinal_updatedAt": now}
+
+    if level is not None:
+        update[f"level{level}_status"] = status
+        update[f"level{level}_updatedAt"] = now
+    else:
+        for i in range(1, 6):
+            if state_atual.get(f"level{i}_status") == "running":
+                update[f"level{i}_status"] = status
+                update[f"level{i}_updatedAt"] = now
+                break
+
+    _apply_relationships(body, update)
+
+    state = update_chamado(trace, chamado, update)
+    broadcast({"event": "updateStatusFinal", "chamado": chamado, "state": state})
+    return {"statusCode": 200, "body": json.dumps({"msg": "Status final atualizado"}, cls=DecimalEncoder)}
+
+def handle_update_acionamento(event, trace, body):
+    chamado = int(body["chamado"])
+    level = int(body.get("level", 1))
+    now = datetime.now(timezone.utc).isoformat()
+
+    observacao = body.get("observacao")
+    pessoa_acionada = body.get("pessoaAcionada")
+    status_acionamento = body.get("statusAcionamento")
+    operador = body.get("operador")
+
+    update = {f"level{level}_updatedAt": now}  # sempre marca o horário da alteração
+
+    if observacao is not None:
+        update[f"level{level}_observacao"] = observacao
+    if pessoa_acionada is not None:
+        update[f"level{level}_pessoaAcionada"] = pessoa_acionada
+    if status_acionamento is not None:
+        update[f"level{level}_statusAcionamento"] = status_acionamento
+    if operador is not None:
+        update[f"level{level}_operador"] = operador
+
+    _apply_relationships(body, update)
+
+    state = update_chamado(trace, chamado, update)
+
+    broadcast({
+        "event": "updateAcionamento",
+        "chamado": chamado,
+        "level": level,
+        "state": state
+    })
+    return {"statusCode": 200, "body": json.dumps({"msg": f"Dados do acionamento do level {level} atualizados"}, cls=DecimalEncoder)}
+
+def handle_get_state(event, trace, body):
+    chamado = int(body["chamado"])
+    resp = table.get_item(Key={"chamado": chamado})
+    state = resp.get("Item", {})
+    log(trace, "Estado retornado", chamado=chamado, state=state)
+
+    # Enviar resposta padronizada só para o cliente que pediu
+    conn_id = event["requestContext"]["connectionId"]
+    payload = {"event": "getState", "chamado": chamado, "state": state}
+    send_to_connection(conn_id, payload)
+    return {"statusCode": 200, "body": json.dumps({"msg": "Estado enviado"}, cls=DecimalEncoder)}
+
+# ---------- Main ----------
+def lambda_handler(event, context):
+    trace = str(uuid.uuid4())[:8]
+    req_ctx = event.get("requestContext", {})
+    route = req_ctx.get("routeKey", "UNKNOWN")
+    conn_id = req_ctx.get("connectionId", "N/A")
+
+    log(trace, "invoke", routeKey=route, connectionId=conn_id, body=event.get("body"))
+
+    try:
+        if route == "$connect":
+            return handle_connect(event, trace)
+        elif route == "$disconnect":
+            return handle_disconnect(event, trace)
+        else:
+            body = json.loads(event.get("body") or "{}")
+            if route == "startTimer":
+                return handle_start_timer(event, trace, body)
+            elif route == "updateObservacao":
+                return handle_update_observacao(event, trace, body)
+            elif route == "updateOperador":
+                return handle_update_operador(event, trace, body)
+            elif route == "updateStatusFinal":
+                return handle_update_status_final(event, trace, body)
+            elif route == "updateAcionamento":
+                return handle_update_acionamento(event, trace, body)
+            elif route == "getState":
+                return handle_get_state(event, trace, body)
+            else:
+                log(trace, "Rota inválida", route=route)
+                return {"statusCode": 400, "body": json.dumps({"error": "Invalid route"}, cls=DecimalEncoder)}
+    except Exception as e:
+        log(trace, "Erro na execução", error=str(e))
+        return {"statusCode": 500, "body": json.dumps({"error": str(e)}, cls=DecimalEncoder)}
