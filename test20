@@ -257,31 +257,26 @@ export const useChat = () => {
       if (sevNum === 4) tempoMensagem = TIME_MESSAGES.twenty;
     }
 
-    // Definir identificador único, cor e ícone baseado em tipo e severidade
+    // Definir identificador único e emoji colorido baseado em tipo e severidade
     let identificador = '';
-    let corImagem = '';
     let icone = '';
     let titulo = '';
     
     if (isAlerta && sevNum === 4) {
       identificador = `ALERTA-SEV4-${alert.chamado}`;
-      corImagem = 'https://via.placeholder.com/800x100/FF9800/FFFFFF?text=ALERTA+SEVERIDADE+4';
-      icone = '🟧';
-      titulo = '<b>🟧 ALERTA SEVERIDADE 4</b>';
+      icone = '🟠';
+      titulo = '<b>🟠 ALERTA SEVERIDADE 4</b>';
     } else if (isIncident && sevNum === 3) {
       identificador = `INC-SEV3-${alert.chamado}`;
-      corImagem = 'https://via.placeholder.com/800x100/FFC107/FFFFFF?text=INCIDENTE+SEVERIDADE+3';
-      icone = '🟨';
-      titulo = '<b>🟨 INCIDENTE SEVERIDADE 3</b>';
+      icone = '🟡';
+      titulo = '<b>🟡 INCIDENTE SEVERIDADE 3</b>';
     } else if (isIncident && (sevNum === 4 || sevNum === 5)) {
       identificador = `INC-SEV${sevNum}-${alert.chamado}`;
-      corImagem = 'https://via.placeholder.com/800x100/F44336/FFFFFF?text=INCIDENTE+SEVERIDADE+' + sevNum;
-      icone = '🟥';
-      titulo = `<b>🟥 INCIDENTE SEVERIDADE ${sevNum}</b>`;
+      icone = '🔴';
+      titulo = `<b>🔴 INCIDENTE SEVERIDADE ${sevNum}</b>`;
     } else {
       // Fallback para outros casos
       identificador = `EVT-${alert.chamado}`;
-      corImagem = 'https://via.placeholder.com/800x100/9E9E9E/FFFFFF?text=EVENTO';
       icone = '⚪';
       titulo = '<b>⚪ EVENTO</b>';
     }
@@ -290,10 +285,8 @@ export const useChat = () => {
       cards: [
         {
           header: {
-            title: '<b>🚨 CIOPs - Ação Necessária</b>',
-            subtitle: identificador,
-            imageUrl: corImagem,
-            imageStyle: 'IMAGE'
+            title: `<b>${icone} 🚨 CIOPs - Ação Necessária</b>`,
+            subtitle: identificador
           },
           sections: [
             {
