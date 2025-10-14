@@ -248,7 +248,6 @@ export const useChat = () => {
     const isIncident = tipoNorm.includes('incidente') || tipoNorm.includes('incident');
     const isAlerta = tipoNorm.includes('alerta') || tipoNorm.includes('alert');
 
-    // Definir tempo de resposta baseado em tipo e severidade
     let tempoMensagem = '';
     if (isIncident) {
       if (sevNum === 4 || sevNum === 5) tempoMensagem = TIME_MESSAGES.seven;
@@ -257,142 +256,63 @@ export const useChat = () => {
       if (sevNum === 4) tempoMensagem = TIME_MESSAGES.twenty;
     }
 
-    // Definir identificador único e emoji colorido baseado em tipo e severidade
-    let identificador = '';
-    let icone = '';
-    let titulo = '';
+    // Determinar emoji colorido e identificador único
+    let identificador = `EVT-${alert.chamado}`;
+    let icone = '⚪';
     
     if (isAlerta && sevNum === 4) {
       identificador = `ALERTA-SEV4-${alert.chamado}`;
       icone = '🟠';
-      titulo = '<b>🟠 ALERTA SEVERIDADE 4</b>';
     } else if (isIncident && sevNum === 3) {
       identificador = `INC-SEV3-${alert.chamado}`;
       icone = '🟡';
-      titulo = '<b>🟡 INCIDENTE SEVERIDADE 3</b>';
     } else if (isIncident && (sevNum === 4 || sevNum === 5)) {
       identificador = `INC-SEV${sevNum}-${alert.chamado}`;
       icone = '🔴';
-      titulo = `<b>🔴 INCIDENTE SEVERIDADE ${sevNum}</b>`;
-    } else {
-      // Fallback para outros casos
-      identificador = `EVT-${alert.chamado}`;
-      icone = '⚪';
-      titulo = '<b>⚪ EVENTO</b>';
     }
 
     return {
       cards: [
         {
           header: {
-            title: `<b>${icone} 🚨 CIOPs - Ação Necessária</b>`,
-            subtitle: identificador
+            title: `<b>${icone} 🚨 O CIOPs precisa da sua atenção!</b>`,
+            subtitle: `ID: ${identificador}`
           },
           sections: [
             {
-              header: titulo,
-              widgets: [
-                {
-                  decoratedText: {
-                    topLabel: 'Identificador do Evento',
-                    text: `<b>${identificador}</b>`,
-                    startIcon: {
-                      knownIcon: 'BOOKMARK'
-                    }
-                  }
-                },
-                {
-                  divider: {}
-                }
-              ]
-            },
-            {
-              header: '<b>📋 Detalhes do Evento</b>',
-              collapsible: false,
-              widgets: [
-                {
-                  decoratedText: {
-                    topLabel: 'Número do Chamado',
-                    text: `<b>${alert.chamado}</b>`,
-                    startIcon: {
-                      knownIcon: 'TICKET'
-                    }
-                  }
-                },
-                {
-                  decoratedText: {
-                    topLabel: 'Tipo',
-                    text: tipoRaw || '-',
-                    startIcon: {
-                      knownIcon: 'DESCRIPTION'
-                    }
-                  }
-                },
-                {
-                  decoratedText: {
-                    topLabel: 'Severidade',
-                    text: `<b>${icone} ${alert.severidade_chamado ?? '-'}</b>`,
-                    startIcon: {
-                      knownIcon: 'STAR'
-                    }
-                  }
-                },
-                {
-                  decoratedText: {
-                    topLabel: 'Título',
-                    text: alert.resumo_chamado ?? '-',
-                    startIcon: {
-                      knownIcon: 'DESCRIPTION'
-                    },
-                    wrapText: true
-                  }
-                },
-                {
-                  decoratedText: {
-                    topLabel: 'Data de Abertura',
-                    text: alert.abertura_chamado ?? '-',
-                    startIcon: {
-                      knownIcon: 'CLOCK'
-                    }
-                  }
-                },
-                {
-                  decoratedText: {
-                    topLabel: 'Grupo Responsável',
-                    text: `<b>${alert.grupo_chamado ?? '-'}</b>`,
-                    startIcon: {
-                      knownIcon: 'MULTIPLE_PEOPLE'
-                    }
-                  }
-                },
-                {
-                  divider: {}
-                }
-              ]
-            },
-            {
-              header: '<b>⏱️ Tempo de Resposta</b>',
               widgets: [
                 {
                   textParagraph: {
-                    text: tempoMensagem 
-                      ? `${icone} <b>Confirmação necessária em: ${tempoMensagem}</b>` 
-                      : `${icone} Aguardando definição de SLA`
+                    text: 'É necessário confirmação de recebimento e ciência pelo grupo responsável.'
                   }
-                },
-                {
-                  divider: {}
                 }
               ]
             },
             {
-              header: '<b>⚠️ Ação Requerida</b>',
               widgets: [
                 {
                   textParagraph: {
-                    text: 
-                      '<font color="#d32f2f"><b>É necessária a confirmação de recebimento e ciência pelo grupo responsável.</b></font><br><br>' +
-                      'Na ausência de confirmação dentro do prazo estabelecido, o CIOPs iniciará automaticamente o processo de <b>escalonamento</b> conforme procedimento operacional padrão.'
+                    text:
+                      '<b>Detalhes do Evento:</b><br><br>' +
+                      '<b>📌 Chamado: </b>' + alert.chamado + '<br><br>' +
+                      '<b>⚠️ Severidade: </b>' + (alert.severidade_chamado ?? '-') + '<br><br>' +
+                      '<b>📰 Título: </b>' + (alert.resumo_chamado ?? '-') + '<br><br>' +
+                      '<b>📅 Abertura: </b>' + (alert.abertura_chamado ?? '-') + '<br><br>' +
+                      '<b>👥 Grupo: </b>' + (alert.grupo_chamado ?? '-')
+                  }
+                }
+              ]
+            },
+            {
+              widgets: [
+                {
+                  textParagraph: {
+                    text: (
+                      '<b>⚠️ Atenção: </b> Na ausência de confirmação, o CIOPs dará início ao processo de escalonamento, conforme procedimento padrão. ' +
+                      (tempoMensagem
+                        ? ('O tempo de resposta para aguardo para confirmação é de: <b>' + tempoMensagem + '</b>')
+                        : '')
+                    )
                   }
                 }
               ]
