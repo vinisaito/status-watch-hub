@@ -1,4 +1,344 @@
-DASHOARD:
+MONITORINGCARDS:
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { useState } from 'react';
+import { AlertTriangle, AlertCircle, Clock, Timer, UserCheck, BarChart3, MessageCircle, CheckCircle2 } from 'lucide-react';
+import { cn } from '@/lib/utils';
+
+interface AlertData {
+  id: string;
+  chamado: string;
+  tipo_chamado: string;
+  grupo_chamado: string;
+  status_chamado: string;
+  abertura_chamado: string;
+  resumo_chamado: string;
+  severidade_chamado: string;
+  acionado: string;
+  chat: boolean;
+}
+
+interface MonitoringCardsProps {
+  alertData: AlertData[];
+  onFilterSelect: (filter: string | null) => void;
+}
+
+export const MonitoringCards = ({ alertData, onFilterSelect }: MonitoringCardsProps) => {
+  const [activeFilter, setActiveFilter] = useState<string | null>(null);
+
+  // Usando o hook para obter os chamados acionados
+
+  // Função toggle do filtro
+  const handleCardClick = (filterKey: string) => {
+    if (activeFilter === filterKey) {
+      setActiveFilter(null);
+      onFilterSelect(null);
+    } else {
+      setActiveFilter(filterKey);
+      onFilterSelect(filterKey);
+    }
+  };
+
+  // Função para calcular tempo restante em minutos
+  const getTimeRemaining = (openingTime: string) => {
+    const now = new Date();
+    const opening = new Date(openingTime);
+    const diffMs = now.getTime() - opening.getTime();
+    const diffMinutes = Math.floor(diffMs / (1000 * 60));
+
+    // Assumindo SLA de 60 minutos para alertas críticos
+    const slaMinutes = 60;
+    return slaMinutes - diffMinutes;
+  };
+
+  // Cards métricas verticais
+  const tempoExpirado = alertData.filter(alert => getTimeRemaining(alert.abertura_chamado) <= 0).length;
+  const cincoMinRest = alertData.filter(alert => getTimeRemaining(alert.abertura_chamado) > 0 && getTimeRemaining(alert.abertura_chamado) <= 5).length;
+  const dezMinRest = alertData.filter(alert => getTimeRemaining(alert.abertura_chamado) > 5 && getTimeRemaining(alert.abertura_chamado) <= 10).length;
+
+  // Ajuste de altura para caber 4 blocos sem scroll vertical
+  // Altura total disponível para cards: cerca de 90vh (descontando header/footer/paddings)
+  // Cada bloco: gap pequeno, cards menores e central reduzido
+  return (
+    <div className="flex flex-col items-center w-full gap-2" style={{height: '100%', justifyContent: 'center'}}>
+      {/* Bloco 1 */}
+      <div className="flex flex-col items-center w-full gap-1">
+        <div className="w-3/4">
+          <VerticalCard
+            title="5 MINUTOS RESTANTES"
+            count={cincoMinRest}
+            filterKey="CINCO_MINUTOS"
+            isActive={activeFilter === 'CINCO_MINUTOS'}
+            onClick={() => handleCardClick('CINCO_MINUTOS')}
+            small
+          />
+        </div>
+        <div className="w-full">
+          <VerticalCard
+            title="TEMPO EXPIRADO"
+            count={tempoExpirado}
+            filterKey="TEMPO_EXPIRADO"
+            isActive={activeFilter === 'TEMPO_EXPIRADO'}
+            onClick={() => handleCardClick('TEMPO_EXPIRADO')}
+            medium
+          />
+        </div>
+        <div className="w-3/4">
+          <VerticalCard
+            title="10 MINUTOS RESTANTES"
+            count={dezMinRest}
+            filterKey="DEZ_MINUTOS"
+            isActive={activeFilter === 'DEZ_MINUTOS'}
+            onClick={() => handleCardClick('DEZ_MINUTOS')}
+            small
+          />
+        </div>
+      </div>
+      {/* Bloco 2 */}
+      <div className="flex flex-col items-center w-full gap-1">
+        <div className="w-3/4">
+          <VerticalCard
+            title="5 MINUTOS RESTANTES"
+            count={cincoMinRest}
+            filterKey="CINCO_MINUTOS_2"
+            isActive={activeFilter === 'CINCO_MINUTOS_2'}
+            onClick={() => handleCardClick('CINCO_MINUTOS_2')}
+            small
+          />
+        </div>
+        <div className="w-full">
+          <VerticalCard
+            title="TEMPO EXPIRADO"
+            count={tempoExpirado}
+            filterKey="TEMPO_EXPIRADO_2"
+            isActive={activeFilter === 'TEMPO_EXPIRADO_2'}
+            onClick={() => handleCardClick('TEMPO_EXPIRADO_2')}
+            medium
+          />
+        </div>
+        <div className="w-3/4">
+          <VerticalCard
+            title="10 MINUTOS RESTANTES"
+            count={dezMinRest}
+            filterKey="DEZ_MINUTOS_2"
+            isActive={activeFilter === 'DEZ_MINUTOS_2'}
+            onClick={() => handleCardClick('DEZ_MINUTOS_2')}
+            small
+          />
+        </div>
+      </div>
+      {/* Bloco 3 */}
+      <div className="flex flex-col items-center w-full gap-1">
+        <div className="w-3/4">
+          <VerticalCard
+            title="5 MINUTOS RESTANTES"
+            count={cincoMinRest}
+            filterKey="CINCO_MINUTOS_3"
+            isActive={activeFilter === 'CINCO_MINUTOS_3'}
+            onClick={() => handleCardClick('CINCO_MINUTOS_3')}
+            small
+          />
+        </div>
+        <div className="w-full">
+          <VerticalCard
+            title="TEMPO EXPIRADO"
+            count={tempoExpirado}
+            filterKey="TEMPO_EXPIRADO_3"
+            isActive={activeFilter === 'TEMPO_EXPIRADO_3'}
+            onClick={() => handleCardClick('TEMPO_EXPIRADO_3')}
+            medium
+          />
+        </div>
+        <div className="w-3/4">
+          <VerticalCard
+            title="10 MINUTOS RESTANTES"
+            count={dezMinRest}
+            filterKey="DEZ_MINUTOS_3"
+            isActive={activeFilter === 'DEZ_MINUTOS_3'}
+            onClick={() => handleCardClick('DEZ_MINUTOS_3')}
+            small
+          />
+        </div>
+      </div>
+      {/* Bloco 4 */}
+      <div className="flex flex-col items-center w-full gap-1">
+        <div className="w-3/4">
+          <VerticalCard
+            title="5 MINUTOS RESTANTES"
+            count={cincoMinRest}
+            filterKey="CINCO_MINUTOS_4"
+            isActive={activeFilter === 'CINCO_MINUTOS_4'}
+            onClick={() => handleCardClick('CINCO_MINUTOS_4')}
+            small
+          />
+        </div>
+        <div className="w-full">
+          <VerticalCard
+            title="TEMPO EXPIRADO"
+            count={tempoExpirado}
+            filterKey="TEMPO_EXPIRADO_4"
+            isActive={activeFilter === 'TEMPO_EXPIRADO_4'}
+            onClick={() => handleCardClick('TEMPO_EXPIRADO_4')}
+            medium
+          />
+        </div>
+        <div className="w-3/4">
+          <VerticalCard
+            title="10 MINUTOS RESTANTES"
+            count={dezMinRest}
+            filterKey="DEZ_MINUTOS_4"
+            isActive={activeFilter === 'DEZ_MINUTOS_4'}
+            onClick={() => handleCardClick('DEZ_MINUTOS_4')}
+            small
+          />
+        </div>
+      </div>
+    </div>
+  );
+// Novo componente para o layout vertical dos cards
+// Ajuste de tamanho dos cards para caber 4 blocos na tela
+function VerticalCard({ title, count, filterKey, isActive, onClick, small, medium }: { title: string, count: number, filterKey: string, isActive: boolean, onClick: () => void, small?: boolean, medium?: boolean }) {
+  let heightClass = 'h-8 text-xs';
+  if (medium) heightClass = 'h-16 text-base md:text-lg font-bold';
+  if (small) heightClass = 'h-8 text-xs';
+  return (
+    <div
+      onClick={onClick}
+      className={cn(
+        'rounded-md border border-border bg-card text-card-foreground shadow transition-all duration-200 cursor-pointer flex flex-col items-center justify-center',
+        heightClass,
+        isActive && 'ring-2 ring-primary/60 ring-offset-2 ring-offset-background',
+        'hover:bg-hover-bg/80 px-2'
+      )}
+      style={{ minHeight: small ? 24 : medium ? 48 : 32 }}
+    >
+      <span className="tracking-wide uppercase leading-tight">{title}</span>
+      <span className={cn('ml-2 font-bold', medium ? 'text-xl' : 'text-base')}>{count}</span>
+    </div>
+  );
+}
+};
+
+interface CompactCardProps {
+  title: string;
+  count: number;
+  totalCount: number;
+  icon: React.ComponentType<any>;
+  type: string;
+  filterKey: string;
+  isActive: boolean;
+  onClick: () => void;
+}
+
+function CompactCard({ title, count, totalCount, icon: Icon, type, isActive, onClick }: CompactCardProps) {
+  // Todos os cards azuis, exceto tempo-expirado (vermelho) e cenarios-crise (roxo)
+  const typeStyles: Record<string, any> = {
+    default: {
+      bg: 'bg-blue-500/10',
+      border: 'border-blue-500/30',
+      text: 'text-blue-600',
+      hover: 'hover:bg-blue-500/20 hover:border-blue-500/50',
+      animation: '',
+    },
+    'tempo-expirado': {
+      bg: 'bg-red-500/10',
+      border: 'border-red-500/30',
+      text: 'text-red-600',
+      hover: 'hover:bg-red-500/20 hover:border-red-500/50',
+      animation: count > 0 ? 'animate-pulse-critical' : '',
+    },
+    'cenarios-crise': {
+      bg: 'bg-purple-500/10',
+      border: 'border-purple-500/30',
+      text: 'text-purple-600',
+      hover: 'hover:bg-purple-500/20 hover:border-purple-500/50',
+      animation: count > 0 ? 'animate-glow-crisis' : '',
+    },
+  };
+
+  const style = typeStyles[type] || typeStyles.default;
+
+  return (
+    <div
+      onClick={onClick}
+      className={cn(
+        "p-6 rounded-lg border-2 cursor-pointer transition-all duration-300 hover:scale-105",
+        style.bg,
+        style.border,
+        style.hover,
+        style.animation,
+        isActive && "ring-2 ring-primary/50 ring-offset-2 ring-offset-background"
+      )}
+    >
+      <div className="flex flex-col items-center text-center space-y-3">
+        <div className={cn("p-2 rounded-lg bg-black/20", style.text)}>
+          <Icon size={20} />
+        </div>
+
+        <div className={cn("text-3xl font-bold", style.text)}>
+          {count}
+        </div>
+
+        <div className="space-y-1">
+          <div className={cn("text-xs font-medium uppercase tracking-wide", style.text)}>
+            {title}
+          </div>
+          <div className="text-xs text-muted-foreground">
+            {count === 0 ? "Nenhum pendente" : `${count} de ${totalCount}`}
+          </div>
+        </div>
+      </div>
+
+      {/* Active indicator */}
+      {isActive && (
+        <div className="absolute top-2 right-2 w-2 h-2 bg-primary rounded-full animate-pulse" />
+      )}
+    </div>
+  );
+}
+
+interface CompactSubCardProps {
+  label: string;
+  count: number;
+  type: string;
+  filterKey: string;
+  isActive: boolean;
+  onClick: () => void;
+}
+
+function CompactSubCard({ label, count, type, isActive, onClick }: CompactSubCardProps) {
+  const typeStyles = {
+    'total': 'text-blue-600 border-blue-500/20 hover:border-blue-500/40',
+    'pendente-chat': 'text-orange-600 border-orange-500/20 hover:border-orange-500/40',
+    'confirmados': 'text-green-600 border-green-500/20 hover:border-green-500/40',
+    'tempo-expirado': 'text-red-600 border-red-500/20 hover:border-red-500/40',
+    'dez-minutos': 'text-yellow-600 border-yellow-500/20 hover:border-yellow-500/40',
+    'cinco-minutos': 'text-amber-600 border-amber-500/20 hover:border-amber-500/40',
+    'com-operador': 'text-emerald-600 border-emerald-500/20 hover:border-emerald-500/40',
+    'cenarios-crise': 'text-purple-600 border-purple-500/20 hover:border-purple-500/40',
+  };
+
+  return (
+    <div
+      onClick={onClick}
+      className={cn(
+        "p-3 rounded-lg bg-panel-bg/50 border cursor-pointer transition-all duration-200 hover:scale-105",
+        typeStyles[type as keyof typeof typeStyles],
+        isActive && "ring-2 ring-primary/50 ring-offset-1 ring-offset-background"
+      )}
+    >
+      <div className="flex items-center justify-between">
+        <span className="text-sm text-muted-foreground">{label}</span>
+        <span className={cn("text-lg font-semibold", typeStyles[type as keyof typeof typeStyles].split(' ')[0])}>
+          {count}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+
+
+DASHBOARD:
 import { useState, useEffect } from 'react';
 import {
   Settings,
@@ -288,34 +628,31 @@ const Dashboard = () => {
   }, [timers]);
 
   return (
-    <div className="min-h-screen flex bg-background text-foreground">
-      {/* Conteúdo principal */}
-      <div className="flex-1 flex flex-col">
-        {/* Header */}
-        <div className="bg-dashboard-bg border-b border-border p-6 text-center">
-          <h1
-            className="text-3xl font-bold mb-2"
-            style={{
-              color: isDarkMode ? '#d2d3d8ff' : '#4a90e2',
-            }}
-          >
-            NEMO - PAINEL DE MONITORAMENTO
-          </h1>
+    <div className="min-h-screen flex flex-col bg-background text-foreground">
+      {/* Header */}
+      <div className="w-full bg-dashboard-bg border-b border-border p-6 text-center">
+        <h1
+          className="text-3xl font-bold mb-2"
+          style={{ color: isDarkMode ? '#d2d3d8ff' : '#4a90e2' }}
+        >
+          NEMO - PAINEL DE MONITORAMENTO
+        </h1>
+      </div>
+
+      {/* Main layout: Cards | Table | Sidebar */}
+      <div className="flex flex-1 min-h-0">
+        {/* Cards à esquerda */}
+        <div className="flex flex-col gap-4 p-4 bg-panel-bg border-r border-border min-w-[260px] max-w-xs w-full justify-start items-stretch">
+          <MonitoringCards
+            alertData={alertData}
+            onFilterSelect={(filterKey) => setFilter(prev => prev === filterKey ? null : filterKey)}
+          />
         </div>
 
-        {/* Main */}
-        <div className="flex-1 bg-dashboard-bg">
-          <div className="container mx-auto p-6 max-w-7xl">
-            <div className="space-y-8">
-              {/* Cards */}
-              <div className="text-center">
-                <MonitoringCards
-                  alertData={alertData}
-                  onFilterSelect={(filterKey) => setFilter(prev => prev === filterKey ? null : filterKey)}
-                />
-              </div>
-
-              {/* Table */}
+        {/* Tabela central */}
+        <div className="flex-1 flex flex-col bg-dashboard-bg p-6 overflow-auto">
+          <div className="flex-1 flex flex-col justify-start items-center">
+            <div className="w-full max-w-5xl">
               <ActionTable
                 alertData={outageFilteredData}
                 onUpdateAcknowledgment={updateAlertAcknowledgment}
@@ -324,68 +661,68 @@ const Dashboard = () => {
             </div>
           </div>
         </div>
-      </div>
 
-      {/* Sidebar Enhanced */}
-      <div className="w-20 bg-gradient-to-b from-sidebar-background to-sidebar-background/95 border-l border-sidebar-border/50 backdrop-blur-sm flex flex-col justify-between sticky top-0 h-screen shadow-lg" style={{ background: 'var(--sidebar-gradient)', boxShadow: 'var(--sidebar-glow)' }}>
-        {/* Parte superior - Menu items */}
-        <div className="flex flex-col gap-3 p-3 flex-1">
-          {sidebarItems.map((item) => (
+        {/* Sidebar à direita */}
+        <div className="w-20 bg-gradient-to-b from-sidebar-background to-sidebar-background/95 border-l border-sidebar-border/50 backdrop-blur-sm flex flex-col justify-between sticky top-0 h-screen shadow-lg" style={{ background: 'var(--sidebar-gradient)', boxShadow: 'var(--sidebar-glow)' }}>
+          {/* Parte superior - Menu items */}
+          <div className="flex flex-col gap-3 p-3 flex-1">
+            {sidebarItems.map((item) => (
+              <Button
+                key={item.key}
+                variant="ghost"
+                size="icon"
+                onClick={() => setActiveSection(activeSection === item.key ? null : item.key)}
+                className={`w-14 h-14 rounded-xl transition-all duration-300 relative group ${activeSection === item.key
+                  ? 'bg-gradient-to-br from-sidebar-primary to-sidebar-primary/90 text-sidebar-primary-foreground shadow-lg scale-105'
+                  : 'text-sidebar-foreground hover:bg-sidebar-accent/80 hover:text-sidebar-accent-foreground hover:scale-105'
+                  }`}
+                style={activeSection === item.key ? { boxShadow: 'var(--sidebar-active-glow)' } : { transition: 'all 0.3s ease' }}
+                title={item.title}
+              >
+                <item.icon className="h-6 w-6 transition-transform duration-300 group-hover:scale-110" />
+                {/* Active indicator */}
+                {activeSection === item.key && (
+                  <div className="absolute -right-1 top-1/2 transform -translate-y-1/2 w-1 h-8 bg-sidebar-primary-foreground rounded-full opacity-80"></div>
+                )}
+              </Button>
+            ))}
+          </div>
+
+          {/* Parte inferior - Security + Settings */}
+          <div className="flex flex-col gap-3 p-3 border-t border-sidebar-border/30">
             <Button
-              key={item.key}
               variant="ghost"
               size="icon"
-              onClick={() => setActiveSection(activeSection === item.key ? null : item.key)}
-              className={`w-14 h-14 rounded-xl transition-all duration-300 relative group ${activeSection === item.key
-                ? 'bg-gradient-to-br from-sidebar-primary to-sidebar-primary/90 text-sidebar-primary-foreground shadow-lg scale-105'
-                : 'text-sidebar-foreground hover:bg-sidebar-accent/80 hover:text-sidebar-accent-foreground hover:scale-105'
-                }`}
-              style={activeSection === item.key ? { boxShadow: 'var(--sidebar-active-glow)' } : { transition: 'all 0.3s ease' }}
-              title={item.title}
+              onClick={() => setActiveSection('security')}
+              className="w-14 h-14 rounded-xl text-sidebar-foreground hover:bg-sidebar-accent/80 hover:text-sidebar-accent-foreground transition-all duration-300 hover:scale-105 group"
+              title="Outage"
+              style={{ transition: 'all 0.3s ease' }}
             >
-              <item.icon className="h-6 w-6 transition-transform duration-300 group-hover:scale-110" />
-              {/* Active indicator */}
-              {activeSection === item.key && (
-                <div className="absolute -right-1 top-1/2 transform -translate-y-1/2 w-1 h-8 bg-sidebar-primary-foreground rounded-full opacity-80"></div>
-              )}
+              <Shield className="h-5 w-5 transition-transform duration-300 group-hover:scale-110" />
             </Button>
-          ))}
-        </div>
-
-        {/* Parte inferior - Security + Settings */}
-        <div className="flex flex-col gap-3 p-3 border-t border-sidebar-border/30">
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={() => setActiveSection('security')}
-            className="w-14 h-14 rounded-xl text-sidebar-foreground hover:bg-sidebar-accent/80 hover:text-sidebar-accent-foreground transition-all duration-300 hover:scale-105 group"
-            title="Outage"
-            style={{ transition: 'all 0.3s ease' }}
-          >
-            <Shield className="h-5 w-5 transition-transform duration-300 group-hover:scale-110" />
-          </Button>
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={() => setShowWebhookConfig(true)}
-            className="w-14 h-14 rounded-xl text-sidebar-foreground hover:bg-sidebar-accent/80 hover:text-sidebar-accent-foreground transition-all duration-300 hover:scale-105 group"
-            title="Configuração de Webhooks"
-            style={{ transition: 'all 0.3s ease' }}
-          >
-            <Settings className="h-5 w-5 transition-transform duration-300 group-hover:rotate-90" />
-          </Button>
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={toggleTheme}
-            className="w-14 h-14 rounded-xl text-sidebar-foreground hover:bg-sidebar-accent/80 hover:text-sidebar-accent-foreground transition-all duration-300 hover:scale-105 group"
-            title="Trocar Tema"
-            style={{ transition: 'all 0.3s ease' }}
-          >
-            <div className="transition-transform duration-500 group-hover:rotate-180">
-              {isDarkMode ? <Sun className="h-5 w-5" /> : <Moon className="h-5 w-5" />}
-            </div>
-          </Button>
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => setShowWebhookConfig(true)}
+              className="w-14 h-14 rounded-xl text-sidebar-foreground hover:bg-sidebar-accent/80 hover:text-sidebar-accent-foreground transition-all duration-300 hover:scale-105 group"
+              title="Configuração de Webhooks"
+              style={{ transition: 'all 0.3s ease' }}
+            >
+              <Settings className="h-5 w-5 transition-transform duration-300 group-hover:rotate-90" />
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={toggleTheme}
+              className="w-14 h-14 rounded-xl text-sidebar-foreground hover:bg-sidebar-accent/80 hover:text-sidebar-accent-foreground transition-all duration-300 hover:scale-105 group"
+              title="Trocar Tema"
+              style={{ transition: 'all 0.3s ease' }}
+            >
+              <div className="transition-transform duration-500 group-hover:rotate-180">
+                {isDarkMode ? <Sun className="h-5 w-5" /> : <Moon className="h-5 w-5" />}
+              </div>
+            </Button>
+          </div>
         </div>
       </div>
 
@@ -422,257 +759,3 @@ const Dashboard = () => {
 };
 
 export default Dashboard;
-
-
-MONITORINGCARDS:
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { useState } from 'react';
-import { AlertTriangle, AlertCircle, Clock, Timer, UserCheck, BarChart3, MessageCircle, CheckCircle2 } from 'lucide-react';
-import { cn } from '@/lib/utils';
-
-interface AlertData {
-  id: string;
-  chamado: string;
-  tipo_chamado: string;
-  grupo_chamado: string;
-  status_chamado: string;
-  abertura_chamado: string;
-  resumo_chamado: string;
-  severidade_chamado: string;
-  acionado: string;
-  chat: boolean;
-}
-
-interface MonitoringCardsProps {
-  alertData: AlertData[];
-  onFilterSelect: (filter: string | null) => void;
-}
-
-export const MonitoringCards = ({ alertData, onFilterSelect }: MonitoringCardsProps) => {
-  const [activeFilter, setActiveFilter] = useState<string | null>(null);
-
-  // Usando o hook para obter os chamados acionados
-
-  // Função toggle do filtro
-  const handleCardClick = (filterKey: string) => {
-    if (activeFilter === filterKey) {
-      setActiveFilter(null);
-      onFilterSelect(null);
-    } else {
-      setActiveFilter(filterKey);
-      onFilterSelect(filterKey);
-    }
-  };
-
-  // Função para calcular tempo restante em minutos
-  const getTimeRemaining = (openingTime: string) => {
-    const now = new Date();
-    const opening = new Date(openingTime);
-    const diffMs = now.getTime() - opening.getTime();
-    const diffMinutes = Math.floor(diffMs / (1000 * 60));
-
-    // Assumindo SLA de 60 minutos para alertas críticos
-    const slaMinutes = 60;
-    return slaMinutes - diffMinutes;
-  };
-
-  // Métricas básicas
-  const pendenteEnvioChat = alertData.filter.length;
-
-  // SEM OPERADOR: exemplo de filtro (ajuste conforme a lógica real)
-  const semOperador = alertData.filter.length;
-
-  // Métricas baseadas em tempo
-  const tempoExpirado = alertData.filter(alert => {
-    const timeRemaining = getTimeRemaining(alert.abertura_chamado);
-  }).length;
-
-  const cincoMinutosRestantes = alertData.filter(alert => {
-    const timeRemaining = getTimeRemaining(alert.abertura_chamado);
-  }).length;
-
-  const cenariosCrise = alertData.filter.length;
-
-  return (
-    <div className="grid grid-cols-1 md:grid-cols-4 lg:grid-cols-8 gap-4 w-full max-w-none">
-      {/* Cenários de Crise */}
-      <CompactCard
-        title="Cenários de Crise"
-        count={cenariosCrise}
-        totalCount={alertData.length}
-        icon={AlertCircle}
-        type="cenarios-crise"
-        filterKey="CENARIOS_CRISE"
-        isActive={activeFilter === 'CENARIOS_CRISE'}
-        onClick={() => handleCardClick('CENARIOS_CRISE')}
-      />
-
-      {/* Tempo Expirado */}
-      <CompactCard
-        title="Tempo Expirado"
-        count={tempoExpirado}
-        totalCount={alertData.length}
-        icon={AlertTriangle}
-        type="tempo-expirado"
-        filterKey="TEMPO_EXPIRADO"
-        isActive={activeFilter === 'TEMPO_EXPIRADO'}
-        onClick={() => handleCardClick('TEMPO_EXPIRADO')}
-      />
-
-      {/* Pendente Envio Chat */}
-      <CompactCard
-        title="Pendente Envio Chat"
-        count={pendenteEnvioChat}
-        totalCount={alertData.length}
-        icon={MessageCircle}
-        type="pendente-chat"
-        filterKey="PENDENTE_ENVIO_CHAT"
-        isActive={activeFilter === 'PENDENTE_ENVIO_CHAT'}
-        onClick={() => handleCardClick('PENDENTE_ENVIO_CHAT')}
-      />
-
-      {/* 5 Minutos Restantes */}
-      <CompactCard
-        title="5min Restantes"
-        count={cincoMinutosRestantes}
-        totalCount={alertData.length}
-        icon={Timer}
-        type="cinco-minutos"
-        filterKey="CINCO_MINUTOS"
-        isActive={activeFilter === 'CINCO_MINUTOS'}
-        onClick={() => handleCardClick('CINCO_MINUTOS')}
-      />
-
-      {/* SEM OPERADOR */}
-      <CompactCard
-        title="Sem Operador"
-        count={semOperador}
-        totalCount={alertData.length}
-        icon={AlertTriangle}
-        type="tempo-expirado"
-        filterKey="SEM_OPERADOR"
-        isActive={activeFilter === 'SEM_OPERADOR'}
-        onClick={() => handleCardClick('SEM_OPERADOR')}
-      />
-    </div>
-  );
-};
-
-interface CompactCardProps {
-  title: string;
-  count: number;
-  totalCount: number;
-  icon: React.ComponentType<any>;
-  type: string;
-  filterKey: string;
-  isActive: boolean;
-  onClick: () => void;
-}
-
-function CompactCard({ title, count, totalCount, icon: Icon, type, isActive, onClick }: CompactCardProps) {
-  // Todos os cards azuis, exceto tempo-expirado (vermelho) e cenarios-crise (roxo)
-  const typeStyles: Record<string, any> = {
-    default: {
-      bg: 'bg-blue-500/10',
-      border: 'border-blue-500/30',
-      text: 'text-blue-600',
-      hover: 'hover:bg-blue-500/20 hover:border-blue-500/50',
-      animation: '',
-    },
-    'tempo-expirado': {
-      bg: 'bg-red-500/10',
-      border: 'border-red-500/30',
-      text: 'text-red-600',
-      hover: 'hover:bg-red-500/20 hover:border-red-500/50',
-      animation: count > 0 ? 'animate-pulse-critical' : '',
-    },
-    'cenarios-crise': {
-      bg: 'bg-purple-500/10',
-      border: 'border-purple-500/30',
-      text: 'text-purple-600',
-      hover: 'hover:bg-purple-500/20 hover:border-purple-500/50',
-      animation: count > 0 ? 'animate-glow-crisis' : '',
-    },
-  };
-
-  const style = typeStyles[type] || typeStyles.default;
-
-  return (
-    <div
-      onClick={onClick}
-      className={cn(
-        "p-6 rounded-lg border-2 cursor-pointer transition-all duration-300 hover:scale-105",
-        style.bg,
-        style.border,
-        style.hover,
-        style.animation,
-        isActive && "ring-2 ring-primary/50 ring-offset-2 ring-offset-background"
-      )}
-    >
-      <div className="flex flex-col items-center text-center space-y-3">
-        <div className={cn("p-2 rounded-lg bg-black/20", style.text)}>
-          <Icon size={20} />
-        </div>
-
-        <div className={cn("text-3xl font-bold", style.text)}>
-          {count}
-        </div>
-
-        <div className="space-y-1">
-          <div className={cn("text-xs font-medium uppercase tracking-wide", style.text)}>
-            {title}
-          </div>
-          <div className="text-xs text-muted-foreground">
-            {count === 0 ? "Nenhum pendente" : `${count} de ${totalCount}`}
-          </div>
-        </div>
-      </div>
-
-      {/* Active indicator */}
-      {isActive && (
-        <div className="absolute top-2 right-2 w-2 h-2 bg-primary rounded-full animate-pulse" />
-      )}
-    </div>
-  );
-}
-
-interface CompactSubCardProps {
-  label: string;
-  count: number;
-  type: string;
-  filterKey: string;
-  isActive: boolean;
-  onClick: () => void;
-}
-
-function CompactSubCard({ label, count, type, isActive, onClick }: CompactSubCardProps) {
-  const typeStyles = {
-    'total': 'text-blue-600 border-blue-500/20 hover:border-blue-500/40',
-    'pendente-chat': 'text-orange-600 border-orange-500/20 hover:border-orange-500/40',
-    'confirmados': 'text-green-600 border-green-500/20 hover:border-green-500/40',
-    'tempo-expirado': 'text-red-600 border-red-500/20 hover:border-red-500/40',
-    'dez-minutos': 'text-yellow-600 border-yellow-500/20 hover:border-yellow-500/40',
-    'cinco-minutos': 'text-amber-600 border-amber-500/20 hover:border-amber-500/40',
-    'com-operador': 'text-emerald-600 border-emerald-500/20 hover:border-emerald-500/40',
-    'cenarios-crise': 'text-purple-600 border-purple-500/20 hover:border-purple-500/40',
-  };
-
-  return (
-    <div
-      onClick={onClick}
-      className={cn(
-        "p-3 rounded-lg bg-panel-bg/50 border cursor-pointer transition-all duration-200 hover:scale-105",
-        typeStyles[type as keyof typeof typeStyles],
-        isActive && "ring-2 ring-primary/50 ring-offset-1 ring-offset-background"
-      )}
-    >
-      <div className="flex items-center justify-between">
-        <span className="text-sm text-muted-foreground">{label}</span>
-        <span className={cn("text-lg font-semibold", typeStyles[type as keyof typeof typeStyles].split(' ')[0])}>
-          {count}
-        </span>
-      </div>
-    </div>
-  );
-}
-
