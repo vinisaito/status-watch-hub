@@ -53,39 +53,133 @@ export const MonitoringCards = ({ alertData, onFilterSelect }: MonitoringCardsPr
   }).length;
 
   return (
-    <div className="h-full flex flex-col justify-center gap-3 p-2">
-      {/* 5 Minutos Card - Warning */}
+    <div className="h-full flex flex-col justify-center gap-2 p-2">
+      {/* Grupo 1 */}
       <MonitoringCard
         title="5 Minutos Restantes"
         count={cincoMinRest}
         icon={Timer}
         variant="warning"
-        filterKey="CINCO_MINUTOS"
-        isActive={activeFilter === 'CINCO_MINUTOS'}
-        onClick={() => handleCardClick('CINCO_MINUTOS')}
+        filterKey="CINCO_MINUTOS_1"
+        isActive={activeFilter === 'CINCO_MINUTOS_1'}
+        onClick={() => handleCardClick('CINCO_MINUTOS_1')}
+        small
       />
-
-      {/* Tempo Expirado Card - Critical (Larger) */}
       <MonitoringCard
         title="Tempo Expirado"
         count={tempoExpirado}
         icon={AlertTriangle}
         variant="critical"
-        filterKey="TEMPO_EXPIRADO"
-        isActive={activeFilter === 'TEMPO_EXPIRADO'}
-        onClick={() => handleCardClick('TEMPO_EXPIRADO')}
+        filterKey="TEMPO_EXPIRADO_1"
+        isActive={activeFilter === 'TEMPO_EXPIRADO_1'}
+        onClick={() => handleCardClick('TEMPO_EXPIRADO_1')}
         large
       />
-
-      {/* 10 Minutos Card - Info */}
       <MonitoringCard
         title="10 Minutos Restantes"
         count={dezMinRest}
         icon={Clock}
         variant="info"
-        filterKey="DEZ_MINUTOS"
-        isActive={activeFilter === 'DEZ_MINUTOS'}
-        onClick={() => handleCardClick('DEZ_MINUTOS')}
+        filterKey="DEZ_MINUTOS_1"
+        isActive={activeFilter === 'DEZ_MINUTOS_1'}
+        onClick={() => handleCardClick('DEZ_MINUTOS_1')}
+        small
+      />
+
+      {/* Grupo 2 */}
+      <MonitoringCard
+        title="5 Minutos Restantes"
+        count={cincoMinRest}
+        icon={Timer}
+        variant="warning"
+        filterKey="CINCO_MINUTOS_2"
+        isActive={activeFilter === 'CINCO_MINUTOS_2'}
+        onClick={() => handleCardClick('CINCO_MINUTOS_2')}
+        small
+      />
+      <MonitoringCard
+        title="Tempo Expirado"
+        count={tempoExpirado}
+        icon={AlertTriangle}
+        variant="critical"
+        filterKey="TEMPO_EXPIRADO_2"
+        isActive={activeFilter === 'TEMPO_EXPIRADO_2'}
+        onClick={() => handleCardClick('TEMPO_EXPIRADO_2')}
+        large
+      />
+      <MonitoringCard
+        title="10 Minutos Restantes"
+        count={dezMinRest}
+        icon={Clock}
+        variant="info"
+        filterKey="DEZ_MINUTOS_2"
+        isActive={activeFilter === 'DEZ_MINUTOS_2'}
+        onClick={() => handleCardClick('DEZ_MINUTOS_2')}
+        small
+      />
+
+      {/* Grupo 3 */}
+      <MonitoringCard
+        title="5 Minutos Restantes"
+        count={cincoMinRest}
+        icon={Timer}
+        variant="warning"
+        filterKey="CINCO_MINUTOS_3"
+        isActive={activeFilter === 'CINCO_MINUTOS_3'}
+        onClick={() => handleCardClick('CINCO_MINUTOS_3')}
+        small
+      />
+      <MonitoringCard
+        title="Tempo Expirado"
+        count={tempoExpirado}
+        icon={AlertTriangle}
+        variant="critical"
+        filterKey="TEMPO_EXPIRADO_3"
+        isActive={activeFilter === 'TEMPO_EXPIRADO_3'}
+        onClick={() => handleCardClick('TEMPO_EXPIRADO_3')}
+        large
+      />
+      <MonitoringCard
+        title="10 Minutos Restantes"
+        count={dezMinRest}
+        icon={Clock}
+        variant="info"
+        filterKey="DEZ_MINUTOS_3"
+        isActive={activeFilter === 'DEZ_MINUTOS_3'}
+        onClick={() => handleCardClick('DEZ_MINUTOS_3')}
+        small
+      />
+
+      {/* Grupo 4 */}
+      <MonitoringCard
+        title="5 Minutos Restantes"
+        count={cincoMinRest}
+        icon={Timer}
+        variant="warning"
+        filterKey="CINCO_MINUTOS_4"
+        isActive={activeFilter === 'CINCO_MINUTOS_4'}
+        onClick={() => handleCardClick('CINCO_MINUTOS_4')}
+        small
+      />
+      <MonitoringCard
+        title="Tempo Expirado"
+        count={tempoExpirado}
+        icon={AlertTriangle}
+        variant="critical"
+        filterKey="TEMPO_EXPIRADO_4"
+        isActive={activeFilter === 'TEMPO_EXPIRADO_4'}
+        onClick={() => handleCardClick('TEMPO_EXPIRADO_4')}
+        large
+      />
+      <MonitoringCard
+        title="10 Minutos Restantes"
+        count={dezMinRest}
+        icon={Clock}
+        variant="info"
+        filterKey="DEZ_MINUTOS_4"
+        isActive={activeFilter === 'DEZ_MINUTOS_4'}
+        onClick={() => handleCardClick('DEZ_MINUTOS_4')}
+        small
       />
     </div>
   );
@@ -100,6 +194,7 @@ interface MonitoringCardProps {
   isActive: boolean;
   onClick: () => void;
   large?: boolean;
+  small?: boolean;
 }
 
 function MonitoringCard({ 
@@ -109,7 +204,8 @@ function MonitoringCard({
   variant, 
   isActive, 
   onClick,
-  large = false 
+  large = false,
+  small = false
 }: MonitoringCardProps) {
   const variantStyles = {
     warning: {
@@ -142,7 +238,7 @@ function MonitoringCard({
   };
 
   const style = variantStyles[variant];
-  const heightClass = large ? 'min-h-[140px]' : 'min-h-[90px]';
+  const heightClass = large ? 'min-h-[120px]' : small ? 'min-h-[70px]' : 'min-h-[90px]';
 
   return (
     <div
@@ -177,7 +273,7 @@ function MonitoringCard({
         {/* Count */}
         <div className={cn(
           "font-inter font-bold transition-transform duration-300 group-hover:scale-105",
-          large ? "text-5xl" : "text-3xl",
+          large ? "text-4xl" : small ? "text-2xl" : "text-3xl",
           style.text
         )}>
           {count}
@@ -186,7 +282,7 @@ function MonitoringCard({
         {/* Title */}
         <div className={cn(
           "font-inter font-semibold text-center uppercase tracking-wide leading-tight",
-          large ? "text-sm" : "text-xs",
+          large ? "text-xs" : small ? "text-[10px]" : "text-xs",
           style.text,
           "drop-shadow-lg"
         )}>
