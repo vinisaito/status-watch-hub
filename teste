@@ -1,3 +1,266 @@
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { toast } from '@/hooks/use-toast';
+
+type UpdateChatPayload = {
+  action: 'updateChat';
+  chamado: number;
+  timestamp_chat: string;
+  sending_chat: boolean;
+};
+
+export const useChat = () => {
+  const [isConnected, setIsConnected] = useState(false);
+  const [lastError, setLastError] = useState<string | null>(null);
+  const ws = useRef<WebSocket | null>(null);
+  const reconnectAttempts = useRef(0);
+  const reconnectTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const WS_URL = 'wss://rsgjd6wsza.execute-api.us-east-1.amazonaws.com/dev';
+  const WEBHOOKS_API = 'https://f6ffk8e9fe.execute-api.us-east-1.amazonaws.com/prod/webhook';
+
+  // Cache de webhooks para reduzir chamadas
+  const webhooksCacheRef = useRef<{ data: any | null; fetchedAt: number | null }>({ data: null, fetchedAt: null });
+
+  const fetchWebhooks = useCallback(async () => {
+    try {
+      // TTL de 10 minutos
+      const now = Date.now();
+      const ttlMs = 10 * 60 * 1000;
+      if (webhooksCacheRef.current.data && webhooksCacheRef.current.fetchedAt && (now - webhooksCacheRef.current.fetchedAt) < ttlMs) {
+        return webhooksCacheRef.current.data;
+      }
+      const res = await fetch(WEBHOOKS_API, { method: 'GET' });
+      if (!res.ok) throw new Error(`Falha ao consultar webhooks (${res.status})`);
+      const json = await res.json();
+      webhooksCacheRef.current = { data: json, fetchedAt: now };
+      return json;
+    } catch (err: any) {
+      toast({
+        title: 'Erro ao consultar webhooks',
+        description: err?.message || 'Não foi possível obter os webhooks dos grupos.',
+        variant: 'destructive',
+      });
+      throw err;
+    }
+  }, []);
+
+  const normalize = (s: string) => s.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
+
+  const findWebhookForGroup = useCallback(async (groupName: string): Promise<string | null> => {
+    const data = await fetchWebhooks();
+    const grupos = Array.isArray(data?.grupos) ? data.grupos : [];
+    const target = normalize(groupName);
+
+    // Match exato normalizado
+    let group = grupos.find((g: any) => normalize(g.grupo_chamado || '') === target);
+    // Fallback: inclui/contém
+    if (!group) group = grupos.find((g: any) => normalize(g.grupo_chamado || '').includes(target) || target.includes(normalize(g.grupo_chamado || '')));
+    if (!group) return null;
+
+    const webhooks = Array.isArray(group.webhooks) ? group.webhooks : [];
+    const ativo = webhooks.find((w: any) => w?.ativo && typeof w?.url === 'string');
+    return ativo?.url || null;
+  }, [fetchWebhooks]);
+
+  const sendToGoogleChat = useCallback(async (webhookUrl: string, payload: any) => {
+    try {
+      const res = await fetch(webhookUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(
+          typeof payload === 'string' ? { text: payload } : payload
+        ),
+        // Nota: Pode falhar por CORS em alguns ambientes; se falhar, considerar proxy no backend.
+        mode: 'cors',
+      });
+      if (!res.ok) {
+        const text = await res.text().catch(() => '');
+        throw new Error(`Falha ao enviar para Google Chat (${res.status}): ${text}`);
+      }
+      return true;
+    } catch (err: any) {
+      toast({
+        title: 'Erro ao enviar para Google Chat',
+        description: err?.message || 'Não foi possível postar a mensagem no webhook.',
+        variant: 'destructive',
+      });
+      return false;
+    }
+  }, []);
+
+  const clearReconnectTimeout = () => {
+    if (reconnectTimeout.current) {
+      clearTimeout(reconnectTimeout.current);
+      reconnectTimeout.current = null;
+    }
+  };
+
+  const connect = useCallback(() => {
+    try {
+      if (ws.current && (ws.current.readyState === WebSocket.OPEN || ws.current.readyState === WebSocket.CONNECTING)) {
+        return;
+      }
+
+      ws.current = new WebSocket(WS_URL);
+      const current = ws.current;
+
+      const connectionTimeout = setTimeout(() => {
+        if (current && current.readyState === WebSocket.CONNECTING) {
+          current.close();
+          setLastError('Timeout de conexão');
+        }
+      }, 10000);
+
+      current.onopen = () => {
+        clearTimeout(connectionTimeout);
+        setIsConnected(true);
+        setLastError(null);
+        reconnectAttempts.current = 0;
+      };
+
+      current.onclose = (event) => {
+        clearTimeout(connectionTimeout);
+        setIsConnected(false);
+
+        // Reconexão exponencial simples (máx ~30s)
+        if (event.code !== 1000) {
+          const attempt = Math.min(reconnectAttempts.current + 1, 6);
+          reconnectAttempts.current = attempt;
+          const delay = Math.min(1000 * Math.pow(2, attempt), 30000);
+          clearReconnectTimeout();
+          reconnectTimeout.current = setTimeout(() => connect(), delay);
+        }
+      };
+
+      current.onerror = () => {
+        clearTimeout(connectionTimeout);
+        setLastError('Erro no WebSocket');
+      };
+
+      current.onmessage = () => {
+        // Para o chat, não precisamos tratar mensagens por enquanto.
+      };
+    } catch (err) {
+      setLastError('Falha ao iniciar WebSocket');
+    }
+  }, [WS_URL]);
+
+  const disconnect = useCallback(() => {
+    clearReconnectTimeout();
+    if (ws.current) {
+      try {
+        ws.current.close(1000, 'Client closed');
+      } catch {}
+      ws.current = null;
+    }
+    setIsConnected(false);
+  }, []);
+
+  const waitForOpen = useCallback(async (timeoutMs = 5000) => {
+    if (!ws.current) return false;
+    if (ws.current.readyState === WebSocket.OPEN) return true;
+    return new Promise<boolean>((resolve) => {
+      const start = Date.now();
+      const check = () => {
+        if (!ws.current) return resolve(false);
+        if (ws.current.readyState === WebSocket.OPEN) return resolve(true);
+        if (Date.now() - start > timeoutMs) return resolve(false);
+        setTimeout(check, 100);
+      };
+      check();
+    });
+  }, []);
+
+  const sendUpdateChat = useCallback(async (
+    chamado: number,
+    opts?: { timestamp?: string; sending?: boolean }
+  ) => {
+    try {
+      if (!ws.current || ws.current.readyState !== WebSocket.OPEN) {
+        connect();
+        const ok = await waitForOpen(7000);
+        if (!ok) {
+          toast({
+            title: 'Conexão indisponível',
+            description: 'Não foi possível conectar ao WebSocket para acionar o chat.',
+            variant: 'destructive',
+          });
+          return false;
+        }
+      }
+
+      const payload: UpdateChatPayload = {
+        action: 'updateChat',
+        chamado: Number(chamado),
+        timestamp_chat: opts?.timestamp ?? new Date().toISOString(),
+        sending_chat: opts?.sending ?? true,
+      };
+      ws.current!.send(JSON.stringify(payload));
+
+      toast({
+        title: 'Chat acionado',
+        description: `Solicitação de chat enviada para o chamado ${chamado}.`,
+      });
+      return true;
+    } catch (err: any) {
+      toast({
+        title: 'Erro ao acionar chat',
+        description: err?.message || 'Falha ao enviar a mensagem.',
+        variant: 'destructive',
+      });
+      return false;
+    }
+  }, [connect, waitForOpen]);
+
+  const sendToGroupChat = useCallback(async (groupName: string, message: string, chamado?: number) => {
+    const webhook = await findWebhookForGroup(groupName);
+    if (!webhook) {
+      toast({
+        title: 'Webhook não encontrado',
+        description: `Não há webhook ativo cadastrado para o grupo "${groupName}".`,
+        variant: 'destructive',
+      });
+      return false;
+    }
+    const ok = await sendToGoogleChat(webhook, message);
+    return ok;
+  }, [findWebhookForGroup, sendToGoogleChat]);
+
+  // Monta o payload de cards para Google Chat baseado no modelo fornecido
+  type AlertLike = {
+    chamado: string;
+    severidade_chamado?: string;
+    resumo_chamado?: string;
+    abertura_chamado?: string;
+    grupo_chamado?: string;
+    tipo_chamado?: string;
+  };
+
+  const TIME_MESSAGES = {
+    seven: 'tempo de 7 minutos',
+    twenty: 'tempo de 20 minutos',
+  } as const;
+
+  const buildAlertCardPayload = useCallback((alert: AlertLike) => {
+    // Define mensagem de tempo conforme regras solicitadas
+    const tipoRaw = alert.tipo_chamado ?? '';
+    const tipoNorm = normalize(tipoRaw);
+    const sevMatch = (alert.severidade_chamado ?? '').toString().match(/\d+/);
+    const sevNum = sevMatch ? parseInt(sevMatch[0], 10) : NaN;
+
+  const isIncident = tipoNorm.includes('incidente') || tipoNorm.includes('incident');
+  // cobre "alerta" (e variação sem acento/inglês)
+  const isAlerta = tipoNorm.includes('alerta') || tipoNorm.includes('alert');
+
+    let tempoMensagem = '';
+    if (isIncident) {
+      if (sevNum === 4 || sevNum === 5) tempoMensagem = TIME_MESSAGES.seven;
+      else if (sevNum === 3) tempoMensagem = TIME_MESSAGES.twenty;
+    } else if (isAlerta) {
+      if (sevNum === 4) tempoMensagem = TIME_MESSAGES.twenty;
+    }
+
+    return {
       cards: [
         {
           header: {
@@ -45,3 +308,39 @@
           ]
         }
       ]
+    };
+  }, []);
+
+  const sendAlertCardToGroupChat = useCallback(async (alert: AlertLike & { grupo_chamado: string }) => {
+    const webhook = await findWebhookForGroup(alert.grupo_chamado);
+    if (!webhook) {
+      toast({
+        title: 'Webhook não encontrado',
+        description: `Não há webhook ativo cadastrado para o grupo "${alert.grupo_chamado}".`,
+        variant: 'destructive',
+      });
+      return false;
+    }
+    const payload = buildAlertCardPayload(alert);
+    const ok = await sendToGoogleChat(webhook, payload);
+    return ok;
+  }, [buildAlertCardPayload, findWebhookForGroup, sendToGoogleChat]);
+
+  useEffect(() => {
+    connect();
+    return () => disconnect();
+  }, [connect, disconnect]);
+
+  return {
+    isConnected,
+    lastError,
+    connect,
+    disconnect,
+    sendUpdateChat,
+    fetchWebhooks,
+    sendToGroupChat,
+    sendAlertCardToGroupChat,
+  };
+};
+
+export default useChat;
