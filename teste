@@ -1,7 +1,6 @@
-MONITORINGCARDS:
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card } from '@/components/ui/card';
 import { useState } from 'react';
-import { AlertTriangle, AlertCircle, Clock, Timer, UserCheck, BarChart3, MessageCircle, CheckCircle2 } from 'lucide-react';
+import { AlertTriangle, Clock, Timer, TrendingUp } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 interface AlertData {
@@ -25,9 +24,6 @@ interface MonitoringCardsProps {
 export const MonitoringCards = ({ alertData, onFilterSelect }: MonitoringCardsProps) => {
   const [activeFilter, setActiveFilter] = useState<string | null>(null);
 
-  // Usando o hook para obter os chamados acionados
-
-  // Função toggle do filtro
   const handleCardClick = (filterKey: string) => {
     if (activeFilter === filterKey) {
       setActiveFilter(null);
@@ -38,724 +34,236 @@ export const MonitoringCards = ({ alertData, onFilterSelect }: MonitoringCardsPr
     }
   };
 
-  // Função para calcular tempo restante em minutos
   const getTimeRemaining = (openingTime: string) => {
     const now = new Date();
     const opening = new Date(openingTime);
     const diffMs = now.getTime() - opening.getTime();
     const diffMinutes = Math.floor(diffMs / (1000 * 60));
-
-    // Assumindo SLA de 60 minutos para alertas críticos
     const slaMinutes = 60;
     return slaMinutes - diffMinutes;
   };
 
-  // Cards métricas verticais
   const tempoExpirado = alertData.filter(alert => getTimeRemaining(alert.abertura_chamado) <= 0).length;
   const cincoMinRest = alertData.filter(alert => getTimeRemaining(alert.abertura_chamado) > 0 && getTimeRemaining(alert.abertura_chamado) <= 5).length;
   const dezMinRest = alertData.filter(alert => getTimeRemaining(alert.abertura_chamado) > 5 && getTimeRemaining(alert.abertura_chamado) <= 10).length;
+  
+  const sev4Incidents = alertData.filter(alert => 
+    alert.tipo_chamado.toLowerCase().includes('incidente') && 
+    alert.severidade_chamado.includes('4')
+  ).length;
+  
+  const sev4Alerts = alertData.filter(alert => 
+    alert.tipo_chamado.toLowerCase().includes('alerta') && 
+    alert.severidade_chamado.includes('4') &&
+    alert.acionado !== 'OK'
+  ).length;
+  
+  const sev3Incidents = alertData.filter(alert => 
+    alert.tipo_chamado.toLowerCase().includes('incidente') && 
+    alert.severidade_chamado.includes('3')
+  ).length;
 
-  // Ajuste de altura para caber 4 blocos sem scroll vertical
-  // Altura total disponível para cards: cerca de 90vh (descontando header/footer/paddings)
-  // Cada bloco: gap pequeno, cards menores e central reduzido
+  const pendenteChat = alertData.filter(alert => !alert.chat && alert.acionado !== 'OK').length;
+  const semOperador = alertData.filter(alert => alert.acionado === 'N/A' || !alert.acionado).length;
+
   return (
-    <div className="flex flex-col items-center w-full gap-2" style={{height: '100%', justifyContent: 'center'}}>
-      {/* Bloco 1 */}
-      <div className="flex flex-col items-center w-full gap-1">
-        <div className="w-3/4">
-          <VerticalCard
-            title="5 MINUTOS RESTANTES"
-            count={cincoMinRest}
-            filterKey="CINCO_MINUTOS"
-            isActive={activeFilter === 'CINCO_MINUTOS'}
-            onClick={() => handleCardClick('CINCO_MINUTOS')}
-            small
-          />
-        </div>
-        <div className="w-full">
-          <VerticalCard
-            title="TEMPO EXPIRADO"
-            count={tempoExpirado}
-            filterKey="TEMPO_EXPIRADO"
-            isActive={activeFilter === 'TEMPO_EXPIRADO'}
-            onClick={() => handleCardClick('TEMPO_EXPIRADO')}
-            medium
-          />
-        </div>
-        <div className="w-3/4">
-          <VerticalCard
-            title="10 MINUTOS RESTANTES"
-            count={dezMinRest}
-            filterKey="DEZ_MINUTOS"
-            isActive={activeFilter === 'DEZ_MINUTOS'}
-            onClick={() => handleCardClick('DEZ_MINUTOS')}
-            small
-          />
-        </div>
-      </div>
-      {/* Bloco 2 */}
-      <div className="flex flex-col items-center w-full gap-1">
-        <div className="w-3/4">
-          <VerticalCard
-            title="5 MINUTOS RESTANTES"
-            count={cincoMinRest}
-            filterKey="CINCO_MINUTOS_2"
-            isActive={activeFilter === 'CINCO_MINUTOS_2'}
-            onClick={() => handleCardClick('CINCO_MINUTOS_2')}
-            small
-          />
-        </div>
-        <div className="w-full">
-          <VerticalCard
-            title="TEMPO EXPIRADO"
-            count={tempoExpirado}
-            filterKey="TEMPO_EXPIRADO_2"
-            isActive={activeFilter === 'TEMPO_EXPIRADO_2'}
-            onClick={() => handleCardClick('TEMPO_EXPIRADO_2')}
-            medium
-          />
-        </div>
-        <div className="w-3/4">
-          <VerticalCard
-            title="10 MINUTOS RESTANTES"
-            count={dezMinRest}
-            filterKey="DEZ_MINUTOS_2"
-            isActive={activeFilter === 'DEZ_MINUTOS_2'}
-            onClick={() => handleCardClick('DEZ_MINUTOS_2')}
-            small
-          />
-        </div>
-      </div>
-      {/* Bloco 3 */}
-      <div className="flex flex-col items-center w-full gap-1">
-        <div className="w-3/4">
-          <VerticalCard
-            title="5 MINUTOS RESTANTES"
-            count={cincoMinRest}
-            filterKey="CINCO_MINUTOS_3"
-            isActive={activeFilter === 'CINCO_MINUTOS_3'}
-            onClick={() => handleCardClick('CINCO_MINUTOS_3')}
-            small
-          />
-        </div>
-        <div className="w-full">
-          <VerticalCard
-            title="TEMPO EXPIRADO"
-            count={tempoExpirado}
-            filterKey="TEMPO_EXPIRADO_3"
-            isActive={activeFilter === 'TEMPO_EXPIRADO_3'}
-            onClick={() => handleCardClick('TEMPO_EXPIRADO_3')}
-            medium
-          />
-        </div>
-        <div className="w-3/4">
-          <VerticalCard
-            title="10 MINUTOS RESTANTES"
-            count={dezMinRest}
-            filterKey="DEZ_MINUTOS_3"
-            isActive={activeFilter === 'DEZ_MINUTOS_3'}
-            onClick={() => handleCardClick('DEZ_MINUTOS_3')}
-            small
-          />
-        </div>
-      </div>
-      {/* Bloco 4 */}
-      <div className="flex flex-col items-center w-full gap-1">
-        <div className="w-3/4">
-          <VerticalCard
-            title="5 MINUTOS RESTANTES"
-            count={cincoMinRest}
-            filterKey="CINCO_MINUTOS_4"
-            isActive={activeFilter === 'CINCO_MINUTOS_4'}
-            onClick={() => handleCardClick('CINCO_MINUTOS_4')}
-            small
-          />
-        </div>
-        <div className="w-full">
-          <VerticalCard
-            title="TEMPO EXPIRADO"
-            count={tempoExpirado}
-            filterKey="TEMPO_EXPIRADO_4"
-            isActive={activeFilter === 'TEMPO_EXPIRADO_4'}
-            onClick={() => handleCardClick('TEMPO_EXPIRADO_4')}
-            medium
-          />
-        </div>
-        <div className="w-3/4">
-          <VerticalCard
-            title="10 MINUTOS RESTANTES"
-            count={dezMinRest}
-            filterKey="DEZ_MINUTOS_4"
-            isActive={activeFilter === 'DEZ_MINUTOS_4'}
-            onClick={() => handleCardClick('DEZ_MINUTOS_4')}
-            small
-          />
-        </div>
-      </div>
+    <div className="flex flex-col gap-4 h-full">
+      {/* Grupo: Cenários de Crise */}
+      <CardGroup title="CENÁRIO DE CRISE">
+        <MetricCard
+          label="Incidentes SEV4"
+          value={sev4Incidents}
+          icon={AlertTriangle}
+          variant="danger"
+          filterKey="SEV4_INCIDENT"
+          isActive={activeFilter === 'SEV4_INCIDENT'}
+          onClick={() => handleCardClick('SEV4_INCIDENT')}
+        />
+      </CardGroup>
+
+      {/* Grupo: Tempo */}
+      <CardGroup title="TEMPO">
+        <MetricCard
+          label="5 min restantes"
+          value={cincoMinRest}
+          icon={Clock}
+          variant="warning"
+          size="small"
+          filterKey="CINCO_MINUTOS"
+          isActive={activeFilter === 'CINCO_MINUTOS'}
+          onClick={() => handleCardClick('CINCO_MINUTOS')}
+        />
+        <MetricCard
+          label="Tempo Expirado"
+          value={tempoExpirado}
+          icon={Timer}
+          variant="danger"
+          size="medium"
+          filterKey="TEMPO_EXPIRADO"
+          isActive={activeFilter === 'TEMPO_EXPIRADO'}
+          onClick={() => handleCardClick('TEMPO_EXPIRADO')}
+        />
+        <MetricCard
+          label="10 min restantes"
+          value={dezMinRest}
+          icon={Clock}
+          variant="warning"
+          size="small"
+          filterKey="DEZ_MINUTOS"
+          isActive={activeFilter === 'DEZ_MINUTOS'}
+          onClick={() => handleCardClick('DEZ_MINUTOS')}
+        />
+      </CardGroup>
+
+      {/* Grupo: Alertas SEV4 */}
+      <CardGroup title="ALERTAS SEV4">
+        <MetricCard
+          label="Alertas SEV4"
+          value={sev4Alerts}
+          icon={AlertTriangle}
+          variant="primary"
+          filterKey="SEV4_ALERT"
+          isActive={activeFilter === 'SEV4_ALERT'}
+          onClick={() => handleCardClick('SEV4_ALERT')}
+        />
+      </CardGroup>
+
+      {/* Grupo: Pendente Envio */}
+      <CardGroup title="PENDENTE ENVIO">
+        <MetricCard
+          label="Pendente Chat"
+          value={pendenteChat}
+          icon={TrendingUp}
+          variant="accent"
+          filterKey="PENDENTE_CHAT"
+          isActive={activeFilter === 'PENDENTE_CHAT'}
+          onClick={() => handleCardClick('PENDENTE_CHAT')}
+        />
+      </CardGroup>
+
+      {/* Grupo: Incidentes SEV3 */}
+      <CardGroup title="INCIDENTES SEV3">
+        <MetricCard
+          label="Incidentes SEV3"
+          value={sev3Incidents}
+          icon={AlertTriangle}
+          variant="secondary"
+          filterKey="SEV3_INCIDENT"
+          isActive={activeFilter === 'SEV3_INCIDENT'}
+          onClick={() => handleCardClick('SEV3_INCIDENT')}
+        />
+      </CardGroup>
+
+      {/* Grupo: Sem Operador */}
+      <CardGroup title="SEM OPERADOR">
+        <MetricCard
+          label="Sem Operador"
+          value={semOperador}
+          icon={AlertTriangle}
+          variant="muted"
+          filterKey="SEM_OPERADOR"
+          isActive={activeFilter === 'SEM_OPERADOR'}
+          onClick={() => handleCardClick('SEM_OPERADOR')}
+        />
+      </CardGroup>
     </div>
   );
-// Novo componente para o layout vertical dos cards
-// Ajuste de tamanho dos cards para caber 4 blocos na tela
-function VerticalCard({ title, count, filterKey, isActive, onClick, small, medium }: { title: string, count: number, filterKey: string, isActive: boolean, onClick: () => void, small?: boolean, medium?: boolean }) {
-  let heightClass = 'h-8 text-xs';
-  if (medium) heightClass = 'h-16 text-base md:text-lg font-bold';
-  if (small) heightClass = 'h-8 text-xs';
-  return (
-    <div
-      onClick={onClick}
-      className={cn(
-        'rounded-md border border-border bg-card text-card-foreground shadow transition-all duration-200 cursor-pointer flex flex-col items-center justify-center',
-        heightClass,
-        isActive && 'ring-2 ring-primary/60 ring-offset-2 ring-offset-background',
-        'hover:bg-hover-bg/80 px-2'
-      )}
-      style={{ minHeight: small ? 24 : medium ? 48 : 32 }}
-    >
-      <span className="tracking-wide uppercase leading-tight">{title}</span>
-      <span className={cn('ml-2 font-bold', medium ? 'text-xl' : 'text-base')}>{count}</span>
-    </div>
-  );
-}
 };
 
-interface CompactCardProps {
+interface CardGroupProps {
   title: string;
-  count: number;
-  totalCount: number;
-  icon: React.ComponentType<any>;
-  type: string;
-  filterKey: string;
-  isActive: boolean;
-  onClick: () => void;
+  children: React.ReactNode;
 }
 
-function CompactCard({ title, count, totalCount, icon: Icon, type, isActive, onClick }: CompactCardProps) {
-  // Todos os cards azuis, exceto tempo-expirado (vermelho) e cenarios-crise (roxo)
-  const typeStyles: Record<string, any> = {
-    default: {
-      bg: 'bg-blue-500/10',
-      border: 'border-blue-500/30',
-      text: 'text-blue-600',
-      hover: 'hover:bg-blue-500/20 hover:border-blue-500/50',
-      animation: '',
-    },
-    'tempo-expirado': {
-      bg: 'bg-red-500/10',
-      border: 'border-red-500/30',
-      text: 'text-red-600',
-      hover: 'hover:bg-red-500/20 hover:border-red-500/50',
-      animation: count > 0 ? 'animate-pulse-critical' : '',
-    },
-    'cenarios-crise': {
-      bg: 'bg-purple-500/10',
-      border: 'border-purple-500/30',
-      text: 'text-purple-600',
-      hover: 'hover:bg-purple-500/20 hover:border-purple-500/50',
-      animation: count > 0 ? 'animate-glow-crisis' : '',
-    },
-  };
-
-  const style = typeStyles[type] || typeStyles.default;
-
+function CardGroup({ title, children }: CardGroupProps) {
   return (
-    <div
-      onClick={onClick}
-      className={cn(
-        "p-6 rounded-lg border-2 cursor-pointer transition-all duration-300 hover:scale-105",
-        style.bg,
-        style.border,
-        style.hover,
-        style.animation,
-        isActive && "ring-2 ring-primary/50 ring-offset-2 ring-offset-background"
-      )}
-    >
-      <div className="flex flex-col items-center text-center space-y-3">
-        <div className={cn("p-2 rounded-lg bg-black/20", style.text)}>
-          <Icon size={20} />
-        </div>
-
-        <div className={cn("text-3xl font-bold", style.text)}>
-          {count}
-        </div>
-
-        <div className="space-y-1">
-          <div className={cn("text-xs font-medium uppercase tracking-wide", style.text)}>
-            {title}
-          </div>
-          <div className="text-xs text-muted-foreground">
-            {count === 0 ? "Nenhum pendente" : `${count} de ${totalCount}`}
-          </div>
-        </div>
+    <div className="flex flex-col gap-2">
+      <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wider px-2">
+        {title}
       </div>
-
-      {/* Active indicator */}
-      {isActive && (
-        <div className="absolute top-2 right-2 w-2 h-2 bg-primary rounded-full animate-pulse" />
-      )}
+      <div className="flex flex-col gap-2">
+        {children}
+      </div>
     </div>
   );
 }
 
-interface CompactSubCardProps {
+interface MetricCardProps {
   label: string;
-  count: number;
-  type: string;
+  value: number;
+  icon: React.ComponentType<any>;
+  variant: 'primary' | 'secondary' | 'danger' | 'warning' | 'accent' | 'muted';
+  size?: 'small' | 'medium' | 'large';
   filterKey: string;
   isActive: boolean;
   onClick: () => void;
 }
 
-function CompactSubCard({ label, count, type, isActive, onClick }: CompactSubCardProps) {
-  const typeStyles = {
-    'total': 'text-blue-600 border-blue-500/20 hover:border-blue-500/40',
-    'pendente-chat': 'text-orange-600 border-orange-500/20 hover:border-orange-500/40',
-    'confirmados': 'text-green-600 border-green-500/20 hover:border-green-500/40',
-    'tempo-expirado': 'text-red-600 border-red-500/20 hover:border-red-500/40',
-    'dez-minutos': 'text-yellow-600 border-yellow-500/20 hover:border-yellow-500/40',
-    'cinco-minutos': 'text-amber-600 border-amber-500/20 hover:border-amber-500/40',
-    'com-operador': 'text-emerald-600 border-emerald-500/20 hover:border-emerald-500/40',
-    'cenarios-crise': 'text-purple-600 border-purple-500/20 hover:border-purple-500/40',
+function MetricCard({ 
+  label, 
+  value, 
+  icon: Icon, 
+  variant, 
+  size = 'large',
+  isActive, 
+  onClick 
+}: MetricCardProps) {
+  const variantStyles = {
+    primary: 'bg-primary/10 border-primary/30 hover:bg-primary/20 hover:border-primary/50 text-primary',
+    secondary: 'bg-secondary/10 border-secondary/30 hover:bg-secondary/20 hover:border-secondary/50 text-secondary',
+    danger: 'bg-destructive/10 border-destructive/30 hover:bg-destructive/20 hover:border-destructive/50 text-destructive',
+    warning: 'bg-warning/10 border-warning/30 hover:bg-warning/20 hover:border-warning/50 text-warning',
+    accent: 'bg-accent/10 border-accent/30 hover:bg-accent/20 hover:border-accent/50 text-accent',
+    muted: 'bg-muted border-border hover:bg-card-hover text-muted-foreground',
+  };
+
+  const sizeStyles = {
+    small: 'py-2 px-3',
+    medium: 'py-4 px-4',
+    large: 'py-5 px-4',
+  };
+
+  const textSizeStyles = {
+    small: 'text-xs',
+    medium: 'text-sm',
+    large: 'text-base',
+  };
+
+  const valueSizeStyles = {
+    small: 'text-lg',
+    medium: 'text-2xl',
+    large: 'text-3xl',
   };
 
   return (
-    <div
+    <Card
       onClick={onClick}
       className={cn(
-        "p-3 rounded-lg bg-panel-bg/50 border cursor-pointer transition-all duration-200 hover:scale-105",
-        typeStyles[type as keyof typeof typeStyles],
-        isActive && "ring-2 ring-primary/50 ring-offset-1 ring-offset-background"
+        'cursor-pointer transition-all duration-300 border-2',
+        variantStyles[variant],
+        sizeStyles[size],
+        isActive && 'ring-2 ring-primary ring-offset-2 ring-offset-background scale-[1.02]',
+        'hover:scale-[1.02] hover:shadow-lg'
       )}
     >
-      <div className="flex items-center justify-between">
-        <span className="text-sm text-muted-foreground">{label}</span>
-        <span className={cn("text-lg font-semibold", typeStyles[type as keyof typeof typeStyles].split(' ')[0])}>
-          {count}
-        </span>
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex-1 flex flex-col gap-1">
+          <span className={cn('font-medium uppercase tracking-wide', textSizeStyles[size])}>
+            {label}
+          </span>
+          <span className={cn('font-bold', valueSizeStyles[size])}>
+            {value}
+          </span>
+        </div>
+        <div className={cn(
+          'rounded-lg p-2 bg-card/50',
+          size === 'small' && 'p-1.5'
+        )}>
+          <Icon className={cn(
+            size === 'small' ? 'h-4 w-4' : size === 'medium' ? 'h-5 w-5' : 'h-6 w-6'
+          )} />
+        </div>
       </div>
-    </div>
+    </Card>
   );
 }
-
-
-
-DASHBOARD:
-import { useState, useEffect } from 'react';
-import {
-  Settings,
-  Sun,
-  Moon,
-  AlertTriangle,
-  FileText,
-  MessageSquare,
-  BookOpen,
-  Shield
-} from 'lucide-react';
-import { Button } from '@/components/ui/button';
-import { SidebarProvider } from '@/components/ui/sidebar';
-import { toast } from '@/hooks/use-toast';
-import { MonitoringCards } from './MonitoringCards';
-import { ActionTable } from './ActionTable';
-import { CriticalIncidents } from './CriticalIncidents';
-import { RDMTracker } from './RDMTracker';
-import { ShiftNotes } from './ShiftNotes';
-import { WebhookConfig } from './WebhookConfig';
-import { InstructionsSection } from './InstructionsSection';
-import { Sheet, SheetContent } from "@/components/ui/sheet";
-import OutageManager, { Outage } from './OutageManager';
-import  MaintenancePage  from './MaintenancePage';
-import { useWebsocketTimers } from '@/hooks/useWebsocketTimers';
-
-export interface AlertData {
-  id: string;
-  chamado: string;
-  tipo_chamado: string;
-  grupo_chamado: string;
-  status_chamado: string;
-  abertura_chamado: string;
-  resumo_chamado: string;
-  severidade_chamado: string;
-  acionado: string;
-  chat: boolean;
-  link_chamado: string;
-  timestamp_chat?: string;
-  sending_chat?: boolean;
-}
-
-const Dashboard = () => {
-  const [isDarkMode, setIsDarkMode] = useState(true);
-  const [showWebhookConfig, setShowWebhookConfig] = useState(false);
-  const [alertData, setAlertData] = useState<AlertData[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [activeSection, setActiveSection] = useState<'incidents' | 'rdm' | 'notes' | 'instructions' | 'security' | null>(null);
-  const [filter, setFilter] = useState<string | null>(null);
-  const [outages, setOutages] = useState<Outage[]>([]);
-  const { timers, updateOutage, isConnected } = useWebsocketTimers();
-
-  const fetchAlertData = async () => {
-    setLoading(true);
-    try {
-      const response = await fetch('https://f6ffk8e9fe.execute-api.us-east-1.amazonaws.com/prod/dados');
-
-      if (!response.ok) {
-        throw new Error(`HTTP error! status_chamado: ${response.status}`);
-      }
-
-      const data = await response.json();
-      console.log("data from API:", data);
-
-      // Se a API já retorna array
-      const apiData = Array.isArray(data)
-        ? data
-        : data.body
-          ? JSON.parse(data.body)
-          : [];
-
-      if (!apiData || apiData.length === 0) {
-        throw new Error("Nenhum dado encontrado");
-      }
-
-  const transformedData: AlertData[] = apiData.map((item: any, index: number) => ({
-        id: `alert-${index}`,
-        tipo_chamado: item.tipo_chamado || 'N/A',
-        chamado: item.chamado || 'N/A',
-        grupo_chamado: item.grupo_chamado || 'N/A',
-        status_chamado: item.status_chamado || 'N/A',
-        abertura_chamado: item.dat_abertura_chamado || item.abertura_chamado || item.data_abertura || '',
-        resumo_chamado: item.resumo_chamado || 'Título não disponível',
-        severidade_chamado: item.severidade_chamado || 'N/A',
-        acionado: item.acionado || 'N/A',
-        chat: false,
-        link_chamado: item.link_chamado || '',
-        // Novos campos de chat (se existirem na API)
-        timestamp_chat: item.timestamp_chat || item.chat_timestamp || undefined,
-        // Normaliza sending_chat para boolean (aceita booleano, string "true"/"false", 1/0)
-        sending_chat:
-          typeof item.sending_chat === 'boolean'
-            ? item.sending_chat
-            : typeof item.sending_chat === 'string'
-              ? item.sending_chat.trim().toLowerCase() === 'true'
-              : typeof item.sending_chat === 'number'
-                ? item.sending_chat === 1
-                : undefined,
-      }));
-
-      setAlertData(transformedData);
-
-      const unacknowledged = transformedData.filter(alert => !alert.acionado);
-      if (unacknowledged.length > 0) {
-        playAlertSound();
-      }
-    } catch (error) {
-      console.error('Error fetching data:', error);
-      toast({
-        title: "Erro ao buscar dados",
-        description: "Não foi possível conectar com a API",
-        variant: "destructive",
-      });
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const playAlertSound = () => {
-    const audio = new Audio('data:audio/wav;base64,UklGRnoGAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQoGAACBhYqFbF1fdJivrJBhNjVgodDbq2EcBj+a2/LDciUFLIHO8tiJNwgZaLvt559NEAxQp+PwtmMcBjiR1/LMeSwFJHfH8N2QQAoUXrTp66hVFApGn+Dqu2sgBDR+w/PCaWEbEBOa5rWgdyoEKAA=');
-    audio.play().catch(() => {
-      console.log('Alert sound could not be played');
-    });
-  };
-
-  const toggleTheme = () => {
-    setIsDarkMode(!isDarkMode);
-    if (isDarkMode) {
-      document.documentElement.classList.remove('dark');
-      document.documentElement.classList.add('light');
-    } else {
-      document.documentElement.classList.remove('light');
-      document.documentElement.classList.add('dark');
-    }
-  };
-
-  const updateAlertAcknowledgment = (alertId: string, acknowledged: boolean) => {
-    setAlertData(prev =>
-      prev.map(alert =>
-        alert.id === alertId
-          ? { ...alert, chat: acknowledged }
-          : alert
-      )
-    );
-  };
-
-  useEffect(() => {
-    fetchAlertData();
-    const interval = setInterval(fetchAlertData, 600000);
-    return () => clearInterval(interval);
-  }, []);
-
-  useEffect(() => {
-    document.documentElement.classList.add('dark');
-  }, []);
-
-  // Persistência dos outages (localStorage) + migração simples
-  useEffect(() => {
-    try {
-      const raw = localStorage.getItem('outages');
-      if (raw) {
-        const parsed: any[] = JSON.parse(raw);
-        if (Array.isArray(parsed)) {
-          // Migração: se vierem objetos com expiresAt/startAt ausente, converte para novo formato
-          const mapped: Outage[] = parsed.map((o: any) => {
-            if (typeof o.startAt === 'number' && typeof o.endAt === 'number') return o as Outage;
-            const created = typeof o.createdAt === 'number' ? o.createdAt : Date.now();
-            const startAt = created;
-            const endAt = typeof o.expiresAt === 'number' ? o.expiresAt : created + 30 * 60000;
-            return { id: o.id || `outage-${created}`, title: o.title, startAt, endAt, createdAt: created } as Outage;
-          });
-          setOutages(mapped);
-        } else {
-          setOutages([]);
-        }
-      }
-    } catch {}
-  }, []);
-
-  useEffect(() => {
-    try {
-      localStorage.setItem('outages', JSON.stringify(outages));
-    } catch {}
-  }, [outages]);
-
-  // Limpeza periódica de expirados
-  useEffect(() => {
-    const id = setInterval(() => {
-      const now = Date.now();
-      setOutages((prev) => prev.filter((o) => now <= o.endAt));
-    }, 60000);
-    return () => clearInterval(id);
-  }, []);
-
-  const addOutage = (title: string, startAt: number, endAt: number, numeroChamado: string) => {
-    const id = `outage-${startAt}-${Math.random().toString(36).slice(2, 8)}`;
-    // Envia para o WebSocket/Lambda
-    if (numeroChamado && updateOutage) {
-      // Converte timestamps para string ISO UTC
-      const toIsoUtc = (ms: number) => new Date(ms).toISOString();
-      updateOutage(Number(numeroChamado), {
-        outage_title: title,
-        outage_start: toIsoUtc(startAt),
-        outage_end: toIsoUtc(endAt)
-      });
-    }
-    // Atualiza localmente também (opcional, pode ser removido se quiser só via backend)
-    setOutages((prev) => [
-      ...prev.filter(o => o.title !== title || !(startAt <= o.endAt && endAt >= o.startAt)),
-      { id, title, startAt, endAt, createdAt: Date.now(), numeroChamado }
-    ]);
-  };
-
-  const removeOutage = (id: string) => {
-    setOutages((prev) => prev.filter((o) => o.id !== id));
-  };
-
-  const sidebarItems = [
-    { title: "Incidentes Críticos", icon: AlertTriangle, key: 'incidents' as const },
-    { title: "Acompanhamento RDMs", icon: FileText, key: 'rdm' as const },
-    { title: "Recados do Turno", icon: MessageSquare, key: 'notes' as const },
-    { title: "Instruções Operacionais", icon: BookOpen, key: 'instructions' as const },
-  ];
-
-  const nowTs = Date.now();
-  const activeOutages = outages.filter(o => nowTs >= o.startAt && nowTs <= o.endAt);
-
-  const filteredData = filter
-    ? alertData.filter(alert => {
-      if (filter === 'SEV4_INCIDENT') {
-        return alert.tipo_chamado.toLowerCase().includes('incidente')
-          && alert.severidade_chamado.includes('4')
-      }
-      if (filter === 'SEV4_INCIDENT_TOTAL') {
-        return alert.tipo_chamado.toLowerCase().includes('incidente')
-          && alert.severidade_chamado.includes('4');
-      }
-      if (filter === 'SEV4_ALERT') {
-        return alert.tipo_chamado.toLowerCase().includes('alerta')
-          && alert.severidade_chamado.includes('4')
-          && alert.acionado !== 'OK'
-      }
-      if (filter === 'SEV4_ALERT_TOTAL') {
-        return alert.tipo_chamado.toLowerCase().includes('alerta')
-          && alert.severidade_chamado.includes('4');
-      }
-      if (filter === 'SEV3_INCIDENT') {
-        return alert.tipo_chamado.toLowerCase().includes('incidente')
-          && alert.severidade_chamado.includes('3')
-      }
-      if (filter === 'SEV3_INCIDENT_TOTAL') {
-        return alert.tipo_chamado.toLowerCase().includes('incidente')
-          && alert.severidade_chamado.includes('3');
-      }
-      return true;
-    })
-    : alertData;
-
-  // Aplica filtro de outages (oculta itens cujo título contenha o termo)
-  const outageFilteredData = filteredData.filter(alert => {
-    const title = (alert.resumo_chamado || '').trim().toLowerCase();
-    return !activeOutages.some(o => title === String(o.title || '').trim().toLowerCase());
-  });
-
-  // WebSocket: escuta eventos updateOutage
-  useEffect(() => {
-    // Busca todos os outages dos timers (TimerState)
-    const outagesFromTimers: Outage[] = [];
-    timers.forEach((state) => {
-      // Só adiciona se tiver campos de outage válidos vindos do backend
-      if (state && state.titulo_outage && state.data_inicio_outage && state.data_fim_outage) {
-        outagesFromTimers.push({
-          id: `outage-${state.chamado}`,
-          title: state.titulo_outage,
-          startAt: Number(state.data_inicio_outage),
-          endAt: Number(state.data_fim_outage),
-          createdAt: state.outage_updatedAt ? new Date(state.outage_updatedAt).getTime() : undefined,
-          numeroChamado: state.chamado ? String(state.chamado) : undefined,
-        });
-      }
-    });
-    // Se houver outages do WebSocket, prioriza eles
-    if (outagesFromTimers.length > 0) {
-      setOutages(outagesFromTimers);
-    }
-    // Se não houver, mantém os outages locais
-  }, [timers]);
-
-  return (
-    <div className="min-h-screen flex flex-col bg-background text-foreground">
-      {/* Header */}
-      <div className="w-full bg-dashboard-bg border-b border-border p-6 text-center">
-        <h1
-          className="text-3xl font-bold mb-2"
-          style={{ color: isDarkMode ? '#d2d3d8ff' : '#4a90e2' }}
-        >
-          NEMO - PAINEL DE MONITORAMENTO
-        </h1>
-      </div>
-
-      {/* Main layout: Cards | Table | Sidebar */}
-      <div className="flex flex-1 min-h-0">
-        {/* Cards à esquerda */}
-        <div className="flex flex-col gap-4 p-4 bg-panel-bg border-r border-border min-w-[260px] max-w-xs w-full justify-start items-stretch">
-          <MonitoringCards
-            alertData={alertData}
-            onFilterSelect={(filterKey) => setFilter(prev => prev === filterKey ? null : filterKey)}
-          />
-        </div>
-
-        {/* Tabela central */}
-        <div className="flex-1 flex flex-col bg-dashboard-bg p-6 overflow-auto">
-          <div className="flex-1 flex flex-col justify-start items-center">
-            <div className="w-full max-w-5xl">
-              <ActionTable
-                alertData={outageFilteredData}
-                onUpdateAcknowledgment={updateAlertAcknowledgment}
-                loading={loading}
-              />
-            </div>
-          </div>
-        </div>
-
-        {/* Sidebar à direita */}
-        <div className="w-20 bg-gradient-to-b from-sidebar-background to-sidebar-background/95 border-l border-sidebar-border/50 backdrop-blur-sm flex flex-col justify-between sticky top-0 h-screen shadow-lg" style={{ background: 'var(--sidebar-gradient)', boxShadow: 'var(--sidebar-glow)' }}>
-          {/* Parte superior - Menu items */}
-          <div className="flex flex-col gap-3 p-3 flex-1">
-            {sidebarItems.map((item) => (
-              <Button
-                key={item.key}
-                variant="ghost"
-                size="icon"
-                onClick={() => setActiveSection(activeSection === item.key ? null : item.key)}
-                className={`w-14 h-14 rounded-xl transition-all duration-300 relative group ${activeSection === item.key
-                  ? 'bg-gradient-to-br from-sidebar-primary to-sidebar-primary/90 text-sidebar-primary-foreground shadow-lg scale-105'
-                  : 'text-sidebar-foreground hover:bg-sidebar-accent/80 hover:text-sidebar-accent-foreground hover:scale-105'
-                  }`}
-                style={activeSection === item.key ? { boxShadow: 'var(--sidebar-active-glow)' } : { transition: 'all 0.3s ease' }}
-                title={item.title}
-              >
-                <item.icon className="h-6 w-6 transition-transform duration-300 group-hover:scale-110" />
-                {/* Active indicator */}
-                {activeSection === item.key && (
-                  <div className="absolute -right-1 top-1/2 transform -translate-y-1/2 w-1 h-8 bg-sidebar-primary-foreground rounded-full opacity-80"></div>
-                )}
-              </Button>
-            ))}
-          </div>
-
-          {/* Parte inferior - Security + Settings */}
-          <div className="flex flex-col gap-3 p-3 border-t border-sidebar-border/30">
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={() => setActiveSection('security')}
-              className="w-14 h-14 rounded-xl text-sidebar-foreground hover:bg-sidebar-accent/80 hover:text-sidebar-accent-foreground transition-all duration-300 hover:scale-105 group"
-              title="Outage"
-              style={{ transition: 'all 0.3s ease' }}
-            >
-              <Shield className="h-5 w-5 transition-transform duration-300 group-hover:scale-110" />
-            </Button>
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={() => setShowWebhookConfig(true)}
-              className="w-14 h-14 rounded-xl text-sidebar-foreground hover:bg-sidebar-accent/80 hover:text-sidebar-accent-foreground transition-all duration-300 hover:scale-105 group"
-              title="Configuração de Webhooks"
-              style={{ transition: 'all 0.3s ease' }}
-            >
-              <Settings className="h-5 w-5 transition-transform duration-300 group-hover:rotate-90" />
-            </Button>
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={toggleTheme}
-              className="w-14 h-14 rounded-xl text-sidebar-foreground hover:bg-sidebar-accent/80 hover:text-sidebar-accent-foreground transition-all duration-300 hover:scale-105 group"
-              title="Trocar Tema"
-              style={{ transition: 'all 0.3s ease' }}
-            >
-              <div className="transition-transform duration-500 group-hover:rotate-180">
-                {isDarkMode ? <Sun className="h-5 w-5" /> : <Moon className="h-5 w-5" />}
-              </div>
-            </Button>
-          </div>
-        </div>
-      </div>
-
-      {/* Drawer */}
-      <Sheet open={!!activeSection} onOpenChange={() => setActiveSection(null)}>
-        <SheetContent
-          side="right"
-          className="w-full"
-          style={{ width: '50vw', maxWidth: '1000px' }}
-        >
-          <div className="mt-4">
-            {activeSection === 'incidents' && <CriticalIncidents />}
-            {activeSection === 'rdm' && <RDMTracker />}
-            {activeSection === 'notes' && <ShiftNotes />}
-            {activeSection === 'instructions' && <InstructionsSection />}
-            {activeSection === 'security' && (
-              <OutageManager
-                outages={outages}
-                onAdd={addOutage}
-                onRemove={removeOutage}
-              />
-            )}
-          </div>
-        </SheetContent>
-      </Sheet>
-
-      {/* Webhook Config Modal */}
-      <WebhookConfig
-        open={showWebhookConfig}
-        onOpenChange={setShowWebhookConfig}
-      />
-    </div>
-  );
-};
-
-export default Dashboard;
