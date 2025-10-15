@@ -1,269 +1,327 @@
-import { Card } from '@/components/ui/card';
-import { useState } from 'react';
-import { AlertTriangle, Clock, Timer, TrendingUp } from 'lucide-react';
-import { cn } from '@/lib/utils';
 
-interface AlertData {
-  id: string;
-  chamado: string;
-  tipo_chamado: string;
-  grupo_chamado: string;
-  status_chamado: string;
-  abertura_chamado: string;
-  resumo_chamado: string;
-  severidade_chamado: string;
-  acionado: string;
-  chat: boolean;
-}
 
-interface MonitoringCardsProps {
-  alertData: AlertData[];
-  onFilterSelect: (filter: string | null) => void;
-}
 
-export const MonitoringCards = ({ alertData, onFilterSelect }: MonitoringCardsProps) => {
-  const [activeFilter, setActiveFilter] = useState<string | null>(null);
+import json
+import boto3
+import os
+import uuid
+from datetime import datetime, timezone
+from decimal import Decimal
 
-  const handleCardClick = (filterKey: string) => {
-    if (activeFilter === filterKey) {
-      setActiveFilter(null);
-      onFilterSelect(null);
-    } else {
-      setActiveFilter(filterKey);
-      onFilterSelect(filterKey);
+# ---------- Config ----------
+dynamodb = boto3.resource("dynamodb")
+table = dynamodb.Table(os.environ["CHAMADOS_TABLE"])  # Tabela principal (chamados)
+conn_table = dynamodb.Table(os.environ["CONNECTIONS_TABLE"])  # Tabela de conexões
+apigw = boto3.client(
+    "apigatewaymanagementapi",
+    endpoint_url=f"https://{os.environ['WS_API_ID']}.execute-api.{os.environ['AWS_REGION']}.amazonaws.com/{os.environ['WS_STAGE']}"
+)
+
+# ---------- Helpers ----------
+class DecimalEncoder(json.JSONEncoder):
+    def default(self, o):
+        if isinstance(o, Decimal):
+            if o % 1 == 0:
+                return int(o)
+            return float(o)
+        return super(DecimalEncoder, self).default(o)
+
+def log(trace, msg, **kwargs):
+    print(json.dumps({"trace": trace, "msg": msg, **kwargs}, cls=DecimalEncoder, default=str))
+
+def send_to_connection(conn_id, data):
+    """Envia mensagem para uma conexão específica"""
+    try:
+        apigw.post_to_connection(
+            ConnectionId=conn_id,
+            Data=json.dumps(data, cls=DecimalEncoder).encode("utf-8")
+        )
+    except apigw.exceptions.GoneException:
+        # Conexão morta -> remover
+        conn_table.delete_item(Key={"connectionId": conn_id})
+        log("broadcast", "Conexão removida (GoneException)", connectionId=conn_id)
+
+def broadcast(data):
+    """Envia mensagem para todos conectados"""
+    conns = conn_table.scan().get("Items", [])
+    for c in conns:
+        send_to_connection(c["connectionId"], data)
+
+def update_chamado(trace, chamado, update):
+    log(trace, "Atualizando chamado", chamado=chamado, update=update)
+    table.update_item(
+        Key={"chamado": chamado},
+        UpdateExpression="SET " + ", ".join(f"#{k} = :{k}" for k in update.keys()),
+        ExpressionAttributeNames={f"#{k}": k for k in update.keys()},
+        ExpressionAttributeValues={f":{k}": v for k, v in update.items()},
+    )
+
+    # 🔑 Buscar o estado completo do DynamoDB
+    resp = table.get_item(Key={"chamado": chamado})
+    state = resp.get("Item", {})
+    log(trace, "Chamado atualizado (state completo)", state=state)
+    return state
+
+def _to_int_if_possible(x):
+    try:
+        # Evita converter boolean por engano (True -> 1)
+        if isinstance(x, bool):
+            return x
+        return int(str(x).strip())
+    except Exception:
+        return x
+
+def _apply_relationships(body, update):
+    """Injeta 'pai' e 'filhos' no update quando presentes no body."""
+    if "pai" in body and body["pai"] is not None:
+        update["pai"] = _to_int_if_possible(body["pai"])
+
+    if "filhos" in body and body["filhos"] is not None:
+        filhos_val = body["filhos"]
+        if isinstance(filhos_val, list):
+            normalized = [_to_int_if_possible(v) for v in filhos_val]
+            seen = set()
+            dedup = []
+            for v in normalized:
+                key = (type(v), v)
+                if key not in seen:
+                    seen.add(key)
+                    dedup.append(v)
+            update["filhos"] = dedup
+        else:
+            update["filhos"] = filhos_val
+
+# ---------- Handlers ----------
+def handle_connect(event, trace):
+    conn_id = event["requestContext"]["connectionId"]
+    conn_table.put_item(Item={"connectionId": conn_id, "connectedAt": datetime.now(timezone.utc).isoformat()})
+    log(trace, "Novo cliente conectado", connectionId=conn_id)
+    return {"statusCode": 200}
+
+def handle_disconnect(event, trace):
+    conn_id = event["requestContext"]["connectionId"]
+    conn_table.delete_item(Key={"connectionId": conn_id})
+    log(trace, "Cliente desconectado", connectionId=conn_id)
+    return {"statusCode": 200}
+
+def handle_start_timer(event, trace, body):
+    chamado = int(body["chamado"])
+    level = int(body["level"])
+
+    if "duration" in body:
+        duration = int(body["duration"])
+    else:
+        duration = 1200 if level == 1 else 600  # 20 min no nível 1, senão 10 min
+
+    now = datetime.now(timezone.utc).isoformat()
+
+    update = {
+        f"level{level}_timerStart": now,
+        f"level{level}_duration": duration,
+        f"level{level}_status": "running"
     }
-  };
+    _apply_relationships(body, update)
 
-  const getTimeRemaining = (openingTime: string) => {
-    const now = new Date();
-    const opening = new Date(openingTime);
-    const diffMs = now.getTime() - opening.getTime();
-    const diffMinutes = Math.floor(diffMs / (1000 * 60));
-    const slaMinutes = 60;
-    return slaMinutes - diffMinutes;
-  };
+    state = update_chamado(trace, chamado, update)
 
-  const tempoExpirado = alertData.filter(alert => getTimeRemaining(alert.abertura_chamado) <= 0).length;
-  const cincoMinRest = alertData.filter(alert => getTimeRemaining(alert.abertura_chamado) > 0 && getTimeRemaining(alert.abertura_chamado) <= 5).length;
-  const dezMinRest = alertData.filter(alert => getTimeRemaining(alert.abertura_chamado) > 5 && getTimeRemaining(alert.abertura_chamado) <= 10).length;
-  
-  const sev4Incidents = alertData.filter(alert => 
-    alert.tipo_chamado.toLowerCase().includes('incidente') && 
-    alert.severidade_chamado.includes('4')
-  ).length;
-  
-  const sev4Alerts = alertData.filter(alert => 
-    alert.tipo_chamado.toLowerCase().includes('alerta') && 
-    alert.severidade_chamado.includes('4') &&
-    alert.acionado !== 'OK'
-  ).length;
-  
-  const sev3Incidents = alertData.filter(alert => 
-    alert.tipo_chamado.toLowerCase().includes('incidente') && 
-    alert.severidade_chamado.includes('3')
-  ).length;
+    broadcast({
+        "event": "startTimer",
+        "chamado": chamado,
+        "level": level,
+        "state": state
+    })
 
-  const pendenteChat = alertData.filter(alert => !alert.chat && alert.acionado !== 'OK').length;
-  const semOperador = alertData.filter(alert => alert.acionado === 'N/A' || !alert.acionado).length;
+    return {
+        "statusCode": 200,
+        "body": json.dumps({"msg": f"Timer iniciado ({duration//60} min)"}, cls=DecimalEncoder)
+    }
 
-  return (
-    <div className="flex flex-col gap-4 h-full">
-      {/* Grupo: Cenários de Crise */}
-      <CardGroup title="CENÁRIO DE CRISE">
-        <MetricCard
-          label="Incidentes SEV4"
-          value={sev4Incidents}
-          icon={AlertTriangle}
-          variant="danger"
-          filterKey="SEV4_INCIDENT"
-          isActive={activeFilter === 'SEV4_INCIDENT'}
-          onClick={() => handleCardClick('SEV4_INCIDENT')}
-        />
-      </CardGroup>
+def handle_update_observacao(event, trace, body):
+    chamado = int(body["chamado"])
+    level = int(body.get("level", 1))
+    observacao = body["observacao"]
 
-      {/* Grupo: Tempo */}
-      <CardGroup title="TEMPO">
-        <MetricCard
-          label="5 min restantes"
-          value={cincoMinRest}
-          icon={Clock}
-          variant="warning"
-          size="small"
-          filterKey="CINCO_MINUTOS"
-          isActive={activeFilter === 'CINCO_MINUTOS'}
-          onClick={() => handleCardClick('CINCO_MINUTOS')}
-        />
-        <MetricCard
-          label="Tempo Expirado"
-          value={tempoExpirado}
-          icon={Timer}
-          variant="danger"
-          size="medium"
-          filterKey="TEMPO_EXPIRADO"
-          isActive={activeFilter === 'TEMPO_EXPIRADO'}
-          onClick={() => handleCardClick('TEMPO_EXPIRADO')}
-        />
-        <MetricCard
-          label="10 min restantes"
-          value={dezMinRest}
-          icon={Clock}
-          variant="warning"
-          size="small"
-          filterKey="DEZ_MINUTOS"
-          isActive={activeFilter === 'DEZ_MINUTOS'}
-          onClick={() => handleCardClick('DEZ_MINUTOS')}
-        />
-      </CardGroup>
+    update = {f"level{level}_observacao": observacao}
+    _apply_relationships(body, update)
 
-      {/* Grupo: Alertas SEV4 */}
-      <CardGroup title="ALERTAS SEV4">
-        <MetricCard
-          label="Alertas SEV4"
-          value={sev4Alerts}
-          icon={AlertTriangle}
-          variant="primary"
-          filterKey="SEV4_ALERT"
-          isActive={activeFilter === 'SEV4_ALERT'}
-          onClick={() => handleCardClick('SEV4_ALERT')}
-        />
-      </CardGroup>
+    state = update_chamado(trace, chamado, update)
 
-      {/* Grupo: Pendente Envio */}
-      <CardGroup title="PENDENTE ENVIO">
-        <MetricCard
-          label="Pendente Chat"
-          value={pendenteChat}
-          icon={TrendingUp}
-          variant="accent"
-          filterKey="PENDENTE_CHAT"
-          isActive={activeFilter === 'PENDENTE_CHAT'}
-          onClick={() => handleCardClick('PENDENTE_CHAT')}
-        />
-      </CardGroup>
+    broadcast({"event": "updateObservacao", "chamado": chamado, "state": state})
+    return {"statusCode": 200, "body": json.dumps({"msg": f"Observação do level {level} atualizada"}, cls=DecimalEncoder)}
 
-      {/* Grupo: Incidentes SEV3 */}
-      <CardGroup title="INCIDENTES SEV3">
-        <MetricCard
-          label="Incidentes SEV3"
-          value={sev3Incidents}
-          icon={AlertTriangle}
-          variant="secondary"
-          filterKey="SEV3_INCIDENT"
-          isActive={activeFilter === 'SEV3_INCIDENT'}
-          onClick={() => handleCardClick('SEV3_INCIDENT')}
-        />
-      </CardGroup>
+def handle_update_operador(event, trace, body):
+    chamado = int(body["chamado"])
+    responsavel = body["ResponsavelAcompanhamento"]
+    timestamp_responsavel = datetime.now(timezone.utc).isoformat()
 
-      {/* Grupo: Sem Operador */}
-      <CardGroup title="SEM OPERADOR">
-        <MetricCard
-          label="Sem Operador"
-          value={semOperador}
-          icon={AlertTriangle}
-          variant="muted"
-          filterKey="SEM_OPERADOR"
-          isActive={activeFilter === 'SEM_OPERADOR'}
-          onClick={() => handleCardClick('SEM_OPERADOR')}
-        />
-      </CardGroup>
-    </div>
-  );
-};
+    update = {
+        "ResponsavelAcompanhamento": responsavel,
+        "timestamp_responsavel": timestamp_responsavel
+    }
+    _apply_relationships(body, update)
 
-interface CardGroupProps {
-  title: string;
-  children: React.ReactNode;
-}
+    state = update_chamado(trace, chamado, update)
 
-function CardGroup({ title, children }: CardGroupProps) {
-  return (
-    <div className="flex flex-col gap-2">
-      <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wider px-2">
-        {title}
-      </div>
-      <div className="flex flex-col gap-2">
-        {children}
-      </div>
-    </div>
-  );
-}
+    payload = {
+        "event": "updateOperador",
+        "chamado": chamado,
+        "ResponsavelAcompanhamento": responsavel,
+        "timestamp_responsavel": timestamp_responsavel,
+        "state": state
+    }
+    broadcast(payload)
 
-interface MetricCardProps {
-  label: string;
-  value: number;
-  icon: React.ComponentType<any>;
-  variant: 'primary' | 'secondary' | 'danger' | 'warning' | 'accent' | 'muted';
-  size?: 'small' | 'medium' | 'large';
-  filterKey: string;
-  isActive: boolean;
-  onClick: () => void;
-}
+    return {
+        "statusCode": 200,
+        "body": json.dumps(payload, cls=DecimalEncoder)
+    }
 
-function MetricCard({ 
-  label, 
-  value, 
-  icon: Icon, 
-  variant, 
-  size = 'large',
-  isActive, 
-  onClick 
-}: MetricCardProps) {
-  const variantStyles = {
-    primary: 'bg-primary/10 border-primary/30 hover:bg-primary/20 hover:border-primary/50 text-primary',
-    secondary: 'bg-secondary/10 border-secondary/30 hover:bg-secondary/20 hover:border-secondary/50 text-secondary',
-    danger: 'bg-destructive/10 border-destructive/30 hover:bg-destructive/20 hover:border-destructive/50 text-destructive',
-    warning: 'bg-warning/10 border-warning/30 hover:bg-warning/20 hover:border-warning/50 text-warning',
-    accent: 'bg-accent/10 border-accent/30 hover:bg-accent/20 hover:border-accent/50 text-accent',
-    muted: 'bg-muted border-border hover:bg-card-hover text-muted-foreground',
-  };
+def handle_update_status_final(event, trace, body):
+    chamado = int(body["chamado"])
+    status = body["status"]
+    level_status_key = body.get("levelStatusKey")
+    now = datetime.now(timezone.utc).isoformat()
 
-  const sizeStyles = {
-    small: 'py-2 px-3',
-    medium: 'py-4 px-4',
-    large: 'py-5 px-4',
-  };
+    resp = table.get_item(Key={"chamado": chamado})
+    state_atual = resp.get("Item", {})
 
-  const textSizeStyles = {
-    small: 'text-xs',
-    medium: 'text-sm',
-    large: 'text-base',
-  };
+    update = {}
+    # Se for status global
+    if level_status_key == "statusFinal" or (not level_status_key and not body.get("level")):
+        update["statusFinal"] = status
+        update["statusFinal_updatedAt"] = now
+    # Se for status de nível específico
+    elif level_status_key and level_status_key.startswith("level") and level_status_key.endswith("_status"):
+        update[level_status_key] = status
+        update[level_status_key.replace("_status", "_updatedAt")] = now
+    # Compatibilidade: se vier só level
+    elif body.get("level") is not None:
+        level = int(body["level"])
+        update[f"level{level}_status"] = status
+        update[f"level{level}_updatedAt"] = now
+    else:
+        # fallback: tenta marcar o primeiro running
+        for i in range(1, 6):
+            if state_atual.get(f"level{i}_status") == "running":
+                update[f"level{i}_status"] = status
+                update[f"level{i}_updatedAt"] = now
+                break
 
-  const valueSizeStyles = {
-    small: 'text-lg',
-    medium: 'text-2xl',
-    large: 'text-3xl',
-  };
+    _apply_relationships(body, update)
 
-  return (
-    <Card
-      onClick={onClick}
-      className={cn(
-        'cursor-pointer transition-all duration-300 border-2',
-        variantStyles[variant],
-        sizeStyles[size],
-        isActive && 'ring-2 ring-primary ring-offset-2 ring-offset-background scale-[1.02]',
-        'hover:scale-[1.02] hover:shadow-lg'
-      )}
-    >
-      <div className="flex items-center justify-between gap-3">
-        <div className="flex-1 flex flex-col gap-1">
-          <span className={cn('font-medium uppercase tracking-wide', textSizeStyles[size])}>
-            {label}
-          </span>
-          <span className={cn('font-bold', valueSizeStyles[size])}>
-            {value}
-          </span>
-        </div>
-        <div className={cn(
-          'rounded-lg p-2 bg-card/50',
-          size === 'small' && 'p-1.5'
-        )}>
-          <Icon className={cn(
-            size === 'small' ? 'h-4 w-4' : size === 'medium' ? 'h-5 w-5' : 'h-6 w-6'
-          )} />
-        </div>
-      </div>
-    </Card>
-  );
-}
+    state = update_chamado(trace, chamado, update)
+    broadcast({"event": "updateStatusFinal", "chamado": chamado, "state": state})
+    return {"statusCode": 200, "body": json.dumps({"msg": "Status final atualizado"}, cls=DecimalEncoder)}
+
+def handle_update_acionamento(event, trace, body):
+    chamado = int(body["chamado"])
+    level = int(body.get("level", 1))
+    now = datetime.now(timezone.utc).isoformat()
+
+    observacao = body.get("observacao")
+    pessoa_acionada = body.get("pessoaAcionada")
+    status_acionamento = body.get("statusAcionamento")
+    operador = body.get("operador")
+
+    update = {f"level{level}_updatedAt": now}
+
+    if observacao is not None:
+        update[f"level{level}_observacao"] = observacao
+    if pessoa_acionada is not None:
+        update[f"level{level}_pessoaAcionada"] = pessoa_acionada
+    if status_acionamento is not None:
+        update[f"level{level}_statusAcionamento"] = status_acionamento
+    if operador is not None:
+        update[f"level{level}_operador"] = operador
+
+    _apply_relationships(body, update)
+
+    state = update_chamado(trace, chamado, update)
+
+    broadcast({
+        "event": "updateAcionamento",
+        "chamado": chamado,
+        "level": level,
+        "state": state
+    })
+    return {"statusCode": 200, "body": json.dumps({"msg": f"Dados do acionamento do level {level} atualizados"}, cls=DecimalEncoder)}
+
+def handle_get_state(event, trace, body):
+    chamado = int(body["chamado"])
+    resp = table.get_item(Key={"chamado": chamado})
+    state = resp.get("Item", {})
+
+    state['outage_title'] = state.get('outage_title') or state.get('titulo_outage')
+    state['outage_start'] = state.get('outage_start') or state.get('data_inicio_outage')
+    state['outage_end'] = state.get('outage_end') or state.get('data_fim_outage')
+    
+    log(trace, "Estado retornado", chamado=chamado, state=state)
+
+    conn_id = event["requestContext"]["connectionId"]
+    payload = {"event": "getState", "chamado": chamado, "state": state}
+    send_to_connection(conn_id, payload)
+    return {"statusCode": 200, "body": json.dumps({"msg": "Estado enviado"}, cls=DecimalEncoder)}
+
+# ---------- 🆕 NOVA ROTA: updateOutage ----------
+def handle_update_outage(event, trace, body):
+    chamado = int(body["chamado"])
+    outage_title = body.get("outage_title")
+    outage_start = body.get("outage_start")
+    outage_end = body.get("outage_end")
+
+    update = {
+        "outage_title": outage_title,
+        "outage_start": outage_start,
+        "outage_end": outage_end,
+        "outage_updatedAt": datetime.now(timezone.utc).isoformat()
+    }
+
+    _apply_relationships(body, update)
+
+    state = update_chamado(trace, chamado, update)
+
+    payload = {
+        "event": "updateOutage",
+        "chamado": chamado,
+        "state": state
+    }
+
+    broadcast(payload)
+    return {"statusCode": 200, "body": json.dumps(payload, cls=DecimalEncoder)}
+
+# ---------- Main ----------
+def lambda_handler(event, context):
+    trace = str(uuid.uuid4())[:8]
+    req_ctx = event.get("requestContext", {})
+    route = req_ctx.get("routeKey", "UNKNOWN")
+    conn_id = req_ctx.get("connectionId", "N/A")
+
+    log(trace, "invoke", routeKey=route, connectionId=conn_id, body=event.get("body"))
+
+    try:
+        if route == "$connect":
+            return handle_connect(event, trace)
+        elif route == "$disconnect":
+            return handle_disconnect(event, trace)
+        else:
+            body = json.loads(event.get("body") or "{}")
+            if route == "startTimer":
+                return handle_start_timer(event, trace, body)
+            elif route == "updateObservacao":
+                return handle_update_observacao(event, trace, body)
+            elif route == "updateOperador":
+                return handle_update_operador(event, trace, body)
+            elif route == "updateStatusFinal":
+                return handle_update_status_final(event, trace, body)
+            elif route == "updateAcionamento":
+                return handle_update_acionamento(event, trace, body)
+            elif route == "getState":
+                return handle_get_state(event, trace, body)
+            elif route == "updateOutage": 
+                return handle_update_outage(event, trace, body)
+            else:
+                log(trace, "Rota inválida", route=route)
+                return {"statusCode": 400, "body": json.dumps({"error": "Invalid route"}, cls=DecimalEncoder)}
+    except Exception as e:
+        log(trace, "Erro na execução", error=str(e))
+        return {"statusCode": 500, "body": json.dumps({"error": str(e)}, cls=DecimalEncoder)}
