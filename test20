@@ -1,302 +1,118 @@
-import { useState } from 'react';
-import { Clock, Timer, AlertTriangle } from 'lucide-react';
-import { cn } from '@/lib/utils';
+import json
+import boto3
+import os
+import uuid
+from datetime import datetime, timezone
+from decimal import Decimal
 
-interface AlertData {
-  id: string;
-  chamado: string;
-  tipo_chamado: string;
-  grupo_chamado: string;
-  status_chamado: string;
-  abertura_chamado: string;
-  resumo_chamado: string;
-  severidade_chamado: string;
-  acionado: string;
-  chat: boolean;
-}
+# ---------- Configurações ----------
+dynamodb = boto3.resource("dynamodb")
+table = dynamodb.Table(os.environ["OUTAGES_TABLE"])
 
-interface MonitoringCardsProps {
-  alertData: AlertData[];
-  onFilterSelect: (filter: string | null) => void;
-}
+apigateway = boto3.client(
+    "apigatewaymanagementapi",
+    endpoint_url=os.environ["WEBSOCKET_ENDPOINT"]
+)
 
-export const MonitoringCards = ({ alertData, onFilterSelect }: MonitoringCardsProps) => {
-  const [activeFilter, setActiveFilter] = useState<string | null>(null);
+# ---------- Função principal ----------
+def lambda_handler(event, context):
+    print("Evento recebido:", json.dumps(event))
 
-  const handleCardClick = (filterKey: string) => {
-    if (activeFilter === filterKey) {
-      setActiveFilter(null);
-      onFilterSelect(null);
-    } else {
-      setActiveFilter(filterKey);
-      onFilterSelect(filterKey);
-    }
-  };
+    route = event.get("requestContext", {}).get("routeKey")
+    connection_id = event.get("requestContext", {}).get("connectionId")
 
-  const getTimeRemaining = (openingTime: string) => {
-    const now = new Date();
-    const opening = new Date(openingTime);
-    const diffMs = now.getTime() - opening.getTime();
-    const diffMinutes = Math.floor(diffMs / (1000 * 60));
-    const slaMinutes = 60;
-    return slaMinutes - diffMinutes;
-  };
+    if route == "registerOutage":
+        return register_outage(event, connection_id)
+    elif route == "deleteOutage":
+        return delete_outage(event, connection_id)
+    elif route == "getOutages":
+        return get_outages(event, connection_id)
+    elif route in ["$connect", "$disconnect", "$default"]:
+        return {"statusCode": 200}
+    else:
+        return {"statusCode": 400, "body": f"Rota desconhecida: {route}"}
 
-  const tempoExpirado = alertData.filter(alert => getTimeRemaining(alert.abertura_chamado) <= 0).length;
-  const cincoMinRest = alertData.filter(alert => {
-    const remaining = getTimeRemaining(alert.abertura_chamado);
-    return remaining > 0 && remaining <= 5;
-  }).length;
-  const dezMinRest = alertData.filter(alert => {
-    const remaining = getTimeRemaining(alert.abertura_chamado);
-    return remaining > 5 && remaining <= 10;
-  }).length;
+# ---------- Registrar outage ----------
+def register_outage(event, connection_id):
+    try:
+        body = json.loads(event.get("body", "{}"))
 
-  return (
-    <div className="h-full flex flex-col justify-center gap-2 p-2">
-      {/* Grupo 1 */}
-      <MonitoringCard
-        title="5 Minutos Restantes"
-        count={cincoMinRest}
-        icon={Timer}
-        variant="warning"
-        filterKey="CINCO_MINUTOS_1"
-        isActive={activeFilter === 'CINCO_MINUTOS_1'}
-        onClick={() => handleCardClick('CINCO_MINUTOS_1')}
-        small
-      />
-      <MonitoringCard
-        title="Tempo Expirado"
-        count={tempoExpirado}
-        icon={AlertTriangle}
-        variant="critical"
-        filterKey="TEMPO_EXPIRADO_1"
-        isActive={activeFilter === 'TEMPO_EXPIRADO_1'}
-        onClick={() => handleCardClick('TEMPO_EXPIRADO_1')}
-        large
-      />
-      <MonitoringCard
-        title="10 Minutos Restantes"
-        count={dezMinRest}
-        icon={Clock}
-        variant="info"
-        filterKey="DEZ_MINUTOS_1"
-        isActive={activeFilter === 'DEZ_MINUTOS_1'}
-        onClick={() => handleCardClick('DEZ_MINUTOS_1')}
-        small
-      />
+        outage_id = str(uuid.uuid4())
+        item = {
+            "outage_id": outage_id,
+            "title": body.get("title", "Sem título"),
+            "description": body.get("description", "Sem descrição"),
+            "timestamp": Decimal(str(datetime.now(timezone.utc).timestamp())),
+            "status": body.get("status", "active"),
+        }
 
-      {/* Grupo 2 */}
-      <MonitoringCard
-        title="5 Minutos Restantes"
-        count={cincoMinRest}
-        icon={Timer}
-        variant="warning"
-        filterKey="CINCO_MINUTOS_2"
-        isActive={activeFilter === 'CINCO_MINUTOS_2'}
-        onClick={() => handleCardClick('CINCO_MINUTOS_2')}
-        small
-      />
-      <MonitoringCard
-        title="Tempo Expirado"
-        count={tempoExpirado}
-        icon={AlertTriangle}
-        variant="critical"
-        filterKey="TEMPO_EXPIRADO_2"
-        isActive={activeFilter === 'TEMPO_EXPIRADO_2'}
-        onClick={() => handleCardClick('TEMPO_EXPIRADO_2')}
-        large
-      />
-      <MonitoringCard
-        title="10 Minutos Restantes"
-        count={dezMinRest}
-        icon={Clock}
-        variant="info"
-        filterKey="DEZ_MINUTOS_2"
-        isActive={activeFilter === 'DEZ_MINUTOS_2'}
-        onClick={() => handleCardClick('DEZ_MINUTOS_2')}
-        small
-      />
+        table.put_item(Item=item)
 
-      {/* Grupo 3 */}
-      <MonitoringCard
-        title="5 Minutos Restantes"
-        count={cincoMinRest}
-        icon={Timer}
-        variant="warning"
-        filterKey="CINCO_MINUTOS_3"
-        isActive={activeFilter === 'CINCO_MINUTOS_3'}
-        onClick={() => handleCardClick('CINCO_MINUTOS_3')}
-        small
-      />
-      <MonitoringCard
-        title="Tempo Expirado"
-        count={tempoExpirado}
-        icon={AlertTriangle}
-        variant="critical"
-        filterKey="TEMPO_EXPIRADO_3"
-        isActive={activeFilter === 'TEMPO_EXPIRADO_3'}
-        onClick={() => handleCardClick('TEMPO_EXPIRADO_3')}
-        large
-      />
-      <MonitoringCard
-        title="10 Minutos Restantes"
-        count={dezMinRest}
-        icon={Clock}
-        variant="info"
-        filterKey="DEZ_MINUTOS_3"
-        isActive={activeFilter === 'DEZ_MINUTOS_3'}
-        onClick={() => handleCardClick('DEZ_MINUTOS_3')}
-        small
-      />
+        send_message(connection_id, {
+            "action": "registerOutage",
+            "status": "success",
+            "data": item
+        })
 
-      {/* Grupo 4 */}
-      <MonitoringCard
-        title="5 Minutos Restantes"
-        count={cincoMinRest}
-        icon={Timer}
-        variant="warning"
-        filterKey="CINCO_MINUTOS_4"
-        isActive={activeFilter === 'CINCO_MINUTOS_4'}
-        onClick={() => handleCardClick('CINCO_MINUTOS_4')}
-        small
-      />
-      <MonitoringCard
-        title="Tempo Expirado"
-        count={tempoExpirado}
-        icon={AlertTriangle}
-        variant="critical"
-        filterKey="TEMPO_EXPIRADO_4"
-        isActive={activeFilter === 'TEMPO_EXPIRADO_4'}
-        onClick={() => handleCardClick('TEMPO_EXPIRADO_4')}
-        large
-      />
-      <MonitoringCard
-        title="10 Minutos Restantes"
-        count={dezMinRest}
-        icon={Clock}
-        variant="info"
-        filterKey="DEZ_MINUTOS_4"
-        isActive={activeFilter === 'DEZ_MINUTOS_4'}
-        onClick={() => handleCardClick('DEZ_MINUTOS_4')}
-        small
-      />
-    </div>
-  );
-};
+        return {"statusCode": 200}
 
-interface MonitoringCardProps {
-  title: string;
-  count: number;
-  icon: React.ComponentType<any>;
-  variant: 'warning' | 'critical' | 'info';
-  filterKey: string;
-  isActive: boolean;
-  onClick: () => void;
-  large?: boolean;
-  small?: boolean;
-}
+    except Exception as e:
+        print(f"Erro ao registrar outage: {e}")
+        send_message(connection_id, {"action": "registerOutage", "status": "error", "error": str(e)})
+        return {"statusCode": 500}
 
-function MonitoringCard({ 
-  title, 
-  count, 
-  icon: Icon, 
-  variant, 
-  isActive, 
-  onClick,
-  large = false,
-  small = false
-}: MonitoringCardProps) {
-  const variantStyles = {
-    warning: {
-      gradient: 'bg-gradient-warning',
-      shadow: 'shadow-warning',
-      border: 'border-monitoring-warning/30',
-      text: 'text-white',
-      iconBg: 'bg-white/20',
-      hoverScale: 'hover:scale-[1.02]',
-      glow: count > 0 ? 'animate-pulse-glow' : '',
-    },
-    critical: {
-      gradient: 'bg-gradient-critical',
-      shadow: 'shadow-critical',
-      border: 'border-monitoring-critical/30',
-      text: 'text-white',
-      iconBg: 'bg-white/20',
-      hoverScale: 'hover:scale-[1.02]',
-      glow: count > 0 ? 'animate-pulse-glow' : '',
-    },
-    info: {
-      gradient: 'bg-gradient-info',
-      shadow: 'shadow-info',
-      border: 'border-monitoring-info/30',
-      text: 'text-white',
-      iconBg: 'bg-white/20',
-      hoverScale: 'hover:scale-[1.02]',
-      glow: '',
-    },
-  };
+# ---------- Deletar outage ----------
+def delete_outage(event, connection_id):
+    try:
+        body = json.loads(event.get("body", "{}"))
+        outage_id = body.get("outage_id")
 
-  const style = variantStyles[variant];
-  const heightClass = large ? 'min-h-[120px]' : small ? 'min-h-[70px]' : 'min-h-[90px]';
+        if not outage_id:
+            send_message(connection_id, {"error": "Missing outage_id"})
+            return {"statusCode": 400}
 
-  return (
-    <div
-      onClick={onClick}
-      className={cn(
-        "relative rounded-xl border-2 cursor-pointer transition-all duration-300 overflow-hidden backdrop-blur-sm",
-        heightClass,
-        style.gradient,
-        style.shadow,
-        style.border,
-        style.hoverScale,
-        style.glow,
-        isActive && "ring-4 ring-white/40 ring-offset-2 ring-offset-background scale-[1.02]",
-        "group"
-      )}
-    >
-      {/* Background pattern */}
-      <div className="absolute inset-0 opacity-10">
-        <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_120%,rgba(255,255,255,0.3),transparent)]" />
-      </div>
+        table.delete_item(Key={"outage_id": outage_id})
 
-      {/* Content */}
-      <div className="relative h-full flex flex-col items-center justify-center p-4 space-y-2">
-        {/* Icon */}
-        <div className={cn(
-          "p-2.5 rounded-lg transition-transform duration-300 group-hover:scale-110",
-          style.iconBg
-        )}>
-          <Icon className={cn("w-5 h-5", style.text)} />
-        </div>
+        send_message(connection_id, {
+            "action": "deleteOutage",
+            "status": "success",
+            "outage_id": outage_id
+        })
 
-        {/* Count */}
-        <div className={cn(
-          "font-inter font-bold transition-transform duration-300 group-hover:scale-105",
-          large ? "text-4xl" : small ? "text-2xl" : "text-3xl",
-          style.text
-        )}>
-          {count}
-        </div>
+        return {"statusCode": 200}
 
-        {/* Title */}
-        <div className={cn(
-          "font-inter font-semibold text-center uppercase tracking-wide leading-tight",
-          large ? "text-xs" : small ? "text-[10px]" : "text-xs",
-          style.text,
-          "drop-shadow-lg"
-        )}>
-          {title}
-        </div>
-      </div>
+    except Exception as e:
+        print(f"Erro ao deletar outage: {e}")
+        send_message(connection_id, {"action": "deleteOutage", "status": "error", "error": str(e)})
+        return {"statusCode": 500}
 
-      {/* Active indicator */}
-      {isActive && (
-        <div className="absolute top-3 right-3 w-3 h-3 bg-white rounded-full shadow-lg animate-pulse" />
-      )}
+# ---------- Listar outages ----------
+def get_outages(event, connection_id):
+    try:
+        response = table.scan()
+        outages = response.get("Items", [])
 
-      {/* Hover effect overlay */}
-      <div className="absolute inset-0 bg-white/0 group-hover:bg-white/5 transition-colors duration-300" />
-    </div>
-  );
-}
+        send_message(connection_id, {
+            "action": "getOutages",
+            "status": "success",
+            "data": outages
+        })
+
+        return {"statusCode": 200}
+
+    except Exception as e:
+        print(f"Erro ao buscar outages: {e}")
+        send_message(connection_id, {"action": "getOutages", "status": "error", "error": str(e)})
+        return {"statusCode": 500}
+
+# ---------- Envio de mensagem pelo WebSocket ----------
+def send_message(connection_id: str, data: dict):
+    try:
+        apigateway.post_to_connection(
+            ConnectionId=connection_id,
+            Data=json.dumps(data).encode("utf-8")
+        )
+    except apigateway.exceptions.GoneException:
+        print(f"Conexão {connection_id} não está mais ativa.")
+    except Exception as e:
+        print(f"Erro ao enviar mensagem: {e}")
