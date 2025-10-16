@@ -1,9 +1,5 @@
 {
   "Effect": "Allow",
-  "Action": [
-    "scheduler:CreateSchedule",
-    "scheduler:DeleteSchedule",
-    "scheduler:GetSchedule"
-  ],
-  "Resource": "*"
+  "Action": "lambda:InvokeFunction",
+  "Resource": "arn:aws:lambda:REGIAO:CONTA:function:NOME_DA_SUA_FUNCAO"
 }
