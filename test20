@@ -1,109 +1,60 @@
+scheduler = boto3.client("scheduler")
+
+
 {
-  "Effect": "Allow",
-  "Action": [
-    "scheduler:CreateSchedule",
-    "scheduler:DeleteSchedule",
-    "scheduler:GetSchedule"
-  ],
-  "Resource": "*"
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "AllowSchedulerManagement",
+      "Effect": "Allow",
+      "Action": [
+        "scheduler:CreateSchedule",
+        "scheduler:DeleteSchedule",
+        "scheduler:GetSchedule",
+        "scheduler:UpdateSchedule",
+        "scheduler:ListSchedules"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "AllowLambdaInvokeFromScheduler",
+      "Effect": "Allow",
+      "Action": [
+        "lambda:GetFunction",
+        "lambda:InvokeFunction"
+      ],
+      "Resource": "*"
+    }
+  ]
 }
 
 
 
-def handle_start_timer(event, trace, body):
-    chamado = int(body["chamado"])
-    level = int(body["level"])
 
-    if "duration" in body:
-        duration = int(body["duration"])
-    else:
-        duration = 1200 if level == 1 else 600  # 20 min no nível 1, senão 10 min
 
-    now = datetime.now(timezone.utc).isoformat()
 
-    update = {
-        f"level{level}_timerStart": now,
-        f"level{level}_duration": duration,
-        f"level{level}_status": "running"
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "AllowInvokeLambda",
+      "Effect": "Allow",
+      "Action": "lambda:InvokeFunction",
+      "Resource": "arn:aws:lambda:us-east-1:123456789012:function:NomeDaSuaLambda"
     }
-    _apply_relationships(body, update)
+  ]
+}
 
-    # Atualiza no DynamoDB
-    state = update_chamado(trace, chamado, update)
-
-    # Envia broadcast para o front-end
-    broadcast({
-        "event": "startTimer",
-        "chamado": chamado,
-        "level": level,
-        "state": state
-    })
-
-    # --------------- NOVO BLOCO: cria agendamento ---------------
-    try:
-        import uuid
-        from datetime import timedelta
-
-        schedule_name = f"timer-{chamado}-level{level}-{uuid.uuid4().hex[:6]}"
-
-        # horário de expiração
-        expire_time = datetime.now(timezone.utc) + timedelta(seconds=duration)
-        expire_iso = expire_time.isoformat()
-
-        scheduler.create_schedule(
-            Name=schedule_name,
-            ScheduleExpression=f"at({expire_iso})",
-            FlexibleTimeWindow={"Mode": "OFF"},
-            Target={
-                "Arn": os.environ["LAMBDA_ARN"],  # ARN da própria Lambda
-                "RoleArn": os.environ["SCHEDULER_ROLE_ARN"],  # Role do scheduler
-                "Input": json.dumps({
-                    "action": "expireTimer",
-                    "chamado": chamado,
-                    "level": level
-                })
-            }
-        )
-
-        log(trace, "Agendamento criado", chamado=chamado, level=level, schedule_name=schedule_name, expire_at=expire_iso)
-
-        # Opcional: salvar o nome do schedule no DynamoDB para controle futuro
-        table.update_item(
-            Key={"chamado": chamado},
-            UpdateExpression="SET #sn = :sn",
-            ExpressionAttributeNames={"#sn": f"level{level}_scheduleName"},
-            ExpressionAttributeValues={":sn": schedule_name}
-        )
-
-    except Exception as e:
-        log(trace, "Erro ao criar agendamento", error=str(e))
-
-    # -------------------------------------------------------------
-
-    return {
-        "statusCode": 200,
-        "body": json.dumps({"msg": f"Timer iniciado ({duration//60} min)"}, cls=DecimalEncoder)
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Principal": {
+        "Service": "scheduler.amazonaws.com"
+      },
+      "Action": "sts:AssumeRole"
     }
+  ]
+}
 
-
-
-
-
-elif event.get("action") == "expireTimer":
-    chamado = event["chamado"]
-    level = event["level"]
-
-    update = {
-        f"level{level}_status": "timer_expired",
-        f"level{level}_updatedAt": datetime.now(timezone.utc).isoformat()
-    }
-    state = update_chamado("scheduler", chamado, update)
-
-    broadcast({
-        "event": "timerExpired",
-        "chamado": chamado,
-        "level": level,
-        "state": state
-    })
-
-    return {"statusCode": 200, "body": json.dumps({"msg": "Timer expirado"}, cls=DecimalEncoder)}
