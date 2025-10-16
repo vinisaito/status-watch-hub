@@ -1,3 +1,13 @@
+{
+  "requestContext": {
+    "routeKey": "registerOutage",
+    "connectionId": "12345"
+  },
+  "body": "{\"title\": \"Falha de servidor\", \"description\": \"API caiu às 14h\", \"status\": \"active\"}"
+}
+
+
+
 import json
 import boto3
 import os
