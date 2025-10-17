@@ -3,9 +3,8 @@ import pyodbc
 import json
 import time
 import boto3
-from datetime import datetime, timezone
+from datetime import datetime
 from botocore.exceptions import ClientError
-from decimal import Decimal
 
 def lambda_handler(event, context):
     start_total = time.time()
@@ -17,17 +16,16 @@ def lambda_handler(event, context):
     password = os.environ['DB_PASSWORD']
     port = os.environ.get('DB_PORT', '1433')
     database = 'mdb'
-    connections_table = os.environ['CONNECTIONS_TABLE']          # Tabela de conexões WebSocket
-    state_table = os.environ['STATE_TABLE']                      # Nova tabela para armazenar o último estado
-    ws_api_endpoint = os.environ['WS_API_ENDPOINT']
+    connections_table = os.environ['CONNECTIONS_TABLE']
+    ws_api_endpoint = os.environ['WS_API_ENDPOINT']  # ex: wss://abc123.execute-api.us-east-1.amazonaws.com/prod
 
     dynamodb = boto3.resource('dynamodb')
-    table_connections = dynamodb.Table(connections_table)
-    table_state = dynamodb.Table(state_table)
+    table = dynamodb.Table(connections_table)
+
     apigw = boto3.client('apigatewaymanagementapi', endpoint_url=ws_api_endpoint)
 
     try:
-        # ----- Conexão SQL Server -----
+        # Conexão com SQL Server
         start_conexao = time.time()
         connection_string = (
             f'DRIVER={{ODBC Driver 18 for SQL Server}};'
@@ -41,7 +39,7 @@ def lambda_handler(event, context):
         cursor = conn.cursor()
         print(f"[TEMPO] Conexão com o banco: {time.time() - start_conexao:.2f}s")
 
-        # ----- Query SQL -----
+        # Executa consulta SQL
         query = """
             SELECT [chamado]
                   ,[tipo_chamado]
@@ -60,76 +58,52 @@ def lambda_handler(event, context):
         rows = cursor.fetchall()
         print(f"[TEMPO] Execução da query: {time.time() - start_query:.2f}s")
 
-        # ----- Processamento -----
-        columns = [col[0] for col in cursor.description]
+        # Processamento dos dados
+        start_process = time.time()
+        columns = [column[0] for column in cursor.description]
         results = []
-        current_ids = set()
-
         for row in rows:
-            item = dict(zip(columns, row))
-            # Converte ID e datas corretamente
-            if "chamado" in item and item["chamado"] is not None:
-                item["chamado"] = int(item["chamado"])
-                current_ids.add(item["chamado"])
-
-            if isinstance(item.get("abertura_chamado"), datetime):
-                item["abertura_chamado"] = item["abertura_chamado"].strftime("%Y-%m-%dT%H:%M:%S")
-
-            results.append(item)
+            row_dict = dict(zip(columns, row))
+            if isinstance(row_dict.get("abertura_chamado"), datetime):
+                row_dict["abertura_chamado"] = row_dict["abertura_chamado"].strftime("%Y-%m-%dT%H:%M:%S")
+            results.append(row_dict)
+        print(f"[TEMPO] Processamento dos dados: {time.time() - start_process:.2f}s")
 
         cursor.close()
         conn.close()
 
-        # ----- Obtém estado anterior -----
-        try:
-            response_state = table_state.get_item(Key={"id": "last_state"})
-            previous_ids = set(map(int, response_state.get("Item", {}).get("chamados", [])))
-        except Exception:
-            previous_ids = set()
+        # Mensagem JSON final
+        message = {
+            "action": "getChamados",
+            "data": results
+        }
 
-        # ----- Detecta novos e removidos -----
-        novos = current_ids - previous_ids
-        removidos = previous_ids - current_ids
+        # Envia mensagem para todas conexões ativas
+        start_send = time.time()
+        connections = table.scan().get("Items", [])
+        print(f"[INFO] Enviando para {len(connections)} conexões")
 
-        print(f"[INFO] Novos: {len(novos)} | Removidos: {len(removidos)}")
+        for conn_item in connections:
+            connection_id = conn_item.get("connectionId")
+            try:
+                apigw.post_to_connection(
+                    ConnectionId=connection_id,
+                    Data=json.dumps(message, ensure_ascii=False).encode('utf-8')
+                )
+            except ClientError as e:
+                if e.response['Error']['Code'] == 'GoneException':
+                    # Conexão não existe mais → remove do DynamoDB
+                    print(f"[REMOVENDO] Conexão expirada: {connection_id}")
+                    table.delete_item(Key={'connectionId': connection_id})
+                else:
+                    print(f"[ERRO envio] {connection_id}: {e}")
 
-        # Atualiza estado
-        table_state.put_item(Item={
-            "id": "last_state",
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-            "chamados": list(current_ids)
-        })
-
-        # ----- Envia atualizações apenas se houve mudança -----
-        if novos or removidos:
-            message = {
-                "action": "updateChamados",
-                "novos": [r for r in results if r["chamado"] in novos],
-                "removidos": list(removidos)
-            }
-
-            connections = table_connections.scan().get("Items", [])
-            print(f"[INFO] Enviando atualização para {len(connections)} conexões")
-
-            for conn_item in connections:
-                connection_id = conn_item.get("connectionId")
-                try:
-                    apigw.post_to_connection(
-                        ConnectionId=connection_id,
-                        Data=json.dumps(message, ensure_ascii=False).encode("utf-8")
-                    )
-                except ClientError as e:
-                    if e.response["Error"]["Code"] == "GoneException":
-                        print(f"[REMOVENDO] Conexão expirada: {connection_id}")
-                        table_connections.delete_item(Key={"connectionId": connection_id})
-                    else:
-                        print(f"[ERRO envio] {connection_id}: {e}")
-
-        print(f"[TOTAL] Tempo total: {time.time() - start_total:.2f}s")
+        print(f"[TEMPO] Envio WS: {time.time() - start_send:.2f}s")
+        print(f"[TOTAL] Tempo total da Lambda: {time.time() - start_total:.2f}s")
 
         return {
             "statusCode": 200,
-            "body": json.dumps({"message": "Execução concluída"})
+            "body": json.dumps({"message": "Chamados enviados via WebSocket"})
         }
 
     except Exception as e:
