@@ -2,7 +2,16 @@ import os
 import pyodbc
 import json
 import time
+import boto3
 from datetime import datetime
+from botocore.exceptions import ClientError
+
+# DynamoDB e API Gateway
+dynamodb = boto3.resource("dynamodb")
+connections_table = dynamodb.Table("painelmonitoracao_connections")
+
+# Endpoint da sua API WebSocket (ex: wss://xxxxx.execute-api.us-east-1.amazonaws.com/prod)
+WEBSOCKET_ENDPOINT = os.environ.get("WEBSOCKET_ENDPOINT")
 
 def lambda_handler(event, context):
     start_total = time.time()
@@ -13,10 +22,10 @@ def lambda_handler(event, context):
         server = os.environ['DB_SERVER']
         username = os.environ['DB_USER']
         password = os.environ['DB_PASSWORD']
-        port = os.environ.get('DB_PORT', '1433')  # Padrão 1433
+        port = os.environ.get('DB_PORT', '1433')
         database = 'mdb'
 
-        # String de conexão (suporte a Unicode)
+        # String de conexão
         connection_string = (
             f'DRIVER={{ODBC Driver 18 for SQL Server}};'
             f'SERVER={server},{port};'
@@ -27,11 +36,10 @@ def lambda_handler(event, context):
             f'CHARSET=UTF8;'
         )
 
-        # Conexão
-        start_conexao = time.time()
+        # Conexão com o banco
         conn = pyodbc.connect(connection_string, timeout=5)
         cursor = conn.cursor()
-        print(f"[TEMPO] Conexão com o banco: {time.time() - start_conexao:.2f}s")
+        print("[OK] Conectado ao banco.")
 
         # Consulta SQL
         query = """
@@ -48,32 +56,29 @@ def lambda_handler(event, context):
             WHERE TRY_CONVERT(DATETIME, abertura_chamado, 103) >= DATEADD(HOUR, -10, GETDATE());
         """
 
-        # Executa a consulta
-        start_query = time.time()
         cursor.execute(query)
         rows = cursor.fetchall()
-        print(f"[TEMPO] Execução da query: {time.time() - start_query:.2f}s")
 
         # Processamento dos dados
-        start_process = time.time()
         columns = [column[0] for column in cursor.description]
         results = []
         for row in rows:
             row_dict = dict(zip(columns, row))
-            # Converte abertura_chamado para ISO 8601 se for datetime
             if isinstance(row_dict.get("abertura_chamado"), datetime):
                 row_dict["abertura_chamado"] = row_dict["abertura_chamado"].strftime("%Y-%m-%dT%H:%M:%S")
             results.append(row_dict)
-        print(f"[TEMPO] Processamento dos dados: {time.time() - start_process:.2f}s")
 
-        # Fecha conexão
         cursor.close()
         conn.close()
 
-        tempo_total = time.time() - start_total
-        print(f"[TOTAL] Tempo total da Lambda: {tempo_total:.2f}s")
+        # Envia os dados via WebSocket
+        if WEBSOCKET_ENDPOINT:
+            send_to_all_connections({
+                "type": "NEW_ALERTS",
+                "data": results
+            })
 
-        # Retorna JSON
+        # Retorna resposta REST normal
         return {
             'statusCode': 200,
             'headers': {
@@ -95,9 +100,32 @@ def lambda_handler(event, context):
         }
 
 
+def send_to_all_connections(message):
+    """Envia o payload para todos os clientes WebSocket conectados"""
+    if not WEBSOCKET_ENDPOINT:
+        print("[AVISO] WEBSOCKET_ENDPOINT não configurado.")
+        return
 
+    apigw = boto3.client("apigatewaymanagementapi", endpoint_url=WEBSOCKET_ENDPOINT)
 
+    try:
+        connections = connections_table.scan().get("Items", [])
+        print(f"[INFO] Enviando para {len(connections)} conexões ativas.")
 
+        for conn in connections:
+            connection_id = conn.get("connectionId")
+            try:
+                apigw.post_to_connection(
+                    ConnectionId=connection_id,
+                    Data=json.dumps(message).encode("utf-8")
+                )
+            except ClientError as e:
+                # Remove conexões inativas
+                if e.response["Error"]["Code"] == "GoneException":
+                    print(f"[REMOVENDO] Conexão {connection_id} inativa.")
+                    connections_table.delete_item(Key={"connectionId": connection_id})
+                else:
+                    print(f"[ERRO] Falha ao enviar para {connection_id}: {e}")
 
-
-painelmonitoracao_connections
+    except Exception as e:
+        print("[ERRO WEBSOCKET]", str(e))
