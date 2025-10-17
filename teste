@@ -1,131 +1,112 @@
 import os
-import pyodbc
 import json
 import time
 import boto3
+import pyodbc
 from datetime import datetime
 from botocore.exceptions import ClientError
 
-# DynamoDB e API Gateway
 dynamodb = boto3.resource("dynamodb")
+cache_table = dynamodb.Table("painelmonitoracao_alertas_cache")
 connections_table = dynamodb.Table("painelmonitoracao_connections")
 
-# Endpoint da sua API WebSocket (ex: wss://xxxxx.execute-api.us-east-1.amazonaws.com/prod)
-WEBSOCKET_ENDPOINT = os.environ.get("WEBSOCKET_ENDPOINT")
+WEBSOCKET_ENDPOINT = os.environ["WEBSOCKET_ENDPOINT"]
 
 def lambda_handler(event, context):
-    start_total = time.time()
-    print("[INÍCIO] Execução da Lambda")
+    print("[INÍCIO] Verificando alertas...")
+    new_alerts = get_alerts_from_sql()
+    old_alerts = get_cached_alerts()
 
+    # Index por 'chamado'
+    new_index = {a["chamado"]: a for a in new_alerts}
+    old_index = {a["chamado"]: a for a in old_alerts}
+
+    # Detectar novos e removidos
+    novos = [a for id_, a in new_index.items() if id_ not in old_index]
+    removidos = [a for id_, a in old_index.items() if id_ not in new_index]
+
+    print(f"[INFO] Novos: {len(novos)}, Removidos: {len(removidos)}")
+
+    # Atualiza cache
+    cache_table.put_item(Item={
+        "PK": "alertas",
+        "data": new_alerts,
+        "updatedAt": datetime.utcnow().isoformat()
+    })
+
+    # Envia atualizações via WebSocket
+    if novos:
+        send_to_all({"type": "ALERTS_ADDED", "data": novos})
+    if removidos:
+        send_to_all({"type": "ALERTS_REMOVED", "data": removidos})
+
+    print("[OK] Execução concluída.")
+    return {"statusCode": 200}
+
+
+def get_alerts_from_sql():
+    """Consulta o banco SQL"""
+    server = os.environ['DB_SERVER']
+    username = os.environ['DB_USER']
+    password = os.environ['DB_PASSWORD']
+    port = os.environ.get('DB_PORT', '1433')
+    database = 'mdb'
+
+    conn = pyodbc.connect(
+        f'DRIVER={{ODBC Driver 18 for SQL Server}};SERVER={server},{port};'
+        f'DATABASE={database};UID={username};PWD={password};Encrypt=no;TrustServerCertificate=yes;',
+        timeout=5
+    )
+    cursor = conn.cursor()
+    query = """
+        SELECT [chamado]
+              ,[tipo_chamado]
+              ,[status_chamado]
+              ,[abertura_chamado]
+              ,[resumo_chamado]
+              ,[grupo_chamado]
+              ,[severidade_chamado]
+              ,[acionado]
+              ,[link_chamado]
+        FROM [mdb].[dbo].[view_ciops_acionamento]
+        WHERE TRY_CONVERT(DATETIME, abertura_chamado, 103) >= DATEADD(HOUR, -10, GETDATE());
+    """
+    cursor.execute(query)
+    rows = cursor.fetchall()
+    columns = [column[0] for column in cursor.description]
+
+    results = []
+    for row in rows:
+        row_dict = dict(zip(columns, row))
+        if isinstance(row_dict.get("abertura_chamado"), datetime):
+            row_dict["abertura_chamado"] = row_dict["abertura_chamado"].strftime("%Y-%m-%dT%H:%M:%S")
+        results.append(row_dict)
+    conn.close()
+    return results
+
+
+def get_cached_alerts():
+    """Recupera o cache anterior"""
     try:
-        # Variáveis de ambiente
-        server = os.environ['DB_SERVER']
-        username = os.environ['DB_USER']
-        password = os.environ['DB_PASSWORD']
-        port = os.environ.get('DB_PORT', '1433')
-        database = 'mdb'
-
-        # String de conexão
-        connection_string = (
-            f'DRIVER={{ODBC Driver 18 for SQL Server}};'
-            f'SERVER={server},{port};'
-            f'DATABASE={database};'
-            f'UID={username};'
-            f'PWD={password};'
-            f'Encrypt=no;TrustServerCertificate=yes;'
-            f'CHARSET=UTF8;'
-        )
-
-        # Conexão com o banco
-        conn = pyodbc.connect(connection_string, timeout=5)
-        cursor = conn.cursor()
-        print("[OK] Conectado ao banco.")
-
-        # Consulta SQL
-        query = """
-            SELECT [chamado]
-                  ,[tipo_chamado]
-                  ,[status_chamado]
-                  ,[abertura_chamado]
-                  ,[resumo_chamado]
-                  ,[grupo_chamado]
-                  ,[severidade_chamado]
-                  ,[acionado]
-                  ,[link_chamado]
-            FROM [mdb].[dbo].[view_ciops_acionamento]
-            WHERE TRY_CONVERT(DATETIME, abertura_chamado, 103) >= DATEADD(HOUR, -10, GETDATE());
-        """
-
-        cursor.execute(query)
-        rows = cursor.fetchall()
-
-        # Processamento dos dados
-        columns = [column[0] for column in cursor.description]
-        results = []
-        for row in rows:
-            row_dict = dict(zip(columns, row))
-            if isinstance(row_dict.get("abertura_chamado"), datetime):
-                row_dict["abertura_chamado"] = row_dict["abertura_chamado"].strftime("%Y-%m-%dT%H:%M:%S")
-            results.append(row_dict)
-
-        cursor.close()
-        conn.close()
-
-        # Envia os dados via WebSocket
-        if WEBSOCKET_ENDPOINT:
-            send_to_all_connections({
-                "type": "NEW_ALERTS",
-                "data": results
-            })
-
-        # Retorna resposta REST normal
-        return {
-            'statusCode': 200,
-            'headers': {
-                'Content-Type': 'application/json; charset=utf-8',
-                'Access-Control-Allow-Origin': '*'
-            },
-            'body': json.dumps(results, ensure_ascii=False)
-        }
-
-    except Exception as e:
-        print("[ERRO]", str(e))
-        return {
-            'statusCode': 500,
-            'headers': {
-                'Content-Type': 'application/json; charset=utf-8',
-                'Access-Control-Allow-Origin': '*'
-            },
-            'body': json.dumps({'error': str(e)}, ensure_ascii=False)
-        }
+        resp = cache_table.get_item(Key={"PK": "alertas"})
+        return resp.get("Item", {}).get("data", [])
+    except Exception:
+        return []
 
 
-def send_to_all_connections(message):
-    """Envia o payload para todos os clientes WebSocket conectados"""
-    if not WEBSOCKET_ENDPOINT:
-        print("[AVISO] WEBSOCKET_ENDPOINT não configurado.")
-        return
-
+def send_to_all(message):
+    """Envia uma mensagem via WebSocket para todos os clientes"""
     apigw = boto3.client("apigatewaymanagementapi", endpoint_url=WEBSOCKET_ENDPOINT)
+    connections = connections_table.scan().get("Items", [])
 
-    try:
-        connections = connections_table.scan().get("Items", [])
-        print(f"[INFO] Enviando para {len(connections)} conexões ativas.")
-
-        for conn in connections:
-            connection_id = conn.get("connectionId")
-            try:
-                apigw.post_to_connection(
-                    ConnectionId=connection_id,
-                    Data=json.dumps(message).encode("utf-8")
-                )
-            except ClientError as e:
-                # Remove conexões inativas
-                if e.response["Error"]["Code"] == "GoneException":
-                    print(f"[REMOVENDO] Conexão {connection_id} inativa.")
-                    connections_table.delete_item(Key={"connectionId": connection_id})
-                else:
-                    print(f"[ERRO] Falha ao enviar para {connection_id}: {e}")
-
-    except Exception as e:
-        print("[ERRO WEBSOCKET]", str(e))
+    for conn in connections:
+        connection_id = conn.get("connectionId")
+        try:
+            apigw.post_to_connection(
+                ConnectionId=connection_id,
+                Data=json.dumps(message).encode("utf-8")
+            )
+        except ClientError as e:
+            if e.response["Error"]["Code"] == "GoneException":
+                print(f"[REMOVENDO] Conexão {connection_id} inativa.")
+                connections_table.delete_item(Key={"connectionId": connection_id})
