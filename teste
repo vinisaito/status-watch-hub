@@ -2,38 +2,44 @@ import os
 import pyodbc
 import json
 import time
+import boto3
 from datetime import datetime
+from botocore.exceptions import ClientError
 
 def lambda_handler(event, context):
     start_total = time.time()
     print("[INÍCIO] Execução da Lambda")
 
-    try:
-        # Variáveis de ambiente
-        server = os.environ['DB_SERVER']
-        username = os.environ['DB_USER']
-        password = os.environ['DB_PASSWORD']
-        port = os.environ.get('DB_PORT', '1433')  # Padrão 1433
-        database = 'mdb'
+    # Variáveis de ambiente
+    server = os.environ['DB_SERVER']
+    username = os.environ['DB_USER']
+    password = os.environ['DB_PASSWORD']
+    port = os.environ.get('DB_PORT', '1433')
+    database = 'mdb'
+    connections_table = os.environ['CONNECTIONS_TABLE']
+    ws_api_endpoint = os.environ['WS_API_ENDPOINT']  # ex: wss://abc123.execute-api.us-east-1.amazonaws.com/prod
 
-        # String de conexão (suporte a Unicode)
+    dynamodb = boto3.resource('dynamodb')
+    table = dynamodb.Table(connections_table)
+
+    apigw = boto3.client('apigatewaymanagementapi', endpoint_url=ws_api_endpoint)
+
+    try:
+        # Conexão com SQL Server
+        start_conexao = time.time()
         connection_string = (
             f'DRIVER={{ODBC Driver 18 for SQL Server}};'
             f'SERVER={server},{port};'
             f'DATABASE={database};'
             f'UID={username};'
             f'PWD={password};'
-            f'Encrypt=no;TrustServerCertificate=yes;'
-            f'CHARSET=UTF8;'
+            f'Encrypt=no;TrustServerCertificate=yes;CHARSET=UTF8;'
         )
-
-        # Conexão
-        start_conexao = time.time()
         conn = pyodbc.connect(connection_string, timeout=5)
         cursor = conn.cursor()
         print(f"[TEMPO] Conexão com o banco: {time.time() - start_conexao:.2f}s")
 
-        # Consulta SQL
+        # Executa consulta SQL
         query = """
             SELECT [chamado]
                   ,[tipo_chamado]
@@ -47,8 +53,6 @@ def lambda_handler(event, context):
             FROM [mdb].[dbo].[view_ciops_acionamento]
             WHERE TRY_CONVERT(DATETIME, abertura_chamado, 103) >= DATEADD(HOUR, -10, GETDATE());
         """
-
-        # Executa a consulta
         start_query = time.time()
         cursor.execute(query)
         rows = cursor.fetchall()
@@ -60,36 +64,51 @@ def lambda_handler(event, context):
         results = []
         for row in rows:
             row_dict = dict(zip(columns, row))
-            # Converte abertura_chamado para ISO 8601 se for datetime
             if isinstance(row_dict.get("abertura_chamado"), datetime):
                 row_dict["abertura_chamado"] = row_dict["abertura_chamado"].strftime("%Y-%m-%dT%H:%M:%S")
             results.append(row_dict)
         print(f"[TEMPO] Processamento dos dados: {time.time() - start_process:.2f}s")
 
-        # Fecha conexão
         cursor.close()
         conn.close()
 
-        tempo_total = time.time() - start_total
-        print(f"[TOTAL] Tempo total da Lambda: {tempo_total:.2f}s")
+        # Mensagem JSON final
+        message = {
+            "action": "getChamados",
+            "data": results
+        }
 
-        # Retorna JSON
+        # Envia mensagem para todas conexões ativas
+        start_send = time.time()
+        connections = table.scan().get("Items", [])
+        print(f"[INFO] Enviando para {len(connections)} conexões")
+
+        for conn_item in connections:
+            connection_id = conn_item.get("connectionId")
+            try:
+                apigw.post_to_connection(
+                    ConnectionId=connection_id,
+                    Data=json.dumps(message, ensure_ascii=False).encode('utf-8')
+                )
+            except ClientError as e:
+                if e.response['Error']['Code'] == 'GoneException':
+                    # Conexão não existe mais → remove do DynamoDB
+                    print(f"[REMOVENDO] Conexão expirada: {connection_id}")
+                    table.delete_item(Key={'connectionId': connection_id})
+                else:
+                    print(f"[ERRO envio] {connection_id}: {e}")
+
+        print(f"[TEMPO] Envio WS: {time.time() - start_send:.2f}s")
+        print(f"[TOTAL] Tempo total da Lambda: {time.time() - start_total:.2f}s")
+
         return {
-            'statusCode': 200,
-            'headers': {
-                'Content-Type': 'application/json; charset=utf-8',
-                'Access-Control-Allow-Origin': '*'
-            },
-            'body': json.dumps(results, ensure_ascii=False)
+            "statusCode": 200,
+            "body": json.dumps({"message": "Chamados enviados via WebSocket"})
         }
 
     except Exception as e:
         print("[ERRO]", str(e))
         return {
-            'statusCode': 500,
-            'headers': {
-                'Content-Type': 'application/json; charset=utf-8',
-                'Access-Control-Allow-Origin': '*'
-            },
-            'body': json.dumps({'error': str(e)}, ensure_ascii=False)
+            "statusCode": 500,
+            "body": json.dumps({"error": str(e)}, ensure_ascii=False)
         }
