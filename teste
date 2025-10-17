@@ -3,32 +3,31 @@ import pyodbc
 import json
 import time
 import boto3
-from datetime import datetime
+from datetime import datetime, timezone
 from botocore.exceptions import ClientError
+from decimal import Decimal
 
 def lambda_handler(event, context):
     start_total = time.time()
     print("[INÍCIO] Execução da Lambda")
 
-    # ---------- VARIÁVEIS DE AMBIENTE ----------
+    # Variáveis de ambiente
     server = os.environ['DB_SERVER']
     username = os.environ['DB_USER']
     password = os.environ['DB_PASSWORD']
     port = os.environ.get('DB_PORT', '1433')
     database = 'mdb'
-
-    connections_table_name = os.environ['CONNECTIONS_TABLE']
-    state_table_name = os.environ['STATE_TABLE']  # nova tabela DynamoDB
+    connections_table = os.environ['CONNECTIONS_TABLE']          # Tabela de conexões WebSocket
+    state_table = os.environ['STATE_TABLE']                      # Nova tabela para armazenar o último estado
     ws_api_endpoint = os.environ['WS_API_ENDPOINT']
 
     dynamodb = boto3.resource('dynamodb')
-    connections_table = dynamodb.Table(connections_table_name)
-    state_table = dynamodb.Table(state_table_name)
-
+    table_connections = dynamodb.Table(connections_table)
+    table_state = dynamodb.Table(state_table)
     apigw = boto3.client('apigatewaymanagementapi', endpoint_url=ws_api_endpoint)
 
     try:
-        # ---------- CONEXÃO COM SQL ----------
+        # ----- Conexão SQL Server -----
         start_conexao = time.time()
         connection_string = (
             f'DRIVER={{ODBC Driver 18 for SQL Server}};'
@@ -40,9 +39,9 @@ def lambda_handler(event, context):
         )
         conn = pyodbc.connect(connection_string, timeout=5)
         cursor = conn.cursor()
-        print(f"[TEMPO] Conexão: {time.time() - start_conexao:.2f}s")
+        print(f"[TEMPO] Conexão com o banco: {time.time() - start_conexao:.2f}s")
 
-        # ---------- QUERY ----------
+        # ----- Query SQL -----
         query = """
             SELECT [chamado]
                   ,[tipo_chamado]
@@ -56,81 +55,81 @@ def lambda_handler(event, context):
             FROM [mdb].[dbo].[view_ciops_acionamento]
             WHERE TRY_CONVERT(DATETIME, abertura_chamado, 103) >= DATEADD(HOUR, -10, GETDATE());
         """
+        start_query = time.time()
         cursor.execute(query)
         rows = cursor.fetchall()
+        print(f"[TEMPO] Execução da query: {time.time() - start_query:.2f}s")
 
-        # ---------- PROCESSA RESULTADOS ----------
-        columns = [column[0] for column in cursor.description]
-        current_records = []
+        # ----- Processamento -----
+        columns = [col[0] for col in cursor.description]
+        results = []
+        current_ids = set()
+
         for row in rows:
-            row_dict = dict(zip(columns, row))
-            if isinstance(row_dict.get("abertura_chamado"), datetime):
-                row_dict["abertura_chamado"] = row_dict["abertura_chamado"].strftime("%Y-%m-%dT%H:%M:%S")
-            current_records.append(row_dict)
+            item = dict(zip(columns, row))
+            # Converte ID e datas corretamente
+            if "chamado" in item and item["chamado"] is not None:
+                item["chamado"] = int(item["chamado"])
+                current_ids.add(item["chamado"])
+
+            if isinstance(item.get("abertura_chamado"), datetime):
+                item["abertura_chamado"] = item["abertura_chamado"].strftime("%Y-%m-%dT%H:%M:%S")
+
+            results.append(item)
 
         cursor.close()
         conn.close()
 
-        current_ids = {r["chamado"] for r in current_records}
-
-        # ---------- CARREGA ÚLTIMO ESTADO ----------
+        # ----- Obtém estado anterior -----
         try:
-            last_state = state_table.get_item(Key={"id": "last_state"}).get("Item", {})
-            previous_ids = set(last_state.get("chamados", []))
+            response_state = table_state.get_item(Key={"id": "last_state"})
+            previous_ids = set(map(int, response_state.get("Item", {}).get("chamados", [])))
         except Exception:
             previous_ids = set()
 
-        # ---------- COMPARA DIFERENÇAS ----------
-        new_ids = current_ids - previous_ids
-        removed_ids = previous_ids - current_ids
+        # ----- Detecta novos e removidos -----
+        novos = current_ids - previous_ids
+        removidos = previous_ids - current_ids
 
-        added_records = [r for r in current_records if r["chamado"] in new_ids]
-        removed_records = list(removed_ids)
+        print(f"[INFO] Novos: {len(novos)} | Removidos: {len(removidos)}")
 
-        print(f"[INFO] Novos: {len(added_records)}, Removidos: {len(removed_records)}")
-
-        # ---------- SALVA NOVO ESTADO ----------
-        state_table.put_item(Item={
+        # Atualiza estado
+        table_state.put_item(Item={
             "id": "last_state",
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
             "chamados": list(current_ids)
         })
 
-        # ---------- SE NÃO HOUVER MUDANÇAS, ENCERRA ----------
-        if not added_records and not removed_records:
-            print("[INFO] Nenhuma alteração detectada")
-            return {"statusCode": 200, "body": json.dumps({"message": "Sem alterações"})}
+        # ----- Envia atualizações apenas se houve mudança -----
+        if novos or removidos:
+            message = {
+                "action": "updateChamados",
+                "novos": [r for r in results if r["chamado"] in novos],
+                "removidos": list(removidos)
+            }
 
-        # ---------- MONTA MENSAGEM ----------
-        message = {
-            "action": "getChamados",
-            "added": added_records,
-            "removed": removed_records
-        }
+            connections = table_connections.scan().get("Items", [])
+            print(f"[INFO] Enviando atualização para {len(connections)} conexões")
 
-        # ---------- ENVIA AOS CLIENTES ----------
-        connections = connections_table.scan().get("Items", [])
-        print(f"[INFO] Enviando atualização para {len(connections)} conexões")
-
-        for conn_item in connections:
-            connection_id = conn_item.get("connectionId")
-            try:
-                apigw.post_to_connection(
-                    ConnectionId=connection_id,
-                    Data=json.dumps(message, ensure_ascii=False).encode('utf-8')
-                )
-            except ClientError as e:
-                if e.response['Error']['Code'] == 'GoneException':
-                    print(f"[REMOVENDO] Conexão expirada: {connection_id}")
-                    connections_table.delete_item(Key={'connectionId': connection_id})
-                else:
-                    print(f"[ERRO envio] {connection_id}: {e}")
+            for conn_item in connections:
+                connection_id = conn_item.get("connectionId")
+                try:
+                    apigw.post_to_connection(
+                        ConnectionId=connection_id,
+                        Data=json.dumps(message, ensure_ascii=False).encode("utf-8")
+                    )
+                except ClientError as e:
+                    if e.response["Error"]["Code"] == "GoneException":
+                        print(f"[REMOVENDO] Conexão expirada: {connection_id}")
+                        table_connections.delete_item(Key={"connectionId": connection_id})
+                    else:
+                        print(f"[ERRO envio] {connection_id}: {e}")
 
         print(f"[TOTAL] Tempo total: {time.time() - start_total:.2f}s")
 
         return {
             "statusCode": 200,
-            "body": json.dumps({"message": "Atualizações enviadas"})
+            "body": json.dumps({"message": "Execução concluída"})
         }
 
     except Exception as e:
