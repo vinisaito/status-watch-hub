@@ -4,7 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Separator } from '@/components/ui/separator';
-import { Trash2, Shield } from 'lucide-react';
+import { Trash2, Shield, Clock, AlertTriangle, CheckCircle2, Activity, Calendar, Plus } from 'lucide-react';
 
 export type Outage = {
   // Formato antigo (UI local)
@@ -59,28 +59,40 @@ export const OutageManager: React.FC<OutageManagerProps> = ({ outages, onAdd, on
   }, [outages]);
 
   return (
-    <Card className="gradient-card border-panel-border shadow-card rounded-2xl overflow-hidden transition-smooth hover:shadow-hover">
-      <CardHeader className="bg-gradient-to-r from-panel-bg to-background p-6 border-b border-panel-border">
-        <CardTitle className="text-primary flex items-center gap-3 text-xl font-bold">
-          <div className="relative">
-            <div className="w-3 h-3 bg-orange-500 rounded-full animate-pulse-glow" />
-            <div className="absolute inset-0 w-3 h-3 bg-orange-500 rounded-full animate-ping opacity-30" />
+    <Card className="border-panel-border shadow-card hover:shadow-hover transition-smooth overflow-hidden bg-gradient-to-br from-card via-card to-background">
+      <CardHeader className="relative overflow-hidden border-b border-panel-border bg-gradient-to-r from-primary/5 via-accent/5 to-primary/5 backdrop-blur-sm">
+        <div className="absolute inset-0 bg-gradient-to-r from-primary/10 via-transparent to-accent/10 opacity-50" />
+        <CardTitle className="relative flex items-center justify-between gap-4">
+          <div className="flex items-center gap-3">
+            <div className="relative flex items-center justify-center w-10 h-10 rounded-xl bg-gradient-to-br from-alert-warning to-alert-warning/80 shadow-glow">
+              <Shield className="h-5 w-5 text-white" />
+              <div className="absolute inset-0 rounded-xl bg-alert-warning/30 animate-pulse-glow" />
+            </div>
+            <div>
+              <h2 className="text-2xl font-bold bg-gradient-to-r from-primary to-accent bg-clip-text text-transparent">
+                Outage de Alertas
+              </h2>
+              <p className="text-sm text-muted-foreground font-normal mt-0.5">
+                Gerenciamento de alertas suprimidos
+              </p>
+            </div>
           </div>
-          <div className="flex items-center gap-2 text-primary text-xl font-semibold">
-            <Shield className="h-5 w-5" />
-            <h2>Outage de Alertas</h2>
-          </div>
-          <Badge variant="secondary" className="ml-auto text-xs px-3 py-2">
+          <Badge 
+            variant="secondary" 
+            className="text-sm px-4 py-2 bg-alert-warning-bg border border-alert-warning-border text-alert-warning font-semibold shadow-sm"
+          >
+            <Activity className="h-3.5 w-3.5 mr-1.5" />
             {activeOutages.length} ativo{activeOutages.length !== 1 ? 's' : ''}
           </Badge>
         </CardTitle>
       </CardHeader>
 
-      <CardContent className="p-6 space-y-6">
+      <CardContent className="p-6 space-y-8">
         {/* Formulário */}
-        <div className="border border-panel-border rounded-xl p-4 bg-card gradient-card shadow-card">
+        <div className="relative border-2 border-panel-border rounded-2xl p-6 bg-gradient-to-br from-panel-bg to-background shadow-card hover:shadow-hover transition-smooth">
+          <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-primary via-accent to-primary rounded-t-2xl" />
           <form
-            className="flex flex-wrap items-end gap-4"
+            className="space-y-5"
             onSubmit={(e) => {
               e.preventDefault();
               const t = title.trim();
@@ -95,128 +107,249 @@ export const OutageManager: React.FC<OutageManagerProps> = ({ outages, onAdd, on
               setEndLocal(defaultEnd);
             }}
           >
-            {/* Campo número do chamado removido */}
-            <div className="flex flex-col gap-1 flex-1 min-w-[320px]">
-              <label className="text-xs uppercase tracking-wide text-muted-foreground">Título completo</label>
+            <div className="space-y-2">
+              <label className="flex items-center gap-2 text-sm font-medium text-foreground">
+                <AlertTriangle className="h-4 w-4 text-alert-warning" />
+                Título do Alerta
+              </label>
               <Input
-                placeholder="Cole aqui o título exato do alerta"
+                placeholder="Cole aqui o título exato do alerta que deseja suprimir"
                 value={title}
                 onChange={(e) => setTitle(e.target.value)}
-                className="w-full"
+                className="h-11 bg-background border-2 focus:border-primary transition-smooth"
                 required
               />
+              <p className="text-xs text-muted-foreground flex items-center gap-1.5">
+                <span className="w-1 h-1 rounded-full bg-muted-foreground" />
+                Alertas com título idêntico serão suprimidos automaticamente
+              </p>
             </div>
 
-            <div className="flex items-end gap-2">
-              <div className="flex flex-col gap-1">
-                <label className="text-xs uppercase tracking-wide text-muted-foreground">Início</label>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <label className="flex items-center gap-2 text-sm font-medium text-foreground">
+                  <Calendar className="h-4 w-4 text-primary" />
+                  Início do Outage
+                </label>
                 <Input
                   type="datetime-local"
                   value={startLocal}
                   onChange={(e) => setStartLocal(e.target.value)}
-                  className="w-56"
+                  className="h-11 bg-background border-2 focus:border-primary transition-smooth"
                 />
               </div>
-              <div className="flex flex-col gap-1">
-                <label className="text-xs uppercase tracking-wide text-muted-foreground">Fim</label>
+              <div className="space-y-2">
+                <label className="flex items-center gap-2 text-sm font-medium text-foreground">
+                  <Clock className="h-4 w-4 text-accent" />
+                  Fim do Outage
+                </label>
                 <Input
                   type="datetime-local"
                   value={endLocal}
                   onChange={(e) => setEndLocal(e.target.value)}
-                  className="w-56"
+                  className="h-11 bg-background border-2 focus:border-accent transition-smooth"
                 />
               </div>
-              <Button type="submit" className="self-end">Adicionar</Button>
             </div>
+
+            <Button 
+              type="submit" 
+              className="w-full h-11 bg-gradient-to-r from-primary to-accent hover:shadow-glow transition-smooth font-semibold"
+            >
+              <Plus className="h-4 w-4 mr-2" />
+              Adicionar Outage
+            </Button>
           </form>
-          <p className="text-xs text-muted-foreground mt-3">Alertas cujo título for exatamente igual ao informado serão ocultados entre o início e o fim configurados.</p>
         </div>
 
-        <Separator />
+        <Separator className="my-8" />
 
         {/* Outages ativos */}
-        <div className="space-y-3">
-          <h3 className="text-sm font-semibold text-foreground">Outages ativos</h3>
+        <div className="space-y-4">
+          <div className="flex items-center justify-between">
+            <h3 className="text-lg font-bold flex items-center gap-2 text-foreground">
+              <div className="w-1.5 h-6 bg-gradient-to-b from-alert-warning to-alert-warning/50 rounded-full" />
+              Outages Ativos
+            </h3>
+            <Badge variant="outline" className="text-xs">
+              {activeOutages.length} item{activeOutages.length !== 1 ? 's' : ''}
+            </Badge>
+          </div>
+          
           {activeOutages.length === 0 ? (
-            <p className="text-sm text-muted-foreground">Nenhum outage ativo.</p>
+            <div className="flex flex-col items-center justify-center py-12 px-4 border-2 border-dashed border-panel-border rounded-2xl bg-background/50">
+              <div className="w-16 h-16 rounded-full bg-alert-success-bg flex items-center justify-center mb-4">
+                <CheckCircle2 className="h-8 w-8 text-alert-success" />
+              </div>
+              <p className="text-sm font-medium text-foreground">Nenhum outage ativo</p>
+              <p className="text-xs text-muted-foreground mt-1">Todos os alertas estão sendo processados normalmente</p>
+            </div>
           ) : (
-            <ul className="space-y-2">
+            <div className="space-y-3">
               {activeOutages.map((o, index) => {
                 const start = (o.data_inicio ?? o.startAt) ?? Date.now();
                 const end = (o.data_fim ?? o.endAt) ?? start;
                 const remaining = Math.max(0, end - Date.now());
                 const mins = Math.ceil(remaining / 60000);
                 return (
-                  <li
+                  <div
                     key={String(o.outage_id ?? o.id ?? `${o.title}-${index}`)}
-                    className="group relative border border-panel-border rounded-xl p-4 bg-card gradient-card shadow-card hover:shadow-hover transition-smooth animate-fade-in"
+                    className="group relative border-2 border-panel-border rounded-xl p-5 bg-gradient-to-br from-alert-warning-bg to-background hover:border-alert-warning-border hover:shadow-hover transition-smooth animate-fade-in"
                     style={{ animationDelay: `${index * 60}ms` }}
                   >
-                    <div className="flex items-center justify-between gap-3">
-                      <div className="flex items-center gap-3 min-w-0">
-                        <Badge className="bg-orange-200 text-orange-900">{o.title}</Badge>
-                        {o.numeroChamado && (
-                          <span className="ml-2 text-xs text-muted-foreground">Chamado: {o.numeroChamado}</span>
-                        )}
-                        <span className="text-sm text-muted-foreground whitespace-nowrap">termina em ~ {mins} min</span>
+                    <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-alert-warning via-alert-warning/50 to-transparent rounded-t-xl" />
+                    
+                    <div className="flex items-start justify-between gap-4">
+                      <div className="flex-1 space-y-3">
+                        <div className="flex items-start gap-3">
+                          <div className="mt-1 flex-shrink-0">
+                            <div className="w-2 h-2 bg-alert-warning rounded-full animate-pulse-glow" />
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-semibold text-foreground mb-1 break-words">
+                              {o.title}
+                            </p>
+                            {o.numeroChamado && (
+                              <Badge variant="outline" className="text-xs">
+                                Chamado: {o.numeroChamado}
+                              </Badge>
+                            )}
+                          </div>
+                        </div>
+                        
+                        <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-xs text-muted-foreground">
+                          <span className="flex items-center gap-1.5">
+                            <Calendar className="h-3 w-3" />
+                            {new Date(start).toLocaleString('pt-BR', { 
+                              day: '2-digit', 
+                              month: '2-digit', 
+                              hour: '2-digit', 
+                              minute: '2-digit' 
+                            })}
+                          </span>
+                          <span className="flex items-center gap-1.5">
+                            <Clock className="h-3 w-3" />
+                            {new Date(end).toLocaleString('pt-BR', { 
+                              day: '2-digit', 
+                              month: '2-digit', 
+                              hour: '2-digit', 
+                              minute: '2-digit' 
+                            })}
+                          </span>
+                          <Badge className="bg-alert-warning/10 text-alert-warning border-alert-warning/20 text-xs">
+                            Termina em ~{mins} min
+                          </Badge>
+                        </div>
                       </div>
-                      <Button variant="ghost" size="sm" onClick={() => onRemove(String(o.outage_id ?? o.id ?? ''))} title="Remover" className="hover:bg-hover-bg">
+                      
+                      <Button 
+                        variant="ghost" 
+                        size="sm" 
+                        onClick={() => onRemove(String(o.outage_id ?? o.id ?? ''))} 
+                        className="hover:bg-destructive/10 hover:text-destructive transition-smooth flex-shrink-0"
+                        title="Remover outage"
+                      >
                         <Trash2 className="h-4 w-4" />
                       </Button>
                     </div>
-                    <div className="mt-2 text-xs text-muted-foreground">
-                      <span>Início: {new Date(start).toLocaleString('pt-BR')}</span>
-                      <span className="mx-2">•</span>
-                      <span>Fim: {new Date(end).toLocaleString('pt-BR')}</span>
-                    </div>
-                  </li>
+                  </div>
                 );
               })}
-            </ul>
+            </div>
           )}
         </div>
 
         {/* Chamados atualmente impactados pelo Outage */}
-        <div className="space-y-2">
-          <h3 className="text-sm font-semibold text-foreground">Chamados em Outage</h3>
+        <div className="space-y-4">
+          <div className="flex items-center justify-between">
+            <h3 className="text-lg font-bold flex items-center gap-2 text-foreground">
+              <div className="w-1.5 h-6 bg-gradient-to-b from-accent to-accent/50 rounded-full" />
+              Chamados em Outage
+            </h3>
+            <Badge variant="outline" className="text-xs">
+              {suppressedAlerts.length} suprimido{suppressedAlerts.length !== 1 ? 's' : ''}
+            </Badge>
+          </div>
+          
           {suppressedAlerts.length === 0 ? (
-            <p className="text-sm text-muted-foreground">Nenhum chamado impactado neste momento.</p>
+            <div className="flex flex-col items-center justify-center py-8 px-4 border-2 border-dashed border-panel-border rounded-2xl bg-background/50">
+              <p className="text-sm text-muted-foreground">Nenhum chamado impactado neste momento</p>
+            </div>
           ) : (
-            <ul className="space-y-2">
-              {suppressedAlerts.map((a) => (
-                <li key={a.id} className="flex items-center justify-between gap-3 border border-panel-border rounded-lg p-3 bg-card">
-                  <div className="min-w-0">
-                    <div className="text-sm font-medium truncate">{a.resumo}</div>
-                    <div className="text-xs text-muted-foreground mt-1">
-                      {a.chamado ? <span>Chamado: {a.chamado}</span> : null}
-                      {a.chamado && (a.abertura || a.link_chamado) ? <span className="mx-2">•</span> : null}
-                      {a.abertura ? <span>Aberto: {new Date(a.abertura).toLocaleString('pt-BR')}</span> : null}
+            <div className="space-y-3">
+              {suppressedAlerts.map((a, index) => (
+                <div 
+                  key={a.id} 
+                  className="group flex items-center justify-between gap-4 border border-panel-border rounded-xl p-4 bg-gradient-to-br from-card to-background hover:border-accent/50 hover:shadow-hover transition-smooth animate-fade-in"
+                  style={{ animationDelay: `${index * 40}ms` }}
+                >
+                  <div className="flex-1 min-w-0 space-y-2">
+                    <p className="text-sm font-medium text-foreground truncate">{a.resumo}</p>
+                    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+                      {a.chamado && (
+                        <span className="flex items-center gap-1.5">
+                          <span className="w-1 h-1 rounded-full bg-muted-foreground" />
+                          Chamado: <span className="font-medium">{a.chamado}</span>
+                        </span>
+                      )}
+                      {a.abertura && (
+                        <span className="flex items-center gap-1.5">
+                          <Calendar className="h-3 w-3" />
+                          {new Date(a.abertura).toLocaleString('pt-BR')}
+                        </span>
+                      )}
                     </div>
                   </div>
-                  {a.link_chamado ? (
-                    <Button asChild size="sm" variant="outline">
-                      <a href={a.link_chamado} target="_blank" rel="noreferrer">Abrir chamado</a>
+                  {a.link_chamado && (
+                    <Button 
+                      asChild 
+                      size="sm" 
+                      variant="outline"
+                      className="hover:bg-primary hover:text-primary-foreground transition-smooth flex-shrink-0"
+                    >
+                      <a href={a.link_chamado} target="_blank" rel="noreferrer">
+                        Ver Chamado
+                      </a>
                     </Button>
-                  ) : null}
-                </li>
+                  )}
+                </div>
               ))}
-            </ul>
+            </div>
           )}
         </div>
 
         {/* Histórico */}
-        <div className="space-y-2">
-          <h3 className="text-sm font-semibold text-foreground">Histórico recente</h3>
+        <div className="space-y-4">
+          <div className="flex items-center justify-between">
+            <h3 className="text-lg font-bold flex items-center gap-2 text-foreground">
+              <div className="w-1.5 h-6 bg-gradient-to-b from-primary to-primary/50 rounded-full" />
+              Histórico Recente
+            </h3>
+            <Badge variant="outline" className="text-xs">
+              Últimos {Math.min(outages.length, 10)}
+            </Badge>
+          </div>
+          
           {outages.length === 0 ? (
-            <p className="text-sm text-muted-foreground">Sem histórico.</p>
+            <div className="flex flex-col items-center justify-center py-8 px-4 border-2 border-dashed border-panel-border rounded-2xl bg-background/50">
+              <p className="text-sm text-muted-foreground">Sem histórico de outages</p>
+            </div>
           ) : (
             <div className="flex flex-wrap gap-2">
               {outages.slice(-10).reverse().map((o, idx) => {
                 const key = String(o.outage_id ?? o.id ?? `${o.title}-${idx}`);
                 return (
-                  <Badge key={key} variant="outline">
+                  <Badge 
+                    key={key} 
+                    variant="secondary"
+                    className="px-3 py-1.5 bg-gradient-to-r from-secondary to-secondary/80 hover:shadow-card transition-smooth text-xs"
+                  >
                     {o.title}
-                    {o.numeroChamado ? ` (Chamado: ${o.numeroChamado})` : ''}
+                    {o.numeroChamado && (
+                      <span className="ml-1.5 opacity-70">
+                        • {o.numeroChamado}
+                      </span>
+                    )}
                   </Badge>
                 );
               })}
