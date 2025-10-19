@@ -1,114 +1,231 @@
-import os
-import pyodbc
-import json
-import time
-import boto3
-from datetime import datetime
-from botocore.exceptions import ClientError
+import React, { useMemo, useState } from 'react';
+import { Input } from '@/components/ui/input';
+import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Separator } from '@/components/ui/separator';
+import { Trash2, Shield } from 'lucide-react';
 
-def lambda_handler(event, context):
-    start_total = time.time()
-    print("[INÍCIO] Execução da Lambda")
+export type Outage = {
+  // Formato antigo (UI local)
+  id?: string;
+  startAt?: number;
+  endAt?: number;
+  createdAt?: number;
+  // Formato Lambda
+  outage_id?: string;
+  data_inicio?: number; // ms
+  data_fim?: number;    // ms
+  timestamp?: number;
+  status?: string;
+  // Comum
+  title: string;
+  numeroChamado?: string;
+};
 
-    # Variáveis de ambiente
-    server = os.environ['DB_SERVER']
-    username = os.environ['DB_USER']
-    password = os.environ['DB_PASSWORD']
-    port = os.environ.get('DB_PORT', '1433')
-    database = 'mdb'
-    connections_table = os.environ['CONNECTIONS_TABLE']
-    ws_api_endpoint = os.environ['WS_API_ENDPOINT']  # ex: wss://abc123.execute-api.us-east-1.amazonaws.com/prod
+type SuppressedAlert = {
+  id: string;
+  resumo: string;
+  chamado?: string;
+  abertura?: string;
+  link_chamado?: string;
+};
 
-    dynamodb = boto3.resource('dynamodb')
-    table = dynamodb.Table(connections_table)
+interface OutageManagerProps {
+  outages: Outage[];
+  onAdd: (title: string, startAt: number, endAt: number, numeroChamado: string) => void;
+  onRemove: (id: string) => void;
+  suppressedAlerts?: SuppressedAlert[];
+}
 
-    apigw = boto3.client('apigatewaymanagementapi', endpoint_url=ws_api_endpoint)
+export const OutageManager: React.FC<OutageManagerProps> = ({ outages, onAdd, onRemove, suppressedAlerts = [] }) => {
+  const [title, setTitle] = useState('');
+  // Helpers para valores default de datetime-local
+  const now = new Date();
+  const pad = (n: number) => String(n).padStart(2, '0');
+  const toLocalInputValue = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  const defaultStart = toLocalInputValue(now);
+  const defaultEnd = toLocalInputValue(new Date(now.getTime() + 60 * 60000));
+  const [startLocal, setStartLocal] = useState<string>(defaultStart);
+  const [endLocal, setEndLocal] = useState<string>(defaultEnd);
 
-    try:
-        # Conexão com SQL Server
-        start_conexao = time.time()
-        connection_string = (
-            f'DRIVER={{ODBC Driver 18 for SQL Server}};'
-            f'SERVER={server},{port};'
-            f'DATABASE={database};'
-            f'UID={username};'
-            f'PWD={password};'
-            f'Encrypt=no;TrustServerCertificate=yes;CHARSET=UTF8;'
-        )
-        conn = pyodbc.connect(connection_string, timeout=5)
-        cursor = conn.cursor()
-        print(f"[TEMPO] Conexão com o banco: {time.time() - start_conexao:.2f}s")
+  const activeOutages = useMemo(() => {
+    const now = Date.now();
+    return outages.filter(o => {
+      const start = (o.data_inicio ?? o.startAt) ?? 0;
+      const end = (o.data_fim ?? o.endAt) ?? 0;
+      return now >= start && now <= end;
+    });
+  }, [outages]);
 
-        # Executa consulta SQL
-        query = """
-            SELECT [chamado]
-                  ,[tipo_chamado]
-                  ,[status_chamado]
-                  ,[abertura_chamado]
-                  ,[resumo_chamado]
-                  ,[grupo_chamado]
-                  ,[severidade_chamado]
-                  ,[acionado]
-                  ,[link_chamado]
-            FROM [mdb].[dbo].[view_ciops_acionamento]
-            WHERE TRY_CONVERT(DATETIME, abertura_chamado, 103) >= DATEADD(HOUR, -10, GETDATE());
-        """
-        start_query = time.time()
-        cursor.execute(query)
-        rows = cursor.fetchall()
-        print(f"[TEMPO] Execução da query: {time.time() - start_query:.2f}s")
+  return (
+    <Card className="gradient-card border-panel-border shadow-card rounded-2xl overflow-hidden transition-smooth hover:shadow-hover">
+      <CardHeader className="bg-gradient-to-r from-panel-bg to-background p-6 border-b border-panel-border">
+        <CardTitle className="text-primary flex items-center gap-3 text-xl font-bold">
+          <div className="relative">
+            <div className="w-3 h-3 bg-orange-500 rounded-full animate-pulse-glow" />
+            <div className="absolute inset-0 w-3 h-3 bg-orange-500 rounded-full animate-ping opacity-30" />
+          </div>
+          <div className="flex items-center gap-2 text-primary text-xl font-semibold">
+            <Shield className="h-5 w-5" />
+            <h2>Outage de Alertas</h2>
+          </div>
+          <Badge variant="secondary" className="ml-auto text-xs px-3 py-2">
+            {activeOutages.length} ativo{activeOutages.length !== 1 ? 's' : ''}
+          </Badge>
+        </CardTitle>
+      </CardHeader>
 
-        # Processamento dos dados
-        start_process = time.time()
-        columns = [column[0] for column in cursor.description]
-        results = []
-        for row in rows:
-            row_dict = dict(zip(columns, row))
-            if isinstance(row_dict.get("abertura_chamado"), datetime):
-                row_dict["abertura_chamado"] = row_dict["abertura_chamado"].strftime("%Y-%m-%dT%H:%M:%S")
-            results.append(row_dict)
-        print(f"[TEMPO] Processamento dos dados: {time.time() - start_process:.2f}s")
+      <CardContent className="p-6 space-y-6">
+        {/* Formulário */}
+        <div className="border border-panel-border rounded-xl p-4 bg-card gradient-card shadow-card">
+          <form
+            className="flex flex-wrap items-end gap-4"
+            onSubmit={(e) => {
+              e.preventDefault();
+              const t = title.trim();
+              if (!t) return;
+              const s = new Date(startLocal).getTime();
+              const f = new Date(endLocal).getTime();
+              if (!isFinite(s) || !isFinite(f)) return;
+              if (f <= s) return;
+              onAdd(t, s, f, '');
+              setTitle('');
+              setStartLocal(defaultStart);
+              setEndLocal(defaultEnd);
+            }}
+          >
+            {/* Campo número do chamado removido */}
+            <div className="flex flex-col gap-1 flex-1 min-w-[320px]">
+              <label className="text-xs uppercase tracking-wide text-muted-foreground">Título completo</label>
+              <Input
+                placeholder="Cole aqui o título exato do alerta"
+                value={title}
+                onChange={(e) => setTitle(e.target.value)}
+                className="w-full"
+                required
+              />
+            </div>
 
-        cursor.close()
-        conn.close()
+            <div className="flex items-end gap-2">
+              <div className="flex flex-col gap-1">
+                <label className="text-xs uppercase tracking-wide text-muted-foreground">Início</label>
+                <Input
+                  type="datetime-local"
+                  value={startLocal}
+                  onChange={(e) => setStartLocal(e.target.value)}
+                  className="w-56"
+                />
+              </div>
+              <div className="flex flex-col gap-1">
+                <label className="text-xs uppercase tracking-wide text-muted-foreground">Fim</label>
+                <Input
+                  type="datetime-local"
+                  value={endLocal}
+                  onChange={(e) => setEndLocal(e.target.value)}
+                  className="w-56"
+                />
+              </div>
+              <Button type="submit" className="self-end">Adicionar</Button>
+            </div>
+          </form>
+          <p className="text-xs text-muted-foreground mt-3">Alertas cujo título for exatamente igual ao informado serão ocultados entre o início e o fim configurados.</p>
+        </div>
 
-        # Mensagem JSON final
-        message = {
-            "action": "getChamados",
-            "data": results
-        }
+        <Separator />
 
-        # Envia mensagem para todas conexões ativas
-        start_send = time.time()
-        connections = table.scan().get("Items", [])
-        print(f"[INFO] Enviando para {len(connections)} conexões")
+        {/* Outages ativos */}
+        <div className="space-y-3">
+          <h3 className="text-sm font-semibold text-foreground">Outages ativos</h3>
+          {activeOutages.length === 0 ? (
+            <p className="text-sm text-muted-foreground">Nenhum outage ativo.</p>
+          ) : (
+            <ul className="space-y-2">
+              {activeOutages.map((o, index) => {
+                const start = (o.data_inicio ?? o.startAt) ?? Date.now();
+                const end = (o.data_fim ?? o.endAt) ?? start;
+                const remaining = Math.max(0, end - Date.now());
+                const mins = Math.ceil(remaining / 60000);
+                return (
+                  <li
+                    key={String(o.outage_id ?? o.id ?? `${o.title}-${index}`)}
+                    className="group relative border border-panel-border rounded-xl p-4 bg-card gradient-card shadow-card hover:shadow-hover transition-smooth animate-fade-in"
+                    style={{ animationDelay: `${index * 60}ms` }}
+                  >
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="flex items-center gap-3 min-w-0">
+                        <Badge className="bg-orange-200 text-orange-900">{o.title}</Badge>
+                        {o.numeroChamado && (
+                          <span className="ml-2 text-xs text-muted-foreground">Chamado: {o.numeroChamado}</span>
+                        )}
+                        <span className="text-sm text-muted-foreground whitespace-nowrap">termina em ~ {mins} min</span>
+                      </div>
+                      <Button variant="ghost" size="sm" onClick={() => onRemove(String(o.outage_id ?? o.id ?? ''))} title="Remover" className="hover:bg-hover-bg">
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </div>
+                    <div className="mt-2 text-xs text-muted-foreground">
+                      <span>Início: {new Date(start).toLocaleString('pt-BR')}</span>
+                      <span className="mx-2">•</span>
+                      <span>Fim: {new Date(end).toLocaleString('pt-BR')}</span>
+                    </div>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </div>
 
-        for conn_item in connections:
-            connection_id = conn_item.get("connectionId")
-            try:
-                apigw.post_to_connection(
-                    ConnectionId=connection_id,
-                    Data=json.dumps(message, ensure_ascii=False).encode('utf-8')
-                )
-            except ClientError as e:
-                if e.response['Error']['Code'] == 'GoneException':
-                    # Conexão não existe mais → remove do DynamoDB
-                    print(f"[REMOVENDO] Conexão expirada: {connection_id}")
-                    table.delete_item(Key={'connectionId': connection_id})
-                else:
-                    print(f"[ERRO envio] {connection_id}: {e}")
+        {/* Chamados atualmente impactados pelo Outage */}
+        <div className="space-y-2">
+          <h3 className="text-sm font-semibold text-foreground">Chamados em Outage</h3>
+          {suppressedAlerts.length === 0 ? (
+            <p className="text-sm text-muted-foreground">Nenhum chamado impactado neste momento.</p>
+          ) : (
+            <ul className="space-y-2">
+              {suppressedAlerts.map((a) => (
+                <li key={a.id} className="flex items-center justify-between gap-3 border border-panel-border rounded-lg p-3 bg-card">
+                  <div className="min-w-0">
+                    <div className="text-sm font-medium truncate">{a.resumo}</div>
+                    <div className="text-xs text-muted-foreground mt-1">
+                      {a.chamado ? <span>Chamado: {a.chamado}</span> : null}
+                      {a.chamado && (a.abertura || a.link_chamado) ? <span className="mx-2">•</span> : null}
+                      {a.abertura ? <span>Aberto: {new Date(a.abertura).toLocaleString('pt-BR')}</span> : null}
+                    </div>
+                  </div>
+                  {a.link_chamado ? (
+                    <Button asChild size="sm" variant="outline">
+                      <a href={a.link_chamado} target="_blank" rel="noreferrer">Abrir chamado</a>
+                    </Button>
+                  ) : null}
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
 
-        print(f"[TEMPO] Envio WS: {time.time() - start_send:.2f}s")
-        print(f"[TOTAL] Tempo total da Lambda: {time.time() - start_total:.2f}s")
+        {/* Histórico */}
+        <div className="space-y-2">
+          <h3 className="text-sm font-semibold text-foreground">Histórico recente</h3>
+          {outages.length === 0 ? (
+            <p className="text-sm text-muted-foreground">Sem histórico.</p>
+          ) : (
+            <div className="flex flex-wrap gap-2">
+              {outages.slice(-10).reverse().map((o, idx) => {
+                const key = String(o.outage_id ?? o.id ?? `${o.title}-${idx}`);
+                return (
+                  <Badge key={key} variant="outline">
+                    {o.title}
+                    {o.numeroChamado ? ` (Chamado: ${o.numeroChamado})` : ''}
+                  </Badge>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      </CardContent>
+    </Card>
+  );
+};
 
-        return {
-            "statusCode": 200,
-            "body": json.dumps({"message": "Chamados enviados via WebSocket"})
-        }
-
-    except Exception as e:
-        print("[ERRO]", str(e))
-        return {
-            "statusCode": 500,
-            "body": json.dumps({"error": str(e)}, ensure_ascii=False)
-        }
+export default OutageManager;
