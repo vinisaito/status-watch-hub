@@ -18,7 +18,11 @@ import {
   Star,
   Plus,
   Save,
-  X
+  X,
+  Activity,
+  FileText,
+  Send,
+  Sparkles
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -123,19 +127,19 @@ const formatDateRange = (start: string, end?: string) => {
 const getStatusAcompanhamentoColor = (status: string) => {
   switch (status) {
     case 'Concluído':
-      return 'bg-status-completed text-white';
+      return 'bg-alert-success text-white border-alert-success-border';
     case 'Em Andamento':
     case 'Em Teste':
-      return 'bg-status-in-progress text-white';
+      return 'bg-primary text-white border-primary/50';
     case 'Aguardando Aprovação':
     case 'Aguardando Terceiros':
-      return 'bg-status-pending text-white';
+      return 'bg-alert-warning text-white border-alert-warning-border';
     case 'Cancelado':
-      return 'bg-status-cancelled text-white';
+      return 'bg-destructive text-white border-destructive/50';
     case 'Suspenso':
-      return 'bg-status-on-hold text-white';
+      return 'bg-muted text-muted-foreground border-muted/50';
     default:
-      return 'bg-muted text-muted-foreground';
+      return 'bg-secondary text-secondary-foreground border-secondary/50';
   }
 };
 
@@ -229,7 +233,6 @@ export const RDMTracker = () => {
     }
   };
 
-  // Fetch a single RDM by number and hydrate form
   const fetchRdmByNumber = async (numero: string) => {
     const trimmed = (numero || '').trim();
     if (!trimmed) return;
@@ -249,7 +252,6 @@ export const RDMTracker = () => {
       }
       const data = await res.json();
 
-      // Map API fields to form structure, preserving any user edits not provided by API
       setFormData(prev => ({
         ...prev,
         numero_rdm: String(data.numero_rdm ?? trimmed),
@@ -301,7 +303,6 @@ export const RDMTracker = () => {
     setLoading(true);
 
     try {
-      // Atualiza/Registra status de acompanhamento no backend
       const payload = {
         numero_rdm: String(formData.numero_rdm).trim(),
         status_acompanhamento: 'Adicionado para Acompanhamento'
@@ -320,9 +321,7 @@ export const RDMTracker = () => {
         throw new Error(msg || 'Erro ao criar RDM');
       }
 
-      // Prepara objeto local (fallback) caso a busca pontual não retorne
       const newRDM = {
-        // Dados principais vindos do formulário
         id: String(formData.numero_rdm).trim(),
         numero_rdm: parseInt(formData.numero_rdm),
         descricao_rdm_user: formData.descricao_rdm_user,
@@ -347,7 +346,7 @@ export const RDMTracker = () => {
         status_acompanhamento: 'Adicionado para Acompanhamento',
         sala_acompanhamento: formData.sala_acompanhamento,
       } as RDM;
-      // Tenta buscar a RDM salva do backend e fazer upsert na lista
+
       const numeroStr = String(formData.numero_rdm).trim();
       try {
         const r = await fetch(`${API_URL}?numero_rdm=${encodeURIComponent(numeroStr)}`);
@@ -368,7 +367,6 @@ export const RDMTracker = () => {
             return [mapped, ...prev];
           });
         } else {
-          // 404 ou outro erro: mantém o fallback local
           setRdms(prev => [newRDM, ...prev]);
         }
       } catch {
@@ -393,7 +391,6 @@ export const RDMTracker = () => {
   const handleStatusChange = async (rdmId: string, newStatus: string) => {
     setStatusLoading(rdmId);
     try {
-      // Atualiza status no backend (Lambda aceita POST)
       const response = await fetch(API_URL, {
         method: 'POST',
         headers: {
@@ -474,87 +471,48 @@ export const RDMTracker = () => {
     switch (status_rdm) {
       case 'Aberta':
       case 'Aprovada':
-        return 'bg-status-approved text-white border-status-approved/50 shadow-md';
-
+        return 'bg-alert-success text-white border-alert-success-border shadow-sm';
       case 'Cancelada':
       case 'Rejeitada':
-        return 'bg-status-cancelled text-white border-status-cancelled/50 shadow-md';
-
+        return 'bg-destructive text-white border-destructive/50 shadow-sm';
       case 'Em aprovação':
       case 'Em aprovação - Comitê':
-        return 'bg-status-pending text-white border-status-pending/50 shadow-md';
-
+        return 'bg-alert-warning text-white border-alert-warning-border shadow-sm';
       case 'Em implantação':
-        return 'bg-status-in-progress text-white border-status-in-progress/50 shadow-md';
-
+        return 'bg-primary text-white border-primary/50 shadow-sm';
       case 'Implantada':
       case 'Fechada':
-        return 'bg-status-completed text-white border-status-completed/50 shadow-md';
-
+        return 'bg-alert-success text-white border-alert-success-border shadow-sm';
       case 'Plano de volta em execução':
       case 'Recuada':
-        return 'bg-status-on-hold text-white border-status-on-hold/50 shadow-md';
-
+        return 'bg-secondary text-secondary-foreground border-secondary/50 shadow-sm';
       default:
         return 'bg-muted text-muted-foreground';
     }
   };
 
-  const getStatusText = (status_rdm: string) => {
-    switch (status_rdm) {
-      case 'Aberta':
-        return 'Aberta';
-      case 'Aprovada':
-        return 'Aprovada';
-      case 'Cancelada':
-        return 'Cancelada';
-      case 'Em aprovação':
-        return 'Em aprovação';
-      case 'Em aprovação - Comitê':
-        return 'Em aprovação - Comitê';
-      case 'Em implantação':
-        return 'Em implantação';
-      case 'Fechada':
-        return 'Fechada';
-      case 'Implantada':
-        return 'Implantada';
-      case 'Plano de volta em execução':
-        return 'Plano de volta em execução';
-      case 'Recuada':
-        return 'Recuada';
-      case 'Rejeitada':
-        return 'Rejeitada';
-      default:
-        return 'Desconhecido';
-    }
-  };
+  const getStatusText = (status_rdm: string) => status_rdm;
 
   const getStatusIcon = (status_rdm: string) => {
     switch (status_rdm) {
       case 'Aberta':
-        return <Play className="h-4 w-4 animate-pulse" />;
+        return <Play className="h-4 w-4" />;
       case 'Aprovada':
-        return <Star className="h-4 w-4 animate-bounce" />;
-
+        return <Star className="h-4 w-4" />;
       case 'Cancelada':
       case 'Rejeitada':
         return <XCircle className="h-4 w-4" />;
-
       case 'Em implantação':
         return <Settings className="h-4 w-4 animate-spin" />;
-
       case 'Em aprovação':
       case 'Em aprovação - Comitê':
-        return <Clock className="h-4 w-4 animate-bounce" />;
-
+        return <Clock className="h-4 w-4" />;
       case 'Implantada':
       case 'Fechada':
         return <CheckCircle2 className="h-4 w-4" />;
-
       case 'Plano de volta em execução':
       case 'Recuada':
         return <RotateCcw className="h-4 w-4" />;
-
       default:
         return <Circle className="h-4 w-4" />;
     }
@@ -563,12 +521,12 @@ export const RDMTracker = () => {
   const getPriorityIcon = (tipo_rdm: string) => {
     switch (tipo_rdm) {
       case 'Urgente':
-        return <AlertTriangle className="h-4 w-4 text-status-cancelled" />;
+        return <AlertTriangle className="h-4 w-4 text-destructive" />;
       case 'Padrão':
       case 'Normal':
-        return <AlertCircle className="h-4 w-4 text-status-in-progress" />;
+        return <AlertCircle className="h-4 w-4 text-primary" />;
       case 'Informativa':
-        return <Circle className="h-4 w-4 text-status-completed" />;
+        return <Circle className="h-4 w-4 text-alert-success" />;
       default:
         return <Circle className="h-4 w-4 text-muted-foreground" />;
     }
@@ -577,20 +535,18 @@ export const RDMTracker = () => {
   const getPriorityColor = (tipo_rdm: string) => {
     switch (tipo_rdm) {
       case 'Urgente':
-        return 'text-status-cancelled';
+        return 'text-destructive';
       case 'Padrão':
       case 'Normal':
-        return 'text-status-in-progress';
+        return 'text-primary';
       case 'Informativa':
-        return 'text-status-completed';
+        return 'text-alert-success';
       default:
         return 'text-muted-foreground';
     }
   };
 
-  const getPriorityText = (tipo_rdm: string) => {
-    return tipo_rdm;
-  };
+  const getPriorityText = (tipo_rdm: string) => tipo_rdm;
 
   const toggleExpanded = (id: string) => {
     setExpandedRDM(prev => prev === id ? null : id);
@@ -606,7 +562,7 @@ export const RDMTracker = () => {
 
   const activeRDMs = rdms.filter(rdm => rdm.status_rdm !== 'Fechada' && rdm.status_rdm !== 'Implantada').length;
 
-  // Componente StatusSelector inline
+  // Componente StatusSelector
   const StatusSelector = ({ rdm }: { rdm: RDM }) => {
     const [selectedStatus, setSelectedStatus] = useState(rdm.status_acompanhamento || 'Não Iniciado');
     const isEditing = editingStatus === rdm.id;
@@ -618,15 +574,15 @@ export const RDMTracker = () => {
     if (!isEditing) {
       return (
         <div className="flex items-center gap-2">
-          <Badge className={`${getStatusAcompanhamentoColor(selectedStatus)} flex items-center gap-1.5 px-3 py-1`}>
-            <CurrentIcon className="h-3 w-3" />
+          <Badge className={`${getStatusAcompanhamentoColor(selectedStatus)} flex items-center gap-1.5 px-3 py-1.5 shadow-sm`}>
+            <CurrentIcon className="h-3.5 w-3.5" />
             {selectedStatus}
           </Badge>
           <Button
             variant="outline"
             size="sm"
             onClick={() => setEditingStatus(rdm.id)}
-            className="h-8 px-2 text-xs"
+            className="h-8 px-3 text-xs hover:bg-primary/5 hover:border-primary/50 transition-smooth"
             disabled={isLoading}
           >
             Alterar
@@ -636,10 +592,10 @@ export const RDMTracker = () => {
     }
 
     return (
-      <div className="flex items-center gap-2 p-2 bg-accent/10 rounded-lg border">
+      <div className="flex items-center gap-2 p-3 bg-gradient-to-br from-panel-bg to-background rounded-xl border-2 border-primary/20 shadow-card">
         <div className="flex-1">
           <Select value={selectedStatus} onValueChange={setSelectedStatus}>
-            <SelectTrigger className="h-8">
+            <SelectTrigger className="h-9 border-2 focus:border-primary transition-smooth">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -657,14 +613,15 @@ export const RDMTracker = () => {
             </SelectContent>
           </Select>
         </div>
-        <div className="flex gap-1">
+        <div className="flex gap-2">
           <Button
             size="sm"
             onClick={() => handleStatusChange(rdm.id, selectedStatus)}
             disabled={isLoading || selectedStatus === rdm.status_acompanhamento}
-            className="h-8 px-2"
+            className="h-9 px-3 bg-gradient-to-r from-primary to-accent hover:shadow-glow transition-smooth"
           >
-            <Save className="h-3 w-3" />
+            <Save className="h-3.5 w-3.5 mr-1.5" />
+            Salvar
           </Button>
           <Button
             variant="outline"
@@ -674,9 +631,9 @@ export const RDMTracker = () => {
               setEditingStatus(null);
             }}
             disabled={isLoading}
-            className="h-8 px-2"
+            className="h-9 px-3 hover:bg-destructive/5 hover:text-destructive transition-smooth"
           >
-            ✕
+            <X className="h-3.5 w-3.5" />
           </Button>
         </div>
       </div>
@@ -684,95 +641,114 @@ export const RDMTracker = () => {
   };
 
   return (
-    <div className="min-h-screen bg-background p-6">
-      <Card className="shadow-card border transition-all duration-300 hover:shadow-hover">
-        <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3">
-          <CardTitle className="text-primary flex items-center gap-3 text-xl font-bold">
-            <div className="relative">
-              <Calendar className="h-6 w-6" />
+    <div className="min-h-screen bg-gradient-to-br from-background via-background to-muted/30 p-6">
+      <Card className="border-panel-border shadow-card hover:shadow-hover transition-smooth overflow-hidden bg-gradient-to-br from-card via-card to-background">
+        <CardHeader className="relative overflow-hidden border-b border-panel-border bg-gradient-to-r from-primary/5 via-accent/5 to-primary/5 backdrop-blur-sm">
+          <div className="absolute inset-0 bg-gradient-to-r from-primary/10 via-transparent to-accent/10 opacity-50" />
+          <div className="relative flex flex-row items-center justify-between space-y-0">
+            <CardTitle className="flex items-center gap-3">
+              <div className="relative flex items-center justify-center w-12 h-12 rounded-xl bg-gradient-to-br from-primary to-accent shadow-glow">
+                <Calendar className="h-6 w-6 text-white" />
+                {activeRDMs > 0 && (
+                  <div className="absolute -top-1 -right-1 w-4 h-4 bg-alert-warning rounded-full animate-pulse-glow border-2 border-card flex items-center justify-center">
+                    <Activity className="h-2 w-2 text-white" />
+                  </div>
+                )}
+              </div>
+              <div>
+                <h2 className="text-2xl font-bold bg-gradient-to-r from-primary to-accent bg-clip-text text-transparent">
+                  Acompanhamento de RDMs
+                </h2>
+                <p className="text-sm text-muted-foreground font-normal mt-0.5">
+                  Gestão de mudanças programadas
+                </p>
+              </div>
               {activeRDMs > 0 && (
-                <div className="absolute -top-1 -right-1 w-3 h-3 bg-status-in-progress rounded-full animate-pulse border border-background" />
+                <Badge className="ml-2 bg-alert-warning-bg border border-alert-warning-border text-alert-warning font-semibold shadow-sm">
+                  <Activity className="h-3.5 w-3.5 mr-1.5" />
+                  {activeRDMs} ativas
+                </Badge>
               )}
-            </div>
-            <span>Acompanhamento de RDMs</span>
-            {activeRDMs > 0 && (
-              <Badge variant="outline" className="ml-2 px-2 py-1 bg-status-in-progress/10 text-status-in-progress border-status-in-progress/30">
-                {activeRDMs} ativas
-              </Badge>
-            )}
-          </CardTitle>
-          <Button
-            variant="default"
-            size="sm"
-            className="bg-primary hover:bg-primary/90"
-            onClick={() => setShowForm(true)}
-          >
-            <Plus className="h-4 w-4 mr-2" />
-            Adicionar RDM
-          </Button>
+            </CardTitle>
+            <Button
+              onClick={() => setShowForm(true)}
+              className="bg-gradient-to-r from-primary to-accent hover:shadow-glow transition-smooth font-semibold h-10 px-5"
+            >
+              <Plus className="h-4 w-4 mr-2" />
+              Adicionar RDM
+            </Button>
+          </div>
         </CardHeader>
 
-        <CardContent className="space-y-3 max-h-[75vh] overflow-y-auto pr-2">
+        <CardContent className="p-6 space-y-4 max-h-[75vh] overflow-y-auto">
           {loading && (
-            <div className="text-center py-8 text-muted-foreground">
-              Carregando RDMs...
+            <div className="flex flex-col items-center justify-center py-16">
+              <div className="w-16 h-16 rounded-full bg-gradient-to-br from-primary/10 to-accent/10 flex items-center justify-center mb-4">
+                <Activity className="h-8 w-8 text-primary animate-spin" />
+              </div>
+              <p className="text-muted-foreground font-medium">Carregando RDMs...</p>
             </div>
           )}
 
           {error && (
-            <div className="text-center py-8 text-status-cancelled">
-              {error}
+            <div className="flex flex-col items-center justify-center py-16 px-4 border-2 border-dashed border-destructive/50 rounded-2xl bg-destructive/5">
+              <div className="w-16 h-16 rounded-full bg-destructive/10 flex items-center justify-center mb-4">
+                <AlertCircle className="h-8 w-8 text-destructive" />
+              </div>
+              <p className="text-destructive font-semibold">{error}</p>
             </div>
           )}
 
           {!loading && !error && rdms.map((rdm, index) => (
             <div
               key={rdm.id}
-              className="group relative border rounded-xl p-4 bg-card hover:bg-accent/5 transition-all duration-300 shadow-sm hover:shadow-card animate-in fade-in-0 slide-in-from-bottom-4"
-              style={{ animationDelay: `${index * 100}ms` }}
+              className="group relative border-2 border-panel-border rounded-2xl p-5 bg-gradient-to-br from-card via-background to-card hover:border-primary/30 hover:shadow-hover transition-smooth animate-fade-in"
+              style={{ animationDelay: `${index * 50}ms` }}
             >
               {/* Priority indicator */}
-              <div className={`absolute left-0 top-4 bottom-4 w-1 rounded-r-lg transition-all duration-300 ${rdm.tipo_rdm === 'Urgente' ? 'bg-status-cancelled' :
-                rdm.tipo_rdm === 'Normal' || rdm.tipo_rdm === 'Padrão' ? 'bg-status-in-progress' :
-                  rdm.tipo_rdm === 'Informativa' ? 'bg-status-completed' : 'bg-muted'
+              <div className={`absolute left-0 top-6 bottom-6 w-1.5 rounded-r-lg transition-smooth ${rdm.tipo_rdm === 'Urgente' ? 'bg-gradient-to-b from-destructive to-destructive/50' :
+                  rdm.tipo_rdm === 'Normal' || rdm.tipo_rdm === 'Padrão' ? 'bg-gradient-to-b from-primary to-accent' :
+                    rdm.tipo_rdm === 'Informativa' ? 'bg-gradient-to-b from-alert-success to-alert-success/50' : 'bg-muted'
                 }`} />
 
               <div className="flex flex-col gap-4 ml-4">
                 {/* Header with RDM info */}
                 <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
                   <div className="flex items-center gap-3 flex-wrap">
-                    <span className="font-mono text-sm bg-accent/30 px-2 py-1 rounded-md text-accent-foreground font-semibold">
+                    <Badge variant="secondary" className="font-mono text-sm px-3 py-1.5 bg-gradient-to-r from-primary/10 to-accent/10 border border-primary/20 text-primary font-bold">
                       #{rdm.numero_rdm}
-                    </span>
-                    <span className="text-sm text-foreground font-medium break-words max-w-[300px]">
+                    </Badge>
+                    <span className="text-sm text-foreground font-semibold break-words max-w-[300px]">
                       {rdm.descricao_rdm_user}
                     </span>
-                    <span className="text-sm text-muted-foreground font-medium">
+                    <Badge variant="outline" className="text-xs">
+                      <User className="h-3 w-3 mr-1" />
                       {rdm.grupo_executor}
-                    </span>
+                    </Badge>
                   </div>
 
                   <div className="flex items-center gap-3">
-                    <Badge className={`${getStatusBadgeClass(rdm.status_rdm)} flex items-center gap-1.5 px-3 py-1`}>
+                    <Badge className={`${getStatusBadgeClass(rdm.status_rdm)} flex items-center gap-1.5 px-3 py-1.5`}>
                       {getStatusIcon(rdm.status_rdm)}
                       {getStatusText(rdm.status_rdm)}
                     </Badge>
                     <Button
                       variant="outline"
                       size="sm"
-                      className="hover:bg-accent/50 transition-all duration-300"
+                      className="hover:bg-primary/5 hover:border-primary/50 transition-smooth"
                       onClick={() => openModal(rdm)}
                     >
+                      <FileText className="h-3.5 w-3.5 mr-1.5" />
                       Detalhes
                     </Button>
                   </div>
                 </div>
 
                 {/* Status de Acompanhamento */}
-                <div className="flex items-center gap-3 p-3 bg-accent/10 rounded-lg border border-accent/20">
-                  <div className="flex items-center gap-2 text-sm font-medium text-foreground">
-                    <Settings className="h-4 w-4" />
-                    Status de Acompanhamento:
+                <div className="p-4 bg-gradient-to-br from-panel-bg to-background rounded-xl border border-panel-border shadow-card">
+                  <div className="flex items-center gap-2 mb-3 text-sm font-semibold text-foreground">
+                    <Settings className="h-4 w-4 text-primary" />
+                    Status de Acompanhamento
                   </div>
                   <StatusSelector rdm={rdm} />
                 </div>
@@ -781,14 +757,13 @@ export const RDMTracker = () => {
           ))}
 
           {!loading && !error && rdms.length === 0 && (
-            <div className="text-center py-12 animate-in fade-in-0">
-              <Calendar className="h-12 w-12 text-muted-foreground mx-auto mb-4 opacity-50" />
-              <p className="text-muted-foreground text-lg font-medium">
-                Nenhuma RDM cadastrada
-              </p>
-              <p className="text-muted-foreground/70 text-sm mt-1">
-                Clique em "Adicionar RDM" para começar
-              </p>
+            <div className="flex flex-col items-center justify-center py-16 px-4 border-2 border-dashed border-panel-border rounded-2xl bg-gradient-to-br from-background to-background/50">
+              <div className="w-20 h-20 rounded-full bg-gradient-to-br from-primary/10 to-accent/10 flex items-center justify-center mb-6 relative">
+                <Calendar className="h-10 w-10 text-primary/50" />
+                <div className="absolute inset-0 rounded-full bg-primary/5 animate-pulse-glow" />
+              </div>
+              <p className="text-lg font-semibold text-foreground mb-2">Nenhuma RDM cadastrada</p>
+              <p className="text-sm text-muted-foreground">Clique em "Adicionar RDM" para começar</p>
             </div>
           )}
         </CardContent>
@@ -805,7 +780,7 @@ export const RDMTracker = () => {
         <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-3 text-xl">
-              <div className="p-2 rounded-lg bg-primary/10">
+              <div className="p-2 rounded-lg bg-gradient-to-br from-primary/10 to-accent/10">
                 <Calendar className="h-5 w-5 text-primary" />
               </div>
               Nova RDM
@@ -1032,7 +1007,7 @@ export const RDMTracker = () => {
                   <Input
                     id="atividade_teste_anexo"
                     type="file"
-                    accept=".pdf,.jpg,.png,.doc,.docx" // <-- restringe tipos aceitos
+                    accept=".pdf,.jpg,.png,.doc,.docx"
                     onChange={(e) => updateFormData("atividade_teste_anexo", e.target.files?.[0] || null)}
                   />
                   {formData.atividade_teste_anexo && (
@@ -1082,7 +1057,7 @@ export const RDMTracker = () => {
               <Button
                 type="submit"
                 disabled={loading}
-                className="bg-primary hover:bg-primary/90"
+                className="bg-gradient-to-r from-primary to-accent hover:shadow-glow transition-smooth"
               >
                 <Save className="h-4 w-4 mr-2" />
                 {loading ? 'Salvando...' : 'Salvar RDM'}
@@ -1097,7 +1072,7 @@ export const RDMTracker = () => {
         <DialogContent className="max-w-2xl">
           <DialogHeader>
             <DialogTitle className="text-xl flex items-center gap-3">
-              <div className="p-2 rounded-lg bg-primary/10">
+              <div className="p-2 rounded-lg bg-gradient-to-br from-primary/10 to-accent/10">
                 <Calendar className="h-5 w-5 text-primary" />
               </div>
               #{selectedRDM?.numero_rdm} - {selectedRDM?.descricao_rdm_user}
@@ -1121,7 +1096,7 @@ export const RDMTracker = () => {
               </div>
 
               {/* Status de Acompanhamento no Modal */}
-              <div className="p-4 bg-accent/10 rounded-lg border border-accent/20">
+              <div className="p-4 bg-gradient-to-br from-panel-bg to-background rounded-xl border border-panel-border shadow-card">
                 <h4 className="font-semibold text-foreground mb-3 flex items-center gap-2">
                   <Settings className="h-4 w-4" />
                   Status de Acompanhamento
@@ -1132,7 +1107,7 @@ export const RDMTracker = () => {
               {/* Details Grid */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div className="space-y-4">
-                  <div className="flex items-center gap-3 p-3 bg-accent/10 rounded-lg border border-accent/20">
+                  <div className="flex items-center gap-3 p-3 bg-gradient-to-br from-panel-bg to-background rounded-xl border border-panel-border shadow-card">
                     <User className="h-5 w-5 text-primary" />
                     <div>
                       <p className="text-sm text-muted-foreground">Responsável</p>
@@ -1140,7 +1115,7 @@ export const RDMTracker = () => {
                     </div>
                   </div>
 
-                  <div className="flex items-center gap-3 p-3 bg-accent/10 rounded-lg border border-accent/20">
+                  <div className="flex items-center gap-3 p-3 bg-gradient-to-br from-panel-bg to-background rounded-xl border border-panel-border shadow-card">
                     <Settings className="h-5 w-5 text-primary" />
                     <div>
                       <p className="text-sm text-muted-foreground">Equipe</p>
@@ -1150,7 +1125,7 @@ export const RDMTracker = () => {
                 </div>
 
                 <div className="space-y-4">
-                  <div className="flex items-center gap-3 p-3 bg-accent/10 rounded-lg border border-accent/20">
+                  <div className="flex items-center gap-3 p-3 bg-gradient-to-br from-panel-bg to-background rounded-xl border border-panel-border shadow-card">
                     <Calendar className="h-5 w-5 text-primary" />
                     <div>
                       <p className="text-sm text-muted-foreground">Janela de Execução</p>
@@ -1160,7 +1135,7 @@ export const RDMTracker = () => {
                     </div>
                   </div>
 
-                  <div className="flex items-center gap-3 p-3 bg-accent/10 rounded-lg border border-accent/20">
+                  <div className="flex items-center gap-3 p-3 bg-gradient-to-br from-panel-bg to-background rounded-xl border border-panel-border shadow-card">
                     <Clock className="h-5 w-5 text-primary" />
                     <div>
                       <p className="text-sm text-muted-foreground">Duração Estimada</p>
