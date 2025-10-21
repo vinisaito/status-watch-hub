@@ -1,1 +1,720 @@
-Dashboard de Análise e Histórico de Incidentes (Foco na Gestão e Melhoria)Este painel deve fornecer contexto e histórico, ajudando a identificar tendências, gargalos e a eficácia da equipe ao longo do tempo.Seção de Totais e Visão Geral (KPIs e Gráficos de Resumo):Parâmetro GeralRepresentação SugeridaTipo de VisualizaçãoTOTAL: Alertas sev4Card de Número (KPI). Mostra o total no período (ex: Últimos 30 dias).Cartão de KPITOTAL: Incidentes sev3Card de Número (KPI).Cartão de KPITOTAL: Incidentes sev4Card de Número (KPI).Cartão de KPIQuebra por SeveridadeGráfico de Barras ou Rosca para mostrar a proporção de Incidentes/Alertas por Severidade (1, 2, 3, 4) no período.Gráfico de Rosca/BarrasEvolução de Incidentes S4Gráfico de Linha mostrando o número de Incidentes Severidade 4 ao longo do tempo (ex: por semana/mês) para ver a tendência.Gráfico de LinhaSeção de Detalhamento e Histórico (Tabelas e Listas):Parâmetro GeralRepresentação SugeridaTipo de VisualizaçãoNúmero, resumo, grupo responsável, data, tipo, status atual, severidadeTabela Detalhada (Matriz) com filtros e possibilidade de ordenação. Use Formatação Condicional (cores) na coluna de Severidade e Status Atual.Tabela/MatrizEnvio no chat, status do envio, chamados filhosColunas Adicionais na Tabela Detalhada ou uma sub-tabela associada ao selecionar o incidente.Tabela DetalhadaHistórico de Acionamentos: Operador, Pessoa Acionada, Observação, Horário, Status, EtapaTabela de Histórico (Auditoria). Pode ser uma tabela separada ou um "drill-down" (detalhe) ao clicar em um incidente principal.TabelaOutage de alertas: Titulo, HorárioLista Simples ou Linha do Tempo com os Outages. É útil para cruzar com picos de alertas ou incidentes.Tabela/Lista de EventosMétricas de Performance Sugeridas (Opcionais, mas Altamente Recomendadas):Para adicionar valor gerencial:MTTA (Tempo Médio para Acknowledge/Reconhecimento): Medidor (Gauge) ou Cartão. Mede a agilidade inicial.MTTR (Tempo Médio para Resolução): Medidor (Gauge) ou Cartão. KPI fundamental para a eficácia da resolução.Alertas por Grupo Responsável: Gráfico de Barras para ver qual grupo tem o maior volume de trabalho.Top 5 Problemas Recorrentes: Tabela ou Gráfico de Barras mostrando os "resumos" de incidentes que se repetem com mais frequência, indicando problemas estruturais.Dicas de Design:Filtros: Adicione filtros no topo de ambos os dashboards para permitir a análise por Período de Tempo, Grupo Responsável, e Severidade.
+import { useState, useEffect, useCallback, useRef } from 'react';
+import { toast } from '@/hooks/use-toast';
+
+export interface TimerState {
+  chamado: number;
+  // relacionamentosa
+  pai?: number | string;
+  filhos?: Array<number | string>;
+  operador?: string;
+  statusFinal?: string;
+  statusFinal_updateAt?: string;
+  // flags de chat (replicação em tempo real)
+  timestamp_chat?: string;
+  sending_chat?: boolean | string | number;
+  // chaves alternativas que podem vir do backend
+  timestamp?: string;
+  sending?: boolean | string | number;
+  // outage fields
+  data_inicio_outage?: number | string;
+  data_fim_outage?: number | string;
+  titulo_outage?: string;
+  obs_outage?: string;
+  outage_updatedAt?: string;
+  level1_timerStart?: string;
+  level1_duration?: number;
+  level1_status?: 'running' | 'paused' | 'stopped' | 'finished' | 'timer_expired';
+  level1_observacao?: string;
+  level1_operador?: string;
+  level1_pessoaAcionada?: string;
+  level1_statusAcionamento?: string;
+  level1_updateAt?: string;
+  level2_timerStart?: string;
+  level2_duration?: number;
+  level2_status?: 'running' | 'paused' | 'stopped' | 'finished' | 'timer_expired';
+  level2_observacao?: string;
+  level2_operador?: string;
+  level2_pessoaAcionada?: string;
+  level2_statusAcionamento?: string;
+  level2_updateAt?: string;
+  level3_timerStart?: string;
+  level3_duration?: number;
+  level3_status?: 'running' | 'paused' | 'stopped' | 'finished' | 'timer_expired';
+  level3_observacao?: string;
+  level3_operador?: string;
+  level3_pessoaAcionada?: string;
+  level3_statusAcionamento?: string;
+  level3_updateAt?: string;
+  level4_timerStart?: string;
+  level4_duration?: number;
+  level4_status?: 'running' | 'paused' | 'stopped' | 'finished' | 'timer_expired';
+  level4_observacao?: string;
+  level4_operador?: string;
+  level4_pessoaAcionada?: string;
+  level4_statusAcionamento?: string;
+  level4_updateAt?: string;
+  level5_timerStart?: string;
+  level5_duration?: number;
+  level5_status?: 'running' | 'paused' | 'stopped' | 'finished' | 'timer_expired';
+  level5_observacao?: string;
+  level5_operador?: string;
+  level5_pessoaAcionada?: string;
+  level5_statusAcionamento?: string;
+  level5_updateAt?: string;
+  timestamp_responsavel?: string;
+  ResponsavelAcompanhamento?: string;
+}
+
+export interface WebSocketMessage {
+  event: 'startTimer' | 'updateObservacao' | 'updateOperador' | 'updateStatusFinal' | 'getState' | 'updateAcionamento' | 'updateOutage';
+  chamado: number;
+  level?: number;
+  state?: TimerState;
+}
+
+// Mensagens do backend de Outages (Lambda)
+type OutageAction = 'registerOutage' | 'deleteOutage' | 'getOutages';
+interface OutageItemBackend {
+  outage_id: string;
+  data_inicio: string | number | null;
+  data_fim: string | number | null;
+  title: string;
+  timestamp: number;
+  status: string;
+}
+
+// Estrutura de Outage usada no front (compatível com OutageManager)
+export interface OutageUIItem {
+  id: string;
+  title: string;
+  startAt: number; // ms
+  endAt: number;   // ms
+  createdAt?: number;
+  numeroChamado?: string;
+}
+
+// Estrutura enviada pela Lambda para lista de chamados
+export interface ChamadoWSItem {
+  chamado: string | number;
+  tipo_chamado: string;
+  status_chamado: string;
+  abertura_chamado: string; // ISO string
+  resumo_chamado: string;
+  grupo_chamado: string;
+  severidade_chamado: string;
+  acionado: string | boolean | number | null;
+  link_chamado: string;
+  // Campos opcionais que podem ou não existir
+  timestamp_chat?: string;
+  sending_chat?: boolean | string | number;
+}
+
+export interface SendMessage {
+  action: 'startTimer' | 'updateObservacao' | 'updateOperador' | 'updateStatusFinal' | 'getState' | 'updateAcionamento' | 'updateOutage';
+  chamado: number;
+  level?: number;
+  duration?: number;
+  observacao?: string;
+  operador?: string;
+  statusFinal?: string;
+  levelStatusKey?: string;
+  status?: string;
+  pessoaAcionada?: string;
+  statusAcionamento?: string;
+  timestamp_responsavel?: string;
+  ResponsavelAcompanhamento?: string;
+  // novos campos opcionais para relacionamentos
+  pai?: number | string | null;
+  filhos?: Array<number | string> | null;
+  // outage fields opcionais (compatível com backend)
+  data_inicio_outage?: number | string | null;
+  data_fim_outage?: number | string | null;
+  titulo_outage?: string | null;
+  obs_outage?: string | null;
+  outage_title?: string | null;
+  outage_start?: number | string | null;
+  outage_end?: number | string | null;
+  outage_timestamp?: number | string | null;
+  clearOutage?: boolean;
+}
+
+export const useWebsocketTimers = () => {
+  const [timers, setTimers] = useState<Map<number, TimerState>>(new Map());
+  const [isConnected, setIsConnected] = useState(false);
+  // Estado de Outages sincronizado com a Lambda
+  const [outages, setOutages] = useState<OutageUIItem[]>([]);
+  // Estado de chamados vindo via WebSocket (ActionTable)
+  const [chamados, setChamados] = useState<ChamadoWSItem[]>([]);
+  const [watchedChamadosVersion, setWatchedChamadosVersion] = useState(0);
+  const ws = useRef<WebSocket | null>(null);
+  const reconnectAttempts = useRef(0);
+  const maxReconnectAttempts = 5;
+  const reconnectTimeout = useRef<NodeJS.Timeout | null>(null);
+  // Guarda chamados/níveis já sinalizados como expirados para evitar reenvio
+  const expiredNotifiedRef = useRef<Set<string>>(new Set());
+  // Mantém uma ref com o snapshot atual dos timers para uso em intervals
+  const timersRef = useRef<Map<number, TimerState>>(new Map());
+  useEffect(() => {
+    timersRef.current = timers;
+  }, [timers]);
+
+  // Chamados que o cliente quer garantir que sejam consultados ao conectar
+  const watchedChamadosRef = useRef<Set<number>>(new Set());
+  // Ref para rastrear chamados já sincronizados (evita chamadas duplicadas de getState)
+  const syncedChamadosRef = useRef<Set<number>>(new Set());
+
+  const connect = useCallback(() => {
+    try {
+      if (ws.current && ws.current.readyState === WebSocket.CONNECTING) {
+        return;
+      }
+
+      const wsUrl = 'wss://rsgjd6wsza.execute-api.us-east-1.amazonaws.com/dev';
+      console.log(`🔌 Tentando conectar no WebSocket: ${wsUrl}`);
+
+      ws.current = new WebSocket(wsUrl);
+
+      const connectionTimeout = setTimeout(() => {
+        if (ws.current && ws.current.readyState === WebSocket.CONNECTING) {
+          ws.current.close();
+          toast({
+            title: "Timeout de Conexão",
+            description: "WebSocket demorou muito para conectar. Tentando novamente...",
+            variant: "destructive",
+          });
+        }
+      }, 10000);
+
+      ws.current.onopen = () => {
+        clearTimeout(connectionTimeout);
+        setIsConnected(true);
+        reconnectAttempts.current = 0;
+        console.log('✅ WebSocket conectado com sucesso');
+      };
+
+      ws.current.onmessage = (event) => {
+        try {
+          const data = event.data as unknown;
+          if (typeof data !== 'string') {
+            // Ignora frames binários/blobs/keepalive
+            return;
+          }
+          const text = data.trim();
+          if (!text) {
+            // Ignora mensagens vazias (ex.: acks/keepalive)
+            return;
+          }
+          let raw: any;
+          try {
+            raw = JSON.parse(text);
+          } catch {
+            // Mensagem não-JSON (ex.: ping) -> ignora silenciosamente
+            return;
+          }
+
+          // 1) Protocolo existente de timers
+          const message: WebSocketMessage = raw;
+          if (message && typeof message === 'object' && 'chamado' in message && message.state) {
+            if (message.state && message.chamado) {
+              setTimers(prev => {
+                const oldState = prev.get(message.chamado);
+                const isDifferent = JSON.stringify(oldState) !== JSON.stringify(message.state);
+
+                if (isDifferent) {
+                  console.log(`🔔 Novo evento para chamado ${message.chamado}`, message.state);
+                }
+
+                const newTimers = new Map(prev);
+                newTimers.set(message.chamado, message.state!);
+                return newTimers;
+              });
+              return; // já tratado
+            }
+          }
+
+          // 2) Mensagens de Outage vindas da Lambda (action + payload)
+          if (raw && typeof raw === 'object' && 'action' in raw) {
+            const action = String(raw.action);
+            if (action === 'registerOutage' && raw.status === 'success' && raw.data) {
+              const item = raw.data as OutageItemBackend;
+              const ui = convertBackendOutageToUI(item);
+              setOutages(prev => {
+                const others = prev.filter(o => o.id !== ui.id);
+                return [...others, ui];
+              });
+              return;
+            }
+            if (action === 'deleteOutage' && raw.status === 'success' && raw.outage_id) {
+              const id = String(raw.outage_id);
+              setOutages(prev => prev.filter(o => {
+                // Compara tanto com o.id quanto com o.outage_id para garantir compatibilidade
+                const matchesId = o.id === id;
+                const matchesOutageId = (o as any).outage_id === id;
+                return !matchesId && !matchesOutageId;
+              }));
+              return;
+            }
+            if (action === 'getOutages' && raw.status === 'success' && Array.isArray(raw.data)) {
+              const list = (raw.data as OutageItemBackend[]).map(convertBackendOutageToUI);
+              setOutages(list);
+              return;
+            }
+            // 3) Mensagens de chamados (ActionTable) vindas da Lambda
+            if (action === 'getChamados' && Array.isArray(raw.data)) {
+              setChamados(raw.data as ChamadoWSItem[]);
+              return;
+            }
+            // 4) Atualização de Chat (replicar "enviado" em tempo real entre sessões)
+            if (action === 'updateChat' && (typeof raw.chamado === 'number' || typeof raw.chamado === 'string')) {
+              const chamadoNum = Number(raw.chamado);
+              const sending_chat = (typeof raw.sending_chat !== 'undefined') ? raw.sending_chat : raw.sending;
+              const timestamp_chat = (typeof raw.timestamp_chat !== 'undefined') ? raw.timestamp_chat : raw.timestamp;
+
+              setTimers(prev => {
+                const next = new Map(prev);
+                const current = next.get(chamadoNum) || ({ chamado: chamadoNum } as TimerState);
+                const updated: TimerState = {
+                  ...current,
+                  sending_chat,
+                  timestamp_chat: typeof timestamp_chat !== 'undefined' ? String(timestamp_chat) : current.timestamp_chat,
+                  // também mantém chaves alternativas para compatibilidade
+                  sending: typeof sending_chat !== 'undefined' ? sending_chat : current.sending,
+                  timestamp: typeof timestamp_chat !== 'undefined' ? String(timestamp_chat) : current.timestamp,
+                };
+                next.set(chamadoNum, updated);
+                return next;
+              });
+              return;
+            }
+          }
+        } catch (error) {
+          // Evita poluir console com erros de frames não-JSON/keepalive
+          console.debug('ℹ️ Mensagem WebSocket ignorada:', error);
+        }
+      };
+
+      ws.current.onclose = (event) => {
+        clearTimeout(connectionTimeout);
+        setIsConnected(false);
+        // Limpa o cache de chamados sincronizados para forçar re-sincronização na reconexão
+        syncedChamadosRef.current.clear();
+
+        console.warn('⚠️ WebSocket desconectado - Código:', event.code, 'Motivo:', event.reason);
+
+        if (event.code !== 1000 && reconnectAttempts.current < maxReconnectAttempts) {
+          reconnectAttempts.current++;
+          const delay = Math.min(1000 * Math.pow(2, reconnectAttempts.current), 30000);
+          console.log(`🔄 Tentando reconectar em ${delay}ms (tentativa ${reconnectAttempts.current}/${maxReconnectAttempts})`);
+
+          reconnectTimeout.current = setTimeout(() => {
+            connect();
+          }, delay);
+        } else if (reconnectAttempts.current >= maxReconnectAttempts) {
+          console.error('❌ Máximo de tentativas de reconexão atingido');
+          toast({
+            title: "Falha na Conexão",
+            description: "Não foi possível conectar ao WebSocket após várias tentativas",
+            variant: "destructive",
+          });
+        }
+      };
+
+      ws.current.onerror = () => {
+        clearTimeout(connectionTimeout);
+        console.error('❌ Erro WebSocket detectado');
+      };
+
+    } catch (error) {
+      console.error('❌ Erro ao conectar WebSocket:', error);
+      toast({
+        title: "Erro de Inicialização",
+        description: "Erro ao inicializar conexão WebSocket",
+        variant: "destructive",
+      });
+    }
+  }, []);
+
+  const disconnect = useCallback(() => {
+    if (reconnectTimeout.current) {
+      clearTimeout(reconnectTimeout.current);
+      reconnectTimeout.current = null;
+    }
+
+    if (ws.current) {
+      ws.current.close(1000, 'Desconexão intencional');
+      ws.current = null;
+    }
+
+    setIsConnected(false);
+    console.log('🔌 WebSocket desconectado manualmente');
+  }, []);
+
+  const sendMessage = useCallback((message: SendMessage) => {
+    if (ws.current && ws.current.readyState === WebSocket.OPEN) {
+      try {
+        const payload = JSON.stringify(message); // Armazena o payload em uma variável
+        ws.current.send(payload);
+
+        // Inclui a variável payload no console.log
+        console.log(`📤 Mensagem enviada: ${message.action} (chamado ${message.chamado})`);
+        console.log('Payload:', payload);
+
+        return true;
+      } catch (error) {
+        console.error('❌ Erro ao enviar mensagem:', error);
+        toast({
+          title: "Erro ao Enviar",
+          description: "Não foi possível enviar a mensagem",
+          variant: "destructive",
+        });
+        return false;
+      }
+    } else {
+      connect();
+      return false;
+    }
+  }, [connect]);
+
+  // ---------- Outage helpers ----------
+  const toIsoUtc = (ms: number) => new Date(ms).toISOString();
+  const parseDateToMs = (d: string | number | null | undefined): number => {
+    if (d === null || d === undefined) return NaN;
+    if (typeof d === 'number') {
+      // Heurística: se for muito grande, pode já estar em ms; se for pequeno, pode estar em s
+      return d > 1e12 ? d : d * 1000;
+    }
+    const t = Date.parse(d);
+    return isNaN(t) ? NaN : t;
+  };
+
+  const convertBackendOutageToUI = (item: OutageItemBackend): OutageUIItem => {
+    const startMs = parseDateToMs(item.data_inicio);
+    const endMs = parseDateToMs(item.data_fim);
+    const created = parseDateToMs(item.timestamp);
+    return {
+      id: String(item.outage_id),
+      title: item.title,
+      startAt: isNaN(startMs) ? Date.now() : startMs,
+      endAt: isNaN(endMs) ? (Date.now() + 30 * 60000) : endMs,
+      createdAt: isNaN(created) ? undefined : created,
+    };
+  };
+
+  const registerOutage = useCallback((title: string, startAtMs: number, endAtMs: number, numeroChamado?: string) => {
+    const outage_id = (globalThis.crypto && 'randomUUID' in globalThis.crypto) ? globalThis.crypto.randomUUID() : `outage-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const payload = {
+      action: 'registerOutage' as OutageAction,
+      outage_id,
+      title,
+      data_inicio: toIsoUtc(startAtMs),
+      data_fim: toIsoUtc(endAtMs),
+      status: 'active',
+      timestamp: Math.floor(Date.now() / 1000)
+    };
+    const ok = sendMessage(payload as unknown as SendMessage);
+    if (ok) {
+      // Otimismo: adiciona localmente até o broadcast confirmar
+      setOutages(prev => {
+        const optimistic: OutageUIItem = {
+          id: outage_id,
+          title,
+          startAt: startAtMs,
+          endAt: endAtMs,
+          createdAt: Date.now(),
+          numeroChamado: numeroChamado ? String(numeroChamado) : undefined,
+        };
+        const others = prev.filter(o => o.id !== outage_id);
+        return [...others, optimistic];
+      });
+    }
+    return ok;
+  }, [sendMessage]);
+
+  const deleteOutage = useCallback((outageId: string) => {
+    const payload = {
+      action: 'deleteOutage' as OutageAction,
+      outage_id: outageId,
+    };
+    return sendMessage(payload as unknown as SendMessage);
+  }, [sendMessage]);
+
+  const refreshOutages = useCallback(() => {
+    const payload = { action: 'getOutages' as OutageAction };
+    return sendMessage(payload as unknown as SendMessage);
+  }, [sendMessage]);
+
+  // Solicita atualização dos chamados (se backend suportar request via action)
+  const refreshChamados = useCallback(() => {
+    const payload = { action: 'getChamados' } as any;
+    return sendMessage(payload as unknown as SendMessage);
+  }, [sendMessage]);
+
+  // Ações (mantive todas as existentes)
+  const startTimer = useCallback((chamado: number, level: number, duration: number = 1200) => {
+    return sendMessage({ action: 'startTimer', chamado, level, duration });
+  }, [sendMessage]);
+
+  const updateObservacao = useCallback((chamado: number, level: number, observacao: string) => {
+    return sendMessage({ action: 'updateObservacao', chamado, level, observacao });
+  }, [sendMessage]);
+
+  const updateOperador = useCallback(
+    (chamado: number, operador: string, timestamp_responsavel?: string, ResponsavelAcompanhamento?: string) => {
+      return sendMessage({
+        action: 'updateOperador',
+        chamado,
+        operador,
+        timestamp_responsavel,
+        ResponsavelAcompanhamento
+      });
+    },
+    [sendMessage]
+  );
+
+  const updateAcionamento = useCallback((chamado: number, level: number, operador: string, pessoaAcionada: string, statusAcionamento: string) => {
+    return sendMessage({ action: 'updateAcionamento', chamado, level, operador, pessoaAcionada, statusAcionamento});
+  }, [sendMessage]);
+
+  // Atualiza apenas relacionamentos (pai/filhos) usando a rota updateAcionamento (sem efeitos colaterais relevantes)
+  const updateRelacionamentos = useCallback((
+    chamado: number,
+    relationships: { pai?: number | string | null; filhos?: Array<number | string> | null; level?: number }
+  ) => {
+    const { pai, filhos, level } = relationships || {};
+    return sendMessage({ action: 'updateAcionamento', chamado, ...(level ? { level } : {}), ...(pai !== undefined ? { pai } : {}), ...(filhos !== undefined ? { filhos } : {}), });
+  }, [sendMessage]);
+
+  const updateStatusFinal = useCallback((
+    chamado: number,
+    levelOrKeyOrStatus: number | string,
+    maybeStatus?: string
+  ) => {
+    // caso 1: numeric + status -> level number
+    if (typeof levelOrKeyOrStatus === 'number') {
+      const level = levelOrKeyOrStatus;
+      const status = maybeStatus!;
+      const levelStatusKey = `level${level}_status`;
+      return sendMessage({ action: 'updateStatusFinal', chamado, levelStatusKey, status });
+    }
+
+    // caso 2: string + status (treat second param as levelStatusKey)
+    if (typeof maybeStatus === 'string') {
+      const levelStatusKey = levelOrKeyOrStatus;
+      const status = maybeStatus;
+      return sendMessage({ action: 'updateStatusFinal', chamado, levelStatusKey, status });
+    }
+
+    // caso 3: apenas chamado + statusFinal (retrocompatível)
+    const statusFinal = levelOrKeyOrStatus;
+    return sendMessage({ action: 'updateStatusFinal', chamado, statusFinal });
+  }, [sendMessage]);
+
+  const getState = useCallback((chamado: number) => {
+    return sendMessage({ action: 'getState', chamado });
+  }, [sendMessage]);
+
+  // Atualiza/limpa campos de Outage no chamado
+  const updateOutage = useCallback((
+    chamado: number,
+    fields: {
+      data_inicio_outage?: number | string | null;
+      data_fim_outage?: number | string | null;
+      titulo_outage?: string | null;
+      obs_outage?: string | null;
+      outage_title?: string | null;
+      outage_start?: number | string | null;
+      outage_end?: number | string | null;
+      outage_timestamp?: number | string | null;
+      clearOutage?: boolean;
+      pai?: number | string | null;
+      filhos?: Array<number | string> | null;
+    }
+  ) => {
+    return sendMessage({ action: 'updateOutage', chamado, ...fields });
+  }, [sendMessage]);
+
+  // Cálculo de tempo restante (sem logs)
+  const getRemainingTime = useCallback((chamado: number, level: number): number => {
+    const timerState = timers.get(chamado);
+    if (!timerState) return 0;
+
+    const levelPrefix = `level${level}` as 'level1' | 'level2' | 'level3' | 'level4' | 'level5';
+    const timerStart = timerState[`${levelPrefix}_timerStart`];
+    const duration = timerState[`${levelPrefix}_duration`];
+    const status = timerState[`${levelPrefix}_status`];
+
+  // Mostrar contagem (inclusive negativa) quando o timer estiver rodando ou já marcado como expirado
+  const shouldShow = status === 'running' || status === 'timer_expired';
+    if (!timerStart || !duration || !shouldShow) return 0;
+
+    try {
+      const startTime = new Date(timerStart).getTime();
+      const endTime = startTime + duration * 1000;
+      const now = Date.now();
+      // Permite valores negativos após expirar
+      return Math.floor((endTime - now) / 1000);
+    } catch {
+      return 0;
+    }
+  }, [timers]);
+
+  const formatTime = useCallback((seconds: number): string => {
+    const sign = seconds < 0 ? '-' : '';
+    const abs = Math.abs(seconds);
+    const hours = Math.floor(abs / 3600);
+    const minutes = Math.floor((abs % 3600) / 60);
+    const secs = abs % 60;
+
+    if (hours > 0) {
+      return `${sign}${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+    }
+    return `${sign}${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+  }, []);
+
+  const isTimerActive = useCallback((chamado: number, level: number): boolean => {
+    const timerState = timers.get(chamado);
+    if (!timerState) return false;
+
+    const levelPrefix = `level${level}` as 'level1' | 'level2' | 'level3' | 'level4' | 'level5';
+    return timerState[`${levelPrefix}_status`] === 'running';
+  }, [timers]);
+
+  // Conectar ao montar
+  useEffect(() => {
+    connect();
+    return () => disconnect();
+  }, [connect, disconnect]);
+
+  // Busca outages iniciais ao conectar
+  useEffect(() => {
+    if (isConnected) {
+      try { refreshOutages(); } catch {}
+    }
+  }, [isConnected, refreshOutages]);
+
+  // Força re-render a cada segundo
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setTimers(prev => new Map(prev));
+    }, 1000);
+    return () => clearInterval(interval);
+  }, []);
+
+  // Detecta timers que chegaram a 00:00 e marca no backend como 'timer_expired' (broadcast para todos)
+  useEffect(() => {
+    const interval = setInterval(() => {
+      const now = Date.now();
+      const current = timersRef.current;
+      current.forEach((state, chamado) => {
+        for (let level = 1; level <= 5; level++) {
+          const status = state[`level${level}_status` as keyof TimerState] as string | undefined;
+          const start = state[`level${level}_timerStart` as keyof TimerState] as string | undefined;
+          const duration = state[`level${level}_duration` as keyof TimerState] as number | undefined;
+
+          // Só processa timers em execução
+          if (status !== 'running' || !start || !duration) continue;
+
+          const startTime = new Date(start).getTime();
+          if (isNaN(startTime)) continue;
+          const endTime = startTime + duration * 1000;
+          if (now < endTime) continue;
+
+          // Usa chave única por chamado-nível-início (se reiniciar o timer, a chave muda)
+          const key = `${chamado}-${level}-${startTime}`;
+          if (expiredNotifiedRef.current.has(key)) continue;
+
+          // Dispara atualização de status para 'timer_expired' e só marca como notificado se enviado com sucesso
+          const ok = updateStatusFinal(chamado, `level${level}_status`, 'timer_expired');
+          if (ok) {
+            expiredNotifiedRef.current.add(key);
+          }
+        }
+      });
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [updateStatusFinal]);
+
+  useEffect(() => {
+    if (!isConnected) return;
+
+    try {
+      const currentKeys = Array.from(timers.keys());
+      const watchedKeys = Array.from(watchedChamadosRef.current);
+      const uniqueChamados = Array.from(new Set([...currentKeys, ...watchedKeys]));
+
+      if (uniqueChamados.length === 0) {
+        return;
+      }
+
+      // Filtrar apenas chamados que ainda não foram sincronizados
+      const chamadosToSync = uniqueChamados.filter(chamado => !syncedChamadosRef.current.has(chamado));
+
+      if (chamadosToSync.length === 0) {
+        return;
+      }
+
+      console.log('🔁 Solicitando estado inicial para chamados:', chamadosToSync);
+      chamadosToSync.forEach(chamado => {
+        try {
+          getState(chamado);
+          syncedChamadosRef.current.add(chamado);
+        } catch (err) {
+          console.error(`Erro ao solicitar getState para ${chamado}:`, err);
+        }
+      });
+    } catch (err) {
+      console.error('Erro no efeito de sincronização inicial:', err);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isConnected, timers, watchedChamadosVersion, getState]);
+
+  const addWatchedChamado = useCallback((chamado: number) => {
+    watchedChamadosRef.current.add(chamado);
+    setWatchedChamadosVersion(v => v + 1);
+  }, []);
+
+  const removeWatchedChamado = useCallback((chamado: number) => {
+    watchedChamadosRef.current.delete(chamado);
+    setWatchedChamadosVersion(v => v + 1);
+  }, []);
+
+  const setWatchedChamados = useCallback((chamados: number[]) => {
+    watchedChamadosRef.current = new Set(chamados);
+    setWatchedChamadosVersion(v => v + 1);
+  }, []);
+
+  const getWatchedChamados = useCallback(() => {
+    return Array.from(watchedChamadosRef.current);
+  }, []);
+
+  return {
+    timers,
+    isConnected,
+    sendMessage,
+    // Outages (Lambda)
+    outages,
+    registerOutage,
+    deleteOutage,
+    refreshOutages,
+    // Chamados (ActionTable via WS)
+    chamados,
+    refreshChamados,
+    startTimer,
+    updateObservacao,
+    updateOperador,
+    updateAcionamento,
+    updateRelacionamentos,
+    updateStatusFinal,
+    getState,
+    updateOutage,
+    getRemainingTime,
+    formatTime,
+    isTimerActive,
+    connect,
+    disconnect,
+    addWatchedChamado,
+    removeWatchedChamado,
+    setWatchedChamados,
+    getWatchedChamados
+  };
+};
