@@ -1,5 +1,69 @@
-action, event, status, data, outage_id, chamado, level, state, duration, observacao, operador, statusFinal, levelStatusKey, statusAcionamento, pessoaAcionada, timestamp_responsavel, ResponsavelAcompanhamento, pai, filhos, data_inicio_outage, data_fim_outage, titulo_outage, obs_outage, outage_title, outage_start, outage_end, outage_timestamp, clearOutage, timestamp_chat, sending_chat, timestamp, sending, outage_updatedAt
-TimerState base: chamado, pai, filhos, operador, statusFinal, statusFinal_updateAt, timestamp_chat, sending_chat, timestamp, sending, data_inicio_outage, data_fim_outage, titulo_outage, obs_outage, outage_updatedAt, timestamp_responsavel, ResponsavelAcompanhamento
-Por nível (1..5): levelN_timerStart, levelN_duration, levelN_status, levelN_observacao, levelN_operador, levelN_pessoaAcionada, levelN_statusAcionamento, levelN_updateAt
-Outage backend/UI: outage_id, data_inicio, data_fim, title, timestamp, status, id, startAt, endAt, createdAt, numeroChamado
-Chamados: tipo_chamado, status_chamado, abertura_chamado, resumo_chamado, grupo_chamado, severidade_chamado, acionado, link_chamado
+import json
+import boto3
+import os
+import traceback
+from decimal import Decimal
+from boto3.dynamodb.conditions import Key, Attr
+
+# ---------- Config ----------
+dynamodb = boto3.resource("dynamodb")
+table = dynamodb.Table(os.environ["DYNAMO_TABLE"])  # nome da tabela em variável de ambiente
+
+# ---------- Helpers ----------
+def decimal_default(obj):
+    """Permite converter Decimal do DynamoDB em float/int para JSON"""
+    if isinstance(obj, Decimal):
+        if obj % 1 == 0:
+            return int(obj)
+        return float(obj)
+    raise TypeError
+
+def response(status_code, body):
+    return {
+        "statusCode": status_code,
+        "headers": {
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Methods": "OPTIONS,GET",
+            "Access-Control-Allow-Headers": "Content-Type",
+        },
+        "body": json.dumps(body, default=decimal_default),
+    }
+
+# ---------- Lambda Handler ----------
+def lambda_handler(event, context):
+    print("Evento recebido:", event)
+
+    try:
+        # Verifica se é requisição OPTIONS (CORS)
+        if event.get("httpMethod") == "OPTIONS":
+            return response(200, {"message": "CORS ok"})
+
+        # Pega parâmetros da URL (caso queira filtrar)
+        params = event.get("queryStringParameters") or {}
+        chamado = params.get("chamado") if params else None
+
+        # Se for buscar 1 item específico
+        if chamado:
+            result = table.get_item(Key={"chamado": chamado})
+            item = result.get("Item")
+
+            if not item:
+                return response(404, {"message": f"Chamado {chamado} não encontrado"})
+
+            return response(200, item)
+
+        # Caso contrário, retorna todos os dados
+        scan_data = []
+        response_data = table.scan()
+        scan_data.extend(response_data.get("Items", []))
+
+        # Se houver paginação
+        while "LastEvaluatedKey" in response_data:
+            response_data = table.scan(ExclusiveStartKey=response_data["LastEvaluatedKey"])
+            scan_data.extend(response_data.get("Items", []))
+
+        return response(200, scan_data)
+
+    except Exception as e:
+        print("Erro:", traceback.format_exc())
+        return response(500, {"error": str(e), "trace": traceback.format_exc()})
