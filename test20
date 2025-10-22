@@ -1,17 +1,19 @@
+import os
 import json
 import pyodbc
 import boto3
 from decimal import Decimal
 
 def lambda_handler(event, context):
-    # Configurações de conexão SQL Server
-    server = 'SEU_SERVIDOR'  # exemplo: mydb.cle2yx.us-east-1.rds.amazonaws.com
-    database = 'mdb_rep'
-    username = 'SEU_USUARIO'
-    password = 'SUA_SENHA'
-    port = '1433'  # porta padrão do SQL Server
+    # 🔹 Variáveis de ambiente (configure no console da AWS Lambda)
+    server = os.environ['SQL_SERVER']
+    database = os.environ['SQL_DATABASE']
+    username = os.environ['SQL_USERNAME']
+    password = os.environ['SQL_PASSWORD']
+    port = os.environ.get('SQL_PORT', '1433')
+    dynamo_table_name = os.environ['DYNAMO_TABLE']
 
-    # Conexão com o SQL Server
+    # 🔹 Conexão com o SQL Server
     conn_str = (
         f"DRIVER={{ODBC Driver 17 for SQL Server}};"
         f"SERVER={server},{port};"
@@ -19,12 +21,11 @@ def lambda_handler(event, context):
         f"UID={username};"
         f"PWD={password};"
     )
-    
+
     try:
         conn = pyodbc.connect(conn_str)
         cursor = conn.cursor()
 
-        # Query
         query = """
         SELECT [num_chamado]
               ,[equipe]
@@ -56,18 +57,16 @@ def lambda_handler(event, context):
         cursor.execute(query)
         rows = cursor.fetchall()
     except Exception as e:
-        print("Erro ao conectar ou buscar dados do SQL Server:", str(e))
+        print("❌ Erro ao conectar ou buscar dados do SQL Server:", str(e))
         return {"statusCode": 500, "body": json.dumps({"error": str(e)})}
 
-    # Conexão com o DynamoDB
+    # 🔹 Conexão com DynamoDB
     dynamodb = boto3.resource('dynamodb')
-    table = dynamodb.Table('chamados')
+    table = dynamodb.Table(dynamo_table_name)
 
-    # Mapeia colunas
     columns = [column[0] for column in cursor.description]
-
-    # Processa cada linha
     count = 0
+
     for row in rows:
         item = {}
         for col, val in zip(columns, row):
@@ -78,16 +77,17 @@ def lambda_handler(event, context):
             elif hasattr(val, 'isoformat'):  # datetime
                 item[col] = val.isoformat()
             else:
-                item[col] = val if val is not None else "null"
+                item[col] = val if val is not None else None
 
         try:
-            # Insere ou substitui (upsert)
+            # 🔸 Upsert automático no DynamoDB
             table.put_item(Item=item)
             count += 1
         except Exception as e:
-            print(f"Erro ao inserir num_chamado={item.get('num_chamado')}: {e}")
+            print(f"⚠️ Erro ao inserir num_chamado={item.get('num_chamado')}: {e}")
 
     conn.close()
+    print(f"✅ {count} registros processados e atualizados no DynamoDB.")
     return {
         'statusCode': 200,
         'body': json.dumps({
