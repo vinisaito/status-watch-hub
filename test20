@@ -1,26 +1,73 @@
-	SELECT [num_chamado]
-		  ,[equipe]
-		  ,[gerente_equipe]
-		  ,[dpto_equipe]
-		  ,[coord_dpto_equipe]
-		  ,[ger_dpto_equipe]
-		  ,[dpto_ger_equipe]
-		  ,[severidade]
-		  ,[dat_abertura]
-		  ,[dat_status_concluido]
-		  ,[dat_fechamento]
-		  ,[data_normalizacao]
-		  ,[status]
-		  ,[classificacao]
-		  ,[dat_estouro_sla]
-		  ,[num_duracao]
-		  ,[duracao_sla]
-		  ,[titulo]
-		  ,[sla_violado]
-	  FROM [mdb_rep].[dbo].[sdm_cr_geral_mcs]
-			WHERE dat_abertura >= DATEADD(MONTH, -6, GETDATE())
-		AND (
-			 (classificacao = 'Incidente' AND severidade IN ('3 - Média', '4 - Alta', '5 - Crítica'))
-		  OR (classificacao = 'Solicitação' AND severidade = '4 - Alta')
-		)
-	  ORDER BY num_chamado DESC;
+import os
+import boto3
+import pymssql
+
+# Configurações do ambiente
+DYNAMO_TABLE = os.environ.get("DYNAMO_TABLE", "tabela_chamados")
+SQL_HOST = os.environ.get("SQL_HOST")
+SQL_USER = os.environ.get("SQL_USER")
+SQL_PASSWORD = os.environ.get("SQL_PASSWORD")
+SQL_DB = os.environ.get("SQL_DB", "mdb_rep")
+
+# Cria cliente DynamoDB
+dynamo = boto3.resource("dynamodb")
+table = dynamo.Table(DYNAMO_TABLE)
+
+# Query fornecida
+QUERY = """
+SELECT [num_chamado],
+       [equipe],
+       [gerente_equipe],
+       [dpto_equipe],
+       [coord_dpto_equipe],
+       [ger_dpto_equipe],
+       [dpto_ger_equipe],
+       [severidade],
+       [dat_abertura],
+       [dat_status_concluido],
+       [dat_fechamento],
+       [data_normalizacao],
+       [status],
+       [classificacao],
+       [dat_estouro_sla],
+       [num_duracao],
+       [duracao_sla],
+       [titulo],
+       [sla_violado]
+FROM [mdb_rep].[dbo].[sdm_cr_geral_mcs]
+WHERE dat_abertura >= DATEADD(MONTH, -6, GETDATE())
+  AND (
+       (classificacao = 'Incidente' AND severidade IN ('3 - Média', '4 - Alta', '5 - Crítica'))
+       OR (classificacao = 'Solicitação' AND severidade = '4 - Alta')
+      )
+ORDER BY num_chamado DESC;
+"""
+
+def lambda_handler(event, context):
+    # Conecta ao SQL Server
+    conn = pymssql.connect(
+        server=SQL_HOST,
+        user=SQL_USER,
+        password=SQL_PASSWORD,
+        database=SQL_DB
+    )
+    cursor = conn.cursor(as_dict=True)
+
+    cursor.execute(QUERY)
+    rows = cursor.fetchall()
+
+    count = 0
+    for row in rows:
+        # Transforma datetime em string (DynamoDB não aceita datetime nativo)
+        item = {k: str(v) if hasattr(v, "isoformat") else v for k, v in row.items() if v is not None}
+
+        # Upsert no DynamoDB
+        table.put_item(Item=item)
+        count += 1
+
+    conn.close()
+
+    return {
+        "statusCode": 200,
+        "body": f"{count} registros sincronizados no DynamoDB."
+    }
