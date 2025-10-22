@@ -1,167 +1,26 @@
-import os
-import json
-from datetime import datetime
-import boto3
-import pyodbc  # Conexão com SQL Server
-from decimal import Decimal
-
-# ---------- Configurações ----------
-SQL_SERVER = os.environ.get("DB_HOST")
-SQL_PORT = os.environ.get("DB_PORT", "1433")
-SQL_USERNAME = os.environ.get("DB_USER")
-SQL_PASSWORD = os.environ.get("DB_PASSWORD")
-DYNAMO_TABLE = os.environ.get("DYNAMO_CHAMADOS_TABLE")
-
-# ---------- Conexões AWS ----------
-dynamodb = boto3.resource("dynamodb")
-table = dynamodb.Table(DYNAMO_TABLE)
-
-# ---------- Headers CORS ----------
-cors_headers = {
-    "Access-Control-Allow-Origin": "*",
-    "Access-Control-Allow-Methods": "GET,OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type",
-    "Content-Type": "application/json; charset=utf-8",
-}
-
-# ---------- Utilidades ----------
-def _sql_conn_str() -> str:
-    """Monta a connection string ODBC para SQL Server."""
-    return (
-        f"DRIVER={{ODBC Driver 18 for SQL Server}};"
-        f"SERVER={SQL_SERVER},{SQL_PORT};"
-        f"UID={SQL_USERNAME};"
-        f"PWD={SQL_PASSWORD};"
-        f"Encrypt=yes;"
-        f"TrustServerCertificate=yes;"
-        f"CHARSET=UTF8;"
-    )
-
-def _rows_to_dicts(cursor, rows):
-    """Converte resultado do SQL em lista de dicionários."""
-    columns = [col[0] for col in cursor.description]
-    results = []
-    for row in rows:
-        item = dict(zip(columns, row))
-
-        # Conversão de tipos compatíveis com DynamoDB
-        for k, v in list(item.items()):
-            if isinstance(v, datetime):
-                item[k] = v.isoformat()
-            elif isinstance(v, float):
-                item[k] = Decimal(str(v))
-            elif isinstance(v, int):
-                item[k] = Decimal(v)
-
-        results.append(item)
-    return results
-
-def _convert_decimals(obj):
-    """Converte Decimal em int ou float recursivamente para JSON."""
-    if isinstance(obj, list):
-        return [_convert_decimals(i) for i in obj]
-    elif isinstance(obj, dict):
-        return {k: _convert_decimals(v) for k, v in obj.items()}
-    elif isinstance(obj, Decimal):
-        return int(obj) if obj % 1 == 0 else float(obj)
-    else:
-        return obj
-
-# ---------- DynamoDB ----------
-def _save_to_dynamo(items):
-    """Registra ou atualiza chamados no DynamoDB com num_chamado como PartitionKey (Number)."""
-    if not items:
-        print("⚠️ Nenhum item para registrar no DynamoDB.")
-        return
-
-    # Se o mesmo num_chamado aparecer mais de uma vez, mantém o último
-    unicos = {}
-    for item in items:
-        num = item.get("num_chamado")
-        if num is None:
-            print(f"⚠️ Item ignorado (sem num_chamado): {item}")
-            continue
-        unicos[num] = item  # substitui se repetido
-
-    print(f"🧩 {len(unicos)} chamados únicos (prontos para upsert no DynamoDB)")
-
-    # batch_writer faz upsert automático
-    with table.batch_writer() as batch:
-        for item in unicos.values():
-            try:
-                # Converte num_chamado explicitamente para Number (Decimal)
-                item["num_chamado"] = Decimal(str(int(item["num_chamado"])))
-
-                # Adiciona timestamp de atualização
-                item["updated_at"] = datetime.utcnow().isoformat()
-
-                batch.put_item(Item=item)
-            except Exception as e:
-                print(f"❌ Erro ao gravar item no DynamoDB: {e}")
-
-# ---------- SQL ----------
-def fetch_chamados_ultimos_6_meses():
-    """Busca todos os chamados dos últimos 6 meses, aplicando filtro de classificação/severidade."""
-    query = """
-    SELECT [num_chamado]
-          ,[equipe]
-          ,[gerente_equipe]
-          ,[dpto_equipe]
-          ,[coord_dpto_equipe]
-          ,[ger_dpto_equipe]
-          ,[dpto_ger_equipe]
-          ,[severidade]
-          ,[dat_abertura]
-          ,[dat_status_concluido]
-          ,[dat_fechamento]
-          ,[data_normalizacao]
-          ,[status]
-          ,[classificacao]
-          ,[dat_estouro_sla]
-          ,[num_duracao]
-          ,[duracao_sla]
-          ,[titulo]
-          ,[sla_violado]
-      FROM [mdb_rep].[dbo].[sdm_cr_geral_mcs]
-      WHERE dat_abertura >= DATEADD(MONTH, -6, GETDATE())
-      ORDER BY num_chamado DESC;
-    """
-    with pyodbc.connect(_sql_conn_str(), timeout=10) as conn:
-        cursor = conn.cursor()
-        cursor.execute(query)
-        rows = cursor.fetchall()
-        return _rows_to_dicts(cursor, rows)
-
-# ---------- Resposta HTTP ----------
-def _response(status: int, body_obj):
-    body_json = json.dumps(_convert_decimals(body_obj), ensure_ascii=False)
-    return {
-        "statusCode": status,
-        "headers": cors_headers,
-        "body": body_json,
-    }
-
-# ---------- Lambda Handler ----------
-def lambda_handler(event, context):
-    """
-    API somente leitura:
-      - GET /   -> retorna chamados dos últimos 6 meses e grava no DynamoDB
-      - OPTIONS -> CORS preflight
-    """
-    method = (event or {}).get("httpMethod", "GET").upper()
-
-    if method == "OPTIONS":
-        return _response(204, {})
-
-    if method != "GET":
-        return _response(405, {"error": "Método não permitido. Use GET."})
-
-    try:
-        # Busca todos os chamados dos últimos 6 meses
-        items = fetch_chamados_ultimos_6_meses()
-        _save_to_dynamo(items)
-        return _response(200, items)
-
-    except Exception as e:
-        print(f"❌ Erro geral: {e}")
-        return _response(500, {"error": str(e)})
+	SELECT [num_chamado]
+		  ,[equipe]
+		  ,[gerente_equipe]
+		  ,[dpto_equipe]
+		  ,[coord_dpto_equipe]
+		  ,[ger_dpto_equipe]
+		  ,[dpto_ger_equipe]
+		  ,[severidade]
+		  ,[dat_abertura]
+		  ,[dat_status_concluido]
+		  ,[dat_fechamento]
+		  ,[data_normalizacao]
+		  ,[status]
+		  ,[classificacao]
+		  ,[dat_estouro_sla]
+		  ,[num_duracao]
+		  ,[duracao_sla]
+		  ,[titulo]
+		  ,[sla_violado]
+	  FROM [mdb_rep].[dbo].[sdm_cr_geral_mcs]
+			WHERE dat_abertura >= DATEADD(MONTH, -6, GETDATE())
+		AND (
+			 (classificacao = 'Incidente' AND severidade IN ('3 - Média', '4 - Alta', '5 - Crítica'))
+		  OR (classificacao = 'Solicitação' AND severidade = '4 - Alta')
+		)
+	  ORDER BY num_chamado DESC;
