@@ -1,29 +1,10 @@
-def _save_to_dynamo(items):
-    """Registra ou atualiza chamados no DynamoDB com num_chamado como PartitionKey (Number)."""
-    if not items:
-        print("⚠️ Nenhum item para registrar no DynamoDB.")
-        return
-
-    # Se o mesmo num_chamado aparecer mais de uma vez, mantém o último (mais recente)
-    unicos = {}
-    for item in items:
-        num = item.get("num_chamado")
-        if num is None:
-            print(f"⚠️ Item ignorado (sem num_chamado): {item}")
-            continue
-        unicos[num] = item  # substitui se repetido
-
-    print(f"🧩 {len(unicos)} chamados únicos (prontos para upsert no DynamoDB)")
-
-    with table.batch_writer(overwrite_by_pkeys=["num_chamado"]) as batch:
-        for item in unicos.values():
-            try:
-                # Converte num_chamado explicitamente para Number (Decimal)
-                item["num_chamado"] = Decimal(str(int(item["num_chamado"])))
-
-                # Adiciona timestamp de atualização
-                item["updated_at"] = datetime.utcnow().isoformat()
-
-                batch.put_item(Item=item)
-            except Exception as e:
-                print(f"❌ Erro ao gravar item no DynamoDB: {e}")
+{
+  "statusCode": 500,
+  "headers": {
+    "Access-Control-Allow-Origin": "*",
+    "Access-Control-Allow-Methods": "GET,OPTIONS",
+    "Access-Control-Allow-Headers": "Content-Type",
+    "Content-Type": "application/json; charset=utf-8"
+  },
+  "body": "{\"error\": \"Object of type Decimal is not JSON serializable\"}"
+}
