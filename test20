@@ -1,21 +1,23 @@
 import os
 import json
 from datetime import datetime
-import urllib.parse
-import urllib.request
+import boto3
 import pyodbc  # Conexão com SQL Server
+from decimal import Decimal
 
-
-# Parâmetros do SQL Server via variáveis de ambiente
+# ---------- Configurações ----------
 SQL_SERVER = os.environ.get("DB_HOST")
 SQL_PORT = os.environ.get("DB_PORT", "1433")
 SQL_USERNAME = os.environ.get("DB_USER")
 SQL_PASSWORD = os.environ.get("DB_PASSWORD")
+DYNAMO_TABLE = os.environ.get("DYNAMO_CHAMADOS_TABLE")
 
-# URL da sua API REST (exemplo: https://minhaapi.com/chamados)
-CHAMADOS_API_URL = os.environ.get("CHAMADOS_API_URL")
+# ---------- Conexões AWS ----------
+dynamodb = boto3.resource("dynamodb")
+table = dynamodb.Table(DYNAMO_TABLE)
 
 
+# ---------- Utilidades ----------
 def _sql_conn_str() -> str:
     """Monta a connection string ODBC para SQL Server."""
     return (
@@ -30,20 +32,39 @@ def _sql_conn_str() -> str:
 
 
 def _rows_to_dicts(cursor, rows):
+    """Converte resultado do SQL em lista de dicionários."""
     columns = [col[0] for col in cursor.description]
     results = []
     for row in rows:
         item = dict(zip(columns, row))
-        # Converte datetime para ISO 8601 string
         for k, v in list(item.items()):
             if isinstance(v, datetime):
                 item[k] = v.isoformat()
+            elif isinstance(v, (float, int)):
+                item[k] = Decimal(str(v))  # Compatível com DynamoDB
         results.append(item)
     return results
 
 
+def _save_to_dynamo(items):
+    """Registra os chamados no DynamoDB."""
+    if not items:
+        print("⚠️ Nenhum item para registrar no DynamoDB.")
+        return
+
+    with table.batch_writer() as batch:
+        for item in items:
+            try:
+                # Adiciona timestamp de atualização
+                item["updated_at"] = datetime.utcnow().isoformat()
+                batch.put_item(Item=item)
+            except Exception as e:
+                print(f"❌ Erro ao gravar item no DynamoDB: {e}")
+
+
+# ---------- SQL ----------
 def fetch_chamados_from_sql_window():
-    """Lista chamados direto do SQL (somente leitura) com fallback para ampliar janela e filtros."""
+    """Lista chamados direto do SQL (somente leitura) com fallback de janelas."""
 
     base_select = """
     SELECT [num_chamado]
@@ -80,7 +101,7 @@ def fetch_chamados_from_sql_window():
         ("HOUR", -24, True),
         ("DAY", -7, True),
         ("MONTH", -6, True),
-        ("MONTH", -6, False),  # último recurso: sem filtros
+        ("MONTH", -6, False),
     ]
 
     with pyodbc.connect(_sql_conn_str(), timeout=10) as conn:
@@ -101,7 +122,7 @@ def fetch_chamados_from_sql_window():
 
 
 def fetch_chamado_by_number(numero_chamado: str):
-    """Busca um chamado específico pelo número, direto no SQL (somente leitura)."""
+    """Busca um chamado específico pelo número, direto no SQL."""
     query = """
     SELECT [num_chamado]
           ,[equipe]
@@ -136,26 +157,7 @@ def fetch_chamado_by_number(numero_chamado: str):
         return _rows_to_dicts(cursor, [row])[0]
 
 
-def send_data_to_api(data):
-    """Envia os dados via GET para a API REST configurada."""
-    if not CHAMADOS_API_URL:
-        print("⚠️ Variável CHAMADOS_API_URL não configurada — dados não enviados.")
-        return {"status": "skipped"}
-
-    try:
-        # Codifica os dados como parâmetros de query string
-        query_string = urllib.parse.urlencode({"data": json.dumps(data, ensure_ascii=False)})
-        url = f"{CHAMADOS_API_URL}?{query_string}"
-
-        with urllib.request.urlopen(url) as response:
-            result = response.read().decode("utf-8")
-            print("✅ Dados enviados com sucesso para API REST.")
-            return {"status": "ok", "response": result}
-    except Exception as e:
-        print(f"❌ Erro ao enviar dados para API: {e}")
-        return {"status": "error", "message": str(e)}
-
-
+# ---------- Resposta HTTP ----------
 def _response(status: int, body_obj):
     return {
         "statusCode": status,
@@ -169,11 +171,12 @@ def _response(status: int, body_obj):
     }
 
 
+# ---------- Lambda Handler ----------
 def lambda_handler(event, context):
     """
     API somente leitura:
       - GET /?numero_chamado=123   -> retorna um chamado específico
-      - GET /                      -> retorna chamados recentes e envia à API REST
+      - GET /                      -> retorna chamados recentes e grava no DynamoDB
       - OPTIONS                    -> CORS preflight
     """
 
@@ -191,14 +194,15 @@ def lambda_handler(event, context):
 
         if numero_chamado:
             item = fetch_chamado_by_number(str(numero_chamado))
-            if item is None:
+            if not item:
                 return _response(404, {"error": "Chamado não encontrado"})
-            send_data_to_api(item)
+            _save_to_dynamo([item])
             return _response(200, item)
         else:
             items = fetch_chamados_from_sql_window()
-            send_data_to_api(items)
+            _save_to_dynamo(items)
             return _response(200, items)
 
     except Exception as e:
+        print(f"❌ Erro geral: {e}")
         return _response(500, {"error": str(e)})
