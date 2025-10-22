@@ -100,64 +100,8 @@ def _save_to_dynamo(items):
                 print(f"❌ Erro ao gravar item no DynamoDB: {e}")
 
 # ---------- SQL ----------
-def fetch_chamados_from_sql_window():
-    """Lista chamados direto do SQL (somente leitura) com fallback de janelas."""
-    base_select = """
-    SELECT [num_chamado]
-          ,[equipe]
-          ,[gerente_equipe]
-          ,[dpto_equipe]
-          ,[coord_dpto_equipe]
-          ,[ger_dpto_equipe]
-          ,[dpto_ger_equipe]
-          ,[severidade]
-          ,[dat_abertura]
-          ,[dat_status_concluido]
-          ,[dat_fechamento]
-          ,[data_normalizacao]
-          ,[status]
-          ,[classificacao]
-          ,[dat_estouro_sla]
-          ,[num_duracao]
-          ,[duracao_sla]
-          ,[titulo]
-          ,[sla_violado]
-      FROM [mdb_rep].[dbo].[sdm_cr_geral_mcs]
-    """
-
-    filtro_cls_sev = """
-      AND (
-             (classificacao = 'Incidente' AND severidade IN ('3 - Média', '4 - Alta', '5 - Crítica'))
-          OR (classificacao = 'Solicitação' AND severidade = '4 - Alta')
-      )
-    """
-
-    janelas = [
-        ("HOUR", -2, True),
-        ("HOUR", -24, True),
-        ("DAY", -7, True),
-        ("MONTH", -6, True),
-        ("MONTH", -6, False),
-    ]
-
-    with pyodbc.connect(_sql_conn_str(), timeout=10) as conn:
-        cursor = conn.cursor()
-        for unidade, delta, aplicar_filtros in janelas:
-            where = f"WHERE dat_abertura >= DATEADD({unidade}, {delta}, GETDATE())"
-            query = base_select + "\n" + where
-            if aplicar_filtros:
-                query += "\n" + filtro_cls_sev
-            query += "\nORDER BY num_chamado DESC;"
-
-            cursor.execute(query)
-            rows = cursor.fetchall()
-            if rows:
-                return _rows_to_dicts(cursor, rows)
-
-        return []
-
-def fetch_chamado_by_number(numero_chamado: str):
-    """Busca um chamado específico pelo número, direto no SQL."""
+def fetch_chamados_ultimos_6_meses():
+    """Busca todos os chamados dos últimos 6 meses, aplicando filtro de classificação/severidade."""
     query = """
     SELECT [num_chamado]
           ,[equipe]
@@ -179,17 +123,14 @@ def fetch_chamado_by_number(numero_chamado: str):
           ,[titulo]
           ,[sla_violado]
       FROM [mdb_rep].[dbo].[sdm_cr_geral_mcs]
-      WHERE num_chamado = ?
+      WHERE dat_abertura >= DATEADD(MONTH, -6, GETDATE())
       ORDER BY num_chamado DESC;
     """
-
     with pyodbc.connect(_sql_conn_str(), timeout=10) as conn:
         cursor = conn.cursor()
-        cursor.execute(query, (numero_chamado,))
-        row = cursor.fetchone()
-        if not row:
-            return None
-        return _rows_to_dicts(cursor, [row])[0]
+        cursor.execute(query)
+        rows = cursor.fetchall()
+        return _rows_to_dicts(cursor, rows)
 
 # ---------- Resposta HTTP ----------
 def _response(status: int, body_obj):
@@ -204,9 +145,8 @@ def _response(status: int, body_obj):
 def lambda_handler(event, context):
     """
     API somente leitura:
-      - GET /?numero_chamado=123   -> retorna um chamado específico
-      - GET /                      -> retorna chamados recentes e grava no DynamoDB
-      - OPTIONS                    -> CORS preflight
+      - GET /   -> retorna chamados dos últimos 6 meses e grava no DynamoDB
+      - OPTIONS -> CORS preflight
     """
     method = (event or {}).get("httpMethod", "GET").upper()
 
@@ -217,19 +157,10 @@ def lambda_handler(event, context):
         return _response(405, {"error": "Método não permitido. Use GET."})
 
     try:
-        params = (event or {}).get("queryStringParameters") or {}
-        numero_chamado = params.get("numero_chamado") if isinstance(params, dict) else None
-
-        if numero_chamado:
-            item = fetch_chamado_by_number(str(numero_chamado))
-            if not item:
-                return _response(404, {"error": "Chamado não encontrado"})
-            _save_to_dynamo([item])
-            return _response(200, item)
-        else:
-            items = fetch_chamados_from_sql_window()
-            _save_to_dynamo(items)
-            return _response(200, items)
+        # Busca todos os chamados dos últimos 6 meses
+        items = fetch_chamados_ultimos_6_meses()
+        _save_to_dynamo(items)
+        return _response(200, items)
 
     except Exception as e:
         print(f"❌ Erro geral: {e}")
