@@ -37,17 +37,22 @@ def _rows_to_dicts(cursor, rows):
     results = []
     for row in rows:
         item = dict(zip(columns, row))
+
+        # Conversão de tipos compatíveis com DynamoDB
         for k, v in list(item.items()):
             if isinstance(v, datetime):
                 item[k] = v.isoformat()
-            elif isinstance(v, (float, int)):
-                item[k] = Decimal(str(v))  # Compatível com DynamoDB
+            elif isinstance(v, float):
+                item[k] = Decimal(str(v))
+            elif isinstance(v, int):
+                item[k] = Decimal(v)
+
         results.append(item)
     return results
 
 
 def _save_to_dynamo(items):
-    """Registra os chamados no DynamoDB."""
+    """Registra os chamados no DynamoDB com num_chamado como PartitionKey (Number)."""
     if not items:
         print("⚠️ Nenhum item para registrar no DynamoDB.")
         return
@@ -55,9 +60,23 @@ def _save_to_dynamo(items):
     with table.batch_writer() as batch:
         for item in items:
             try:
+                # Garante que a chave primária exista e seja numérica
+                if "num_chamado" not in item:
+                    print(f"⚠️ Item ignorado (sem num_chamado): {item}")
+                    continue
+
+                # Converte num_chamado explicitamente para Number (Decimal)
+                try:
+                    item["num_chamado"] = Decimal(str(int(item["num_chamado"])))
+                except Exception:
+                    print(f"⚠️ num_chamado inválido: {item.get('num_chamado')}")
+                    continue
+
                 # Adiciona timestamp de atualização
                 item["updated_at"] = datetime.utcnow().isoformat()
+
                 batch.put_item(Item=item)
+
             except Exception as e:
                 print(f"❌ Erro ao gravar item no DynamoDB: {e}")
 
