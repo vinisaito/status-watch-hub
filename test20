@@ -1,7 +1,8 @@
 import os
 import json
 from datetime import datetime
-
+import urllib.parse
+import urllib.request
 import pyodbc  # Conexão com SQL Server
 
 
@@ -11,182 +12,193 @@ SQL_PORT = os.environ.get("DB_PORT", "1433")
 SQL_USERNAME = os.environ.get("DB_USER")
 SQL_PASSWORD = os.environ.get("DB_PASSWORD")
 
+# URL da sua API REST (exemplo: https://minhaapi.com/chamados)
+CHAMADOS_API_URL = os.environ.get("CHAMADOS_API_URL")
+
 
 def _sql_conn_str() -> str:
-	"""Monta a connection string ODBC para SQL Server."""
-	return (
-		f"DRIVER={{ODBC Driver 18 for SQL Server}};"
-		f"SERVER={SQL_SERVER},{SQL_PORT};"
-		f"UID={SQL_USERNAME};"
-		f"PWD={SQL_PASSWORD};"
-		f"Encrypt=yes;"
-		f"TrustServerCertificate=yes;"
-		f"CHARSET=UTF8;"
-	)
+    """Monta a connection string ODBC para SQL Server."""
+    return (
+        f"DRIVER={{ODBC Driver 18 for SQL Server}};"
+        f"SERVER={SQL_SERVER},{SQL_PORT};"
+        f"UID={SQL_USERNAME};"
+        f"PWD={SQL_PASSWORD};"
+        f"Encrypt=yes;"
+        f"TrustServerCertificate=yes;"
+        f"CHARSET=UTF8;"
+    )
 
 
 def _rows_to_dicts(cursor, rows):
-	columns = [col[0] for col in cursor.description]
-	results = []
-	for row in rows:
-		item = dict(zip(columns, row))
-		# Converte datetime para ISO 8601 string
-		for k, v in list(item.items()):
-			if isinstance(v, datetime):
-				item[k] = v.isoformat()
-		results.append(item)
-	return results
+    columns = [col[0] for col in cursor.description]
+    results = []
+    for row in rows:
+        item = dict(zip(columns, row))
+        # Converte datetime para ISO 8601 string
+        for k, v in list(item.items()):
+            if isinstance(v, datetime):
+                item[k] = v.isoformat()
+        results.append(item)
+    return results
 
 
-def fetch_rdms_from_sql_window():
-		"""Lista RDMs direto do SQL (somente leitura) com fallback para ampliar janela e filtros.
+def fetch_chamados_from_sql_window():
+    """Lista chamados direto do SQL (somente leitura) com fallback para ampliar janela e filtros."""
 
-		Estratégia:
-		1) Tenta últimas 2 horas com filtros de classificação/severidade
-		2) Se vazio, tenta últimas 24 horas
-		3) Se vazio, tenta últimos 7 dias
-		4) Se vazio, tenta últimos 6 meses
-		5) Se ainda vazio, tenta últimos 6 meses SEM filtros (retorna algo para diagnóstico)
-		"""
+    base_select = """
+    SELECT [num_chamado]
+          ,[equipe]
+          ,[gerente_equipe]
+          ,[dpto_equipe]
+          ,[coord_dpto_equipe]
+          ,[ger_dpto_equipe]
+          ,[dpto_ger_equipe]
+          ,[severidade]
+          ,[dat_abertura]
+          ,[dat_status_concluido]
+          ,[dat_fechamento]
+          ,[data_normalizacao]
+          ,[status]
+          ,[classificacao]
+          ,[dat_estouro_sla]
+          ,[num_duracao]
+          ,[duracao_sla]
+          ,[titulo]
+          ,[sla_violado]
+      FROM [mdb_rep].[dbo].[sdm_cr_geral_mcs]
+    """
 
-		base_select = """
-		SELECT [num_chamado]
-					,[equipe]
-					,[gerente_equipe]
-					,[dpto_equipe]
-					,[coord_dpto_equipe]
-					,[ger_dpto_equipe]
-					,[dpto_ger_equipe]
-					,[severidade]
-					,[dat_abertura]
-					,[dat_status_concluido]
-					,[dat_fechamento]
-					,[data_normalizacao]
-					,[status]
-					,[classificacao]
-					,[dat_estouro_sla]
-					,[num_duracao]
-					,[duracao_sla]
-					,[titulo]
-					,[sla_violado]
-			FROM [mdb_rep].[dbo].[sdm_cr_geral_mcs]
-		"""
+    filtro_cls_sev = """
+      AND (
+             (classificacao = 'Incidente' AND severidade IN ('3 - Média', '4 - Alta', '5 - Crítica'))
+          OR (classificacao = 'Solicitação' AND severidade = '4 - Alta')
+      )
+    """
 
-		filtro_cls_sev = """
-			AND (
-					 (classificacao = 'Incidente' AND severidade IN ('3 - Média', '4 - Alta', '5 - Crítica'))
-				OR (classificacao = 'Solicitação' AND severidade = '4 - Alta')
-			)
-		"""
+    janelas = [
+        ("HOUR", -2, True),
+        ("HOUR", -24, True),
+        ("DAY", -7, True),
+        ("MONTH", -6, True),
+        ("MONTH", -6, False),  # último recurso: sem filtros
+    ]
 
-		janelas = [
-				("HOUR", -2, True),
-				("HOUR", -24, True),
-				("DAY", -7, True),
-				("MONTH", -6, True),
-				("MONTH", -6, False),  # último recurso: sem filtros
-		]
+    with pyodbc.connect(_sql_conn_str(), timeout=10) as conn:
+        cursor = conn.cursor()
+        for unidade, delta, aplicar_filtros in janelas:
+            where = f"WHERE dat_abertura >= DATEADD({unidade}, {delta}, GETDATE())"
+            query = base_select + "\n" + where
+            if aplicar_filtros:
+                query += "\n" + filtro_cls_sev
+            query += "\nORDER BY num_chamado DESC;"
 
-		with pyodbc.connect(_sql_conn_str(), timeout=10) as conn:
-				cursor = conn.cursor()
-				for unidade, delta, aplicar_filtros in janelas:
-						where = f"WHERE dat_abertura >= DATEADD({unidade}, {delta}, GETDATE())"
-						query = base_select + "\n" + where
-						if aplicar_filtros:
-								query += "\n" + filtro_cls_sev
-						query += "\nORDER BY num_chamado DESC;"
+            cursor.execute(query)
+            rows = cursor.fetchall()
+            if rows:
+                return _rows_to_dicts(cursor, rows)
 
-						cursor.execute(query)
-						rows = cursor.fetchall()
-						if rows:
-								return _rows_to_dicts(cursor, rows)
-
-				# Se absolutamente nada foi encontrado em nenhuma janela, retorna lista vazia
-				return []
+        return []
 
 
-def fetch_rdm_by_number(numero_rdm: str):
-	"""Busca uma RDM específica pelo número, direto no SQL (somente leitura)."""
-	query = """
-	SELECT [num_chamado]
-		  ,[equipe]
-		  ,[gerente_equipe]
-		  ,[dpto_equipe]
-		  ,[coord_dpto_equipe]
-		  ,[ger_dpto_equipe]
-		  ,[dpto_ger_equipe]
-		  ,[severidade]
-		  ,[dat_abertura]
-		  ,[dat_status_concluido]
-		  ,[dat_fechamento]
-		  ,[data_normalizacao]
-		  ,[status]
-		  ,[classificacao]
-		  ,[dat_estouro_sla]
-		  ,[num_duracao]
-		  ,[duracao_sla]
-		  ,[titulo]
-		  ,[sla_violado]
-	  FROM [mdb_rep].[dbo].[sdm_cr_geral_mcs]
-	  WHERE num_chamado = ?
-	  ORDER BY num_chamado DESC;
-	"""
+def fetch_chamado_by_number(numero_chamado: str):
+    """Busca um chamado específico pelo número, direto no SQL (somente leitura)."""
+    query = """
+    SELECT [num_chamado]
+          ,[equipe]
+          ,[gerente_equipe]
+          ,[dpto_equipe]
+          ,[coord_dpto_equipe]
+          ,[ger_dpto_equipe]
+          ,[dpto_ger_equipe]
+          ,[severidade]
+          ,[dat_abertura]
+          ,[dat_status_concluido]
+          ,[dat_fechamento]
+          ,[data_normalizacao]
+          ,[status]
+          ,[classificacao]
+          ,[dat_estouro_sla]
+          ,[num_duracao]
+          ,[duracao_sla]
+          ,[titulo]
+          ,[sla_violado]
+      FROM [mdb_rep].[dbo].[sdm_cr_geral_mcs]
+      WHERE num_chamado = ?
+      ORDER BY num_chamado DESC;
+    """
 
-	with pyodbc.connect(_sql_conn_str(), timeout=10) as conn:
-		cursor = conn.cursor()
-		cursor.execute(query, (numero_rdm,))
-		row = cursor.fetchone()
-		if not row:
-			return None
-		return _rows_to_dicts(cursor, [row])[0]
+    with pyodbc.connect(_sql_conn_str(), timeout=10) as conn:
+        cursor = conn.cursor()
+        cursor.execute(query, (numero_chamado,))
+        row = cursor.fetchone()
+        if not row:
+            return None
+        return _rows_to_dicts(cursor, [row])[0]
+
+
+def send_data_to_api(data):
+    """Envia os dados via GET para a API REST configurada."""
+    if not CHAMADOS_API_URL:
+        print("⚠️ Variável CHAMADOS_API_URL não configurada — dados não enviados.")
+        return {"status": "skipped"}
+
+    try:
+        # Codifica os dados como parâmetros de query string
+        query_string = urllib.parse.urlencode({"data": json.dumps(data, ensure_ascii=False)})
+        url = f"{CHAMADOS_API_URL}?{query_string}"
+
+        with urllib.request.urlopen(url) as response:
+            result = response.read().decode("utf-8")
+            print("✅ Dados enviados com sucesso para API REST.")
+            return {"status": "ok", "response": result}
+    except Exception as e:
+        print(f"❌ Erro ao enviar dados para API: {e}")
+        return {"status": "error", "message": str(e)}
 
 
 def _response(status: int, body_obj):
-	return {
-		"statusCode": status,
-		"headers": {
-			"Access-Control-Allow-Origin": "*",
-			"Access-Control-Allow-Methods": "GET,OPTIONS",
-			"Access-Control-Allow-Headers": "Content-Type",
-			"Content-Type": "application/json; charset=utf-8",
-		},
-		"body": json.dumps(body_obj, ensure_ascii=False),
-	}
+    return {
+        "statusCode": status,
+        "headers": {
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Methods": "GET,OPTIONS",
+            "Access-Control-Allow-Headers": "Content-Type",
+            "Content-Type": "application/json; charset=utf-8",
+        },
+        "body": json.dumps(body_obj, ensure_ascii=False),
+    }
 
 
 def lambda_handler(event, context):
-	"""
-	API somente leitura:
-	  - GET /?numero_rdm=123   -> retorna uma RDM específica
-	  - GET /                  -> retorna RDMs recentes; se vazio, amplia janela (2h -> 24h -> 7d -> 6m) e por fim remove filtros
-	  - OPTIONS                -> CORS preflight
+    """
+    API somente leitura:
+      - GET /?numero_chamado=123   -> retorna um chamado específico
+      - GET /                      -> retorna chamados recentes e envia à API REST
+      - OPTIONS                    -> CORS preflight
+    """
 
-	Não há operações de POST/PUT/DELETE e não há escrita em DynamoDB.
-	"""
+    method = (event or {}).get("httpMethod", "GET").upper()
 
-	method = (event or {}).get("httpMethod", "GET").upper()
+    if method == "OPTIONS":
+        return _response(204, {})
 
-	if method == "OPTIONS":
-		# Preflight CORS
-		return _response(204, {})
+    if method != "GET":
+        return _response(405, {"error": "Método não permitido. Use GET."})
 
-	if method != "GET":
-		return _response(405, {"error": "Método não permitido. Use GET."})
+    try:
+        params = (event or {}).get("queryStringParameters") or {}
+        numero_chamado = params.get("numero_chamado") if isinstance(params, dict) else None
 
-	try:
-		params = (event or {}).get("queryStringParameters") or {}
-		numero_rdm = params.get("numero_rdm") if isinstance(params, dict) else None
+        if numero_chamado:
+            item = fetch_chamado_by_number(str(numero_chamado))
+            if item is None:
+                return _response(404, {"error": "Chamado não encontrado"})
+            send_data_to_api(item)
+            return _response(200, item)
+        else:
+            items = fetch_chamados_from_sql_window()
+            send_data_to_api(items)
+            return _response(200, items)
 
-		if numero_rdm:
-			item = fetch_rdm_by_number(str(numero_rdm))
-			if item is None:
-				return _response(404, {"error": "RDM não encontrada"})
-			return _response(200, item)
-		else:
-			items = fetch_rdms_from_sql_window()
-			return _response(200, items)
-
-	except Exception as e:
-		# Nunca expõe stack trace em produção; aqui retornamos a mensagem para facilitar o debug inicial
-		return _response(500, {"error": str(e)})
-
+    except Exception as e:
+        return _response(500, {"error": str(e)})
