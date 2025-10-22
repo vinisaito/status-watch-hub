@@ -1,73 +1,96 @@
-import os
+import json
+import pyodbc
 import boto3
-import pymssql
-
-# Configurações do ambiente
-DYNAMO_TABLE = os.environ.get("DYNAMO_TABLE", "tabela_chamados")
-SQL_HOST = os.environ.get("SQL_HOST")
-SQL_USER = os.environ.get("SQL_USER")
-SQL_PASSWORD = os.environ.get("SQL_PASSWORD")
-SQL_DB = os.environ.get("SQL_DB", "mdb_rep")
-
-# Cria cliente DynamoDB
-dynamo = boto3.resource("dynamodb")
-table = dynamo.Table(DYNAMO_TABLE)
-
-# Query fornecida
-QUERY = """
-SELECT [num_chamado],
-       [equipe],
-       [gerente_equipe],
-       [dpto_equipe],
-       [coord_dpto_equipe],
-       [ger_dpto_equipe],
-       [dpto_ger_equipe],
-       [severidade],
-       [dat_abertura],
-       [dat_status_concluido],
-       [dat_fechamento],
-       [data_normalizacao],
-       [status],
-       [classificacao],
-       [dat_estouro_sla],
-       [num_duracao],
-       [duracao_sla],
-       [titulo],
-       [sla_violado]
-FROM [mdb_rep].[dbo].[sdm_cr_geral_mcs]
-WHERE dat_abertura >= DATEADD(MONTH, -6, GETDATE())
-  AND (
-       (classificacao = 'Incidente' AND severidade IN ('3 - Média', '4 - Alta', '5 - Crítica'))
-       OR (classificacao = 'Solicitação' AND severidade = '4 - Alta')
-      )
-ORDER BY num_chamado DESC;
-"""
+from decimal import Decimal
 
 def lambda_handler(event, context):
-    # Conecta ao SQL Server
-    conn = pymssql.connect(
-        server=SQL_HOST,
-        user=SQL_USER,
-        password=SQL_PASSWORD,
-        database=SQL_DB
+    # Configurações de conexão SQL Server
+    server = 'SEU_SERVIDOR'  # exemplo: mydb.cle2yx.us-east-1.rds.amazonaws.com
+    database = 'mdb_rep'
+    username = 'SEU_USUARIO'
+    password = 'SUA_SENHA'
+    port = '1433'  # porta padrão do SQL Server
+
+    # Conexão com o SQL Server
+    conn_str = (
+        f"DRIVER={{ODBC Driver 17 for SQL Server}};"
+        f"SERVER={server},{port};"
+        f"DATABASE={database};"
+        f"UID={username};"
+        f"PWD={password};"
     )
-    cursor = conn.cursor(as_dict=True)
+    
+    try:
+        conn = pyodbc.connect(conn_str)
+        cursor = conn.cursor()
 
-    cursor.execute(QUERY)
-    rows = cursor.fetchall()
+        # Query
+        query = """
+        SELECT [num_chamado]
+              ,[equipe]
+              ,[gerente_equipe]
+              ,[dpto_equipe]
+              ,[coord_dpto_equipe]
+              ,[ger_dpto_equipe]
+              ,[dpto_ger_equipe]
+              ,[severidade]
+              ,[dat_abertura]
+              ,[dat_status_concluido]
+              ,[dat_fechamento]
+              ,[data_normalizacao]
+              ,[status]
+              ,[classificacao]
+              ,[dat_estouro_sla]
+              ,[num_duracao]
+              ,[duracao_sla]
+              ,[titulo]
+              ,[sla_violado]
+          FROM [mdb_rep].[dbo].[sdm_cr_geral_mcs]
+          WHERE dat_abertura >= DATEADD(MONTH, -6, GETDATE())
+          AND (
+               (classificacao = 'Incidente' AND severidade IN ('3 - Média', '4 - Alta', '5 - Crítica'))
+            OR (classificacao = 'Solicitação' AND severidade = '4 - Alta')
+          )
+          ORDER BY num_chamado DESC;
+        """
+        cursor.execute(query)
+        rows = cursor.fetchall()
+    except Exception as e:
+        print("Erro ao conectar ou buscar dados do SQL Server:", str(e))
+        return {"statusCode": 500, "body": json.dumps({"error": str(e)})}
 
+    # Conexão com o DynamoDB
+    dynamodb = boto3.resource('dynamodb')
+    table = dynamodb.Table('chamados')
+
+    # Mapeia colunas
+    columns = [column[0] for column in cursor.description]
+
+    # Processa cada linha
     count = 0
     for row in rows:
-        # Transforma datetime em string (DynamoDB não aceita datetime nativo)
-        item = {k: str(v) if hasattr(v, "isoformat") else v for k, v in row.items() if v is not None}
+        item = {}
+        for col, val in zip(columns, row):
+            if isinstance(val, Decimal):
+                item[col] = float(val)
+            elif isinstance(val, bytes):
+                item[col] = val.decode('utf-8')
+            elif hasattr(val, 'isoformat'):  # datetime
+                item[col] = val.isoformat()
+            else:
+                item[col] = val if val is not None else "null"
 
-        # Upsert no DynamoDB
-        table.put_item(Item=item)
-        count += 1
+        try:
+            # Insere ou substitui (upsert)
+            table.put_item(Item=item)
+            count += 1
+        except Exception as e:
+            print(f"Erro ao inserir num_chamado={item.get('num_chamado')}: {e}")
 
     conn.close()
-
     return {
-        "statusCode": 200,
-        "body": f"{count} registros sincronizados no DynamoDB."
+        'statusCode': 200,
+        'body': json.dumps({
+            'message': f'{count} registros processados e atualizados no DynamoDB.'
+        })
     }
