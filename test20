@@ -1,1 +1,1 @@
-InvalidInputException: At least one security group must open all ingress ports.To limit traffic, the source security group in your inbound rule can be restricted to the same security group
+InvalidInputException: VPC S3 endpoint validation failed for SubnetId: subnet-0a7406dd5ea9c2d3a. VPC: vpc-0c48827cd3ab393bf. Reason: DescribeVpcEndpoints action is unauthorized. Unable to validate VPC id: vpc-0c48827cd3ab393bf
