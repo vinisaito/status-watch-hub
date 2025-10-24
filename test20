@@ -1,26 +1,87 @@
+# glue_job_parquet_last6months.py
+import sys
+from datetime import datetime, timedelta
+from dateutil.relativedelta import relativedelta
+from pyspark.context import SparkContext
+from awsglue.context import GlueContext
+from pyspark.sql.functions import col, to_date, date_format
+from awsglue.job import Job
+import os
+
+sc = SparkContext.getOrCreate()
+glueContext = GlueContext(sc)
+spark = glueContext.spark_session
+job = Job(glueContext)
+
+# Parametros via --JOB-ARGUMENTS
+jdbc_url = os.environ.get("JDBC_URL", "jdbc:sqlserver://10.0.0.10:1433;databaseName=mdb_rep")
+db_user = os.environ.get("DB_USER", "your_user")
+db_password = os.environ.get("DB_PASSWORD", "your_pass")
+s3_output = os.environ.get("S3_OUTPUT", "s3://seu-bucket/alerts/parquet")
+temp_dir = os.environ.get("GLUE_TEMP_DIR", "s3://seu-bucket/glue-temp/")
+
+# Calcular data 6 meses atrás (use timezone conforme necessário)
+six_months_ago = datetime.utcnow() - relativedelta(months=6)
+six_months_str = six_months_ago.strftime("%Y-%m-%d %H:%M:%S")
+
+# Monta query — garantia de parênteses para subquery
+query = f"""
+(
  SELECT [num_chamado]
-          ,[equipe]
-          ,[gerente_equipe]
-          ,[dpto_equipe]
-          ,[coord_dpto_equipe]
-          ,[ger_dpto_equipe]
-          ,[dpto_ger_equipe]
-          ,[severidade]
-          ,[dat_abertura]
-          ,[dat_status_concluido]
-          ,[dat_fechamento]
-          ,[data_normalizacao]
-          ,[status]
-          ,[classificacao]
-          ,[dat_estouro_sla]
-          ,[num_duracao]
-          ,[duracao_sla]
-          ,[titulo]
-          ,[sla_violado]
-      FROM [mdb_rep].[dbo].[sdm_cr_geral_mcs]
-      WHERE dat_abertura >= DATEADD(MONTH, -6, GETDATE())
-      AND (
-           (classificacao = 'Incidente' AND severidade IN ('3 - Média', '4 - Alta', '5 - Crítica'))
-        OR (classificacao = 'Solicitação' AND severidade = '4 - Alta')
-      )
-      ORDER BY num_chamado DESC;
+      ,[equipe]
+      ,[gerente_equipe]
+      ,[dpto_equipe]
+      ,[coord_dpto_equipe]
+      ,[ger_dpto_equipe]
+      ,[dpto_ger_equipe]
+      ,[severidade]
+      ,[dat_abertura]
+      ,[dat_status_concluido]
+      ,[dat_fechamento]
+      ,[data_normalizacao]
+      ,[status]
+      ,[classificacao]
+      ,[dat_estouro_sla]
+      ,[num_duracao]
+      ,[duracao_sla]
+      ,[titulo]
+      ,[sla_violado]
+ FROM [mdb_rep].[dbo].[sdm_cr_geral_mcs]
+ WHERE dat_abertura >= '{six_months_str}'
+   AND (
+         (classificacao = 'Incidente' AND severidade IN ('3 - Média', '4 - Alta', '5 - Crítica'))
+      OR (classificacao = 'Solicitação' AND severidade = '4 - Alta')
+       )
+) as tmp
+"""
+
+# Leitura JDBC. Ajuste driver e propriedades
+jdbc_properties = {
+    "user": db_user,
+    "password": db_password,
+    "driver": "com.microsoft.sqlserver.jdbc.SQLServerDriver",
+    "fetchsize": "10000"
+}
+
+df = spark.read \
+    .format("jdbc") \
+    .option("url", jdbc_url) \
+    .option("dbtable", query) \
+    .option("user", db_user) \
+    .option("password", db_password) \
+    .option("driver", "com.microsoft.sqlserver.jdbc.SQLServerDriver") \
+    .load()
+
+# Normaliza coluna de data e cria coluna de partição (ano, mes)
+df = df.withColumn("dat_abertura_date", to_date(col("dat_abertura")))
+df = df.withColumn("year", date_format(col("dat_abertura_date"), "yyyy"))
+df = df.withColumn("month", date_format(col("dat_abertura_date"), "MM"))
+
+# Coalesce para reduzir números de ficheiros (ajuste conforme tamanho)
+df = df.coalesce(10)
+
+# Escreve parquet particionado
+output_path = s3_output.rstrip("/")
+df.write.mode("overwrite").partitionBy("year", "month").parquet(output_path)
+
+job.commit()
