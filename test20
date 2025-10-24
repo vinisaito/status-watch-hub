@@ -1,26 +1,26 @@
-📌 Acompanhamento de RDMs: 533721 📅
-
-RDM: 533721
-Status RDM: Em implantação
-Descrição: Atualizar no F5 os certificados SSL do ambiente OSB CRP12c (PRODUCÃO)
-OBS:
-23h45 -Informado por Henrique Anjos que a atividade foi executada com sucesso. Validações e testes OK.
-Data de Início: 18/10/2025 22:00
-Data Fim: 19/10/2025 02:25
-Grupo Executor: Suporte Telecom
-Area Principal Afetada: PSG - INFRAESTRUTURA - CONTAINERS E MIDDLEWARE
-
-🔍 Status Acompanhamento: ✅ Concluído ✅
-
-🏁 Etapas do Acompanhamento:
-
-Adicionado para Acompanhamento: 🟢
-Aguardando Início: 🟢
-Em Execução: 🟢
-Fase de Teste: 🟢
-Concluído: 🟢
-Cancelada: ⛔ N/A
-Rollback: ⛔ N/A
-
-Legenda
-🔘 Aguardando Etapa. 🔵 Etapa em Andamento. 🟢 Etapa Concluída.
+ SELECT [num_chamado]
+          ,[equipe]
+          ,[gerente_equipe]
+          ,[dpto_equipe]
+          ,[coord_dpto_equipe]
+          ,[ger_dpto_equipe]
+          ,[dpto_ger_equipe]
+          ,[severidade]
+          ,[dat_abertura]
+          ,[dat_status_concluido]
+          ,[dat_fechamento]
+          ,[data_normalizacao]
+          ,[status]
+          ,[classificacao]
+          ,[dat_estouro_sla]
+          ,[num_duracao]
+          ,[duracao_sla]
+          ,[titulo]
+          ,[sla_violado]
+      FROM [mdb_rep].[dbo].[sdm_cr_geral_mcs]
+      WHERE dat_abertura >= DATEADD(MONTH, -6, GETDATE())
+      AND (
+           (classificacao = 'Incidente' AND severidade IN ('3 - Média', '4 - Alta', '5 - Crítica'))
+        OR (classificacao = 'Solicitação' AND severidade = '4 - Alta')
+      )
+      ORDER BY num_chamado DESC;
