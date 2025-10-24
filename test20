@@ -1,1 +1,4 @@
-InvalidInputException: VPC S3 endpoint validation failed for SubnetId: subnet-0a7406dd5ea9c2d3a. VPC: vpc-0c48827cd3ab393bf. Reason: DescribeVpcEndpoints action is unauthorized. Unable to validate VPC id: vpc-0c48827cd3ab393bf
+        "ec2:DescribeVpcEndpoints",
+        "ec2:DescribeRouteTables",
+        "ec2:DescribeSubnets",
+        "ec2:DescribeSecurityGroups"
