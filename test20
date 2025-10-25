@@ -1,10 +1,1 @@
-df = (
-    spark.read.format("jdbc")
-    .option("url", jdbc_url)
-    .option("dbtable", f"({query})")
-    .option("user", db_user)
-    .option("password", db_password)
-    .option("driver", "com.microsoft.sqlserver.jdbc.SQLServerDriver")
-    .option("fetchsize", "10000")
-    .load()
-)
+An error occurred while calling o96.load. Incorrect syntax near the keyword 'WHERE'.
