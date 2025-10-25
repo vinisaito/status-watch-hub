@@ -1,16 +1,1 @@
-{
-    "Effect": "Allow",
-    "Action": [
-        "glue:GetDatabase",
-        "glue:GetDatabases",
-        "glue:GetTable",
-        "glue:GetTables",
-        "glue:GetPartition",
-        "glue:GetPartitions"
-    ],
-    "Resource": [
-        "arn:aws:glue:us-east-1:368696837445:catalog",
-        "arn:aws:glue:us-east-1:368696837445:database/painelmonitoracao",
-        "arn:aws:glue:us-east-1:368696837445:table/painelmonitoracao/paineldados"
-    ]
-}
+SCHEMA_NOT_FOUND: line 2:14: Schema 'painelmonitoracao' does not exist
