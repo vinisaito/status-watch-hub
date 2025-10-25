@@ -1,26 +1,11 @@
 {
-    "Version": "2012-10-17",
-    "Statement": [
-        {
-            "Effect": "Allow",
-            "Action": [
-                "athena:StartQueryExecution",
-                "athena:GetQueryExecution",
-                "athena:GetQueryResults"
-            ],
-            "Resource": "*"
-        },
-        {
-            "Effect": "Allow",
-            "Action": [
-                "s3:GetObject",
-                "s3:PutObject",
-                "s3:ListBucket"
-            ],
-            "Resource": [
-                "arn:aws:s3:::painel-monitoracao-athena-query-results",
-                "arn:aws:s3:::painel-monitoracao-athena-query-results/*"
-            ]
-        }
-    ]
+  "errorMessage": "An error occurred (AccessDeniedException) when calling the StartQueryExecution operation: You are not authorized to perform: athena:StartQueryExecution on the resource. After your AWS administrator or you have updated your permissions, please try again.",
+  "errorType": "ClientError",
+  "requestId": "d47803af-5f33-4c10-b62c-923e689314e5",
+  "stackTrace": [
+    "  File \"/var/task/lambda_function.py\", line 24, in lambda_handler\n    response = athena.start_query_execution(\n",
+    "  File \"/var/lang/lib/python3.11/site-packages/botocore/client.py\", line 602, in _api_call\n    return self._make_api_call(operation_name, kwargs)\n",
+    "  File \"/var/lang/lib/python3.11/site-packages/botocore/context.py\", line 123, in wrapper\n    return func(*args, **kwargs)\n",
+    "  File \"/var/lang/lib/python3.11/site-packages/botocore/client.py\", line 1078, in _make_api_call\n    raise error_class(parsed_response, operation_name)\n"
+  ]
 }
