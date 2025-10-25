@@ -1,5 +1,30 @@
-ALTER TABLE painel_monitoracao
-CHANGE dat_estouro_sla dat_estouro_sla string;
-
-
-MSCK REPAIR TABLE painel_monitoracao;
+CREATE TABLE painel-monitoracao.sdm_cr_geral_mcs_corrigida
+WITH (
+  format = 'PARQUET',
+  external_location = 's3://painel-monitoracao-administrativo-dados/dados_corrigidos/',
+  partitioned_by = ARRAY['year','month']
+) AS
+SELECT
+  num_chamado,
+  equipe,
+  gerente_equipe,
+  dpto_equipe,
+  coord_dpto_equipe,
+  ger_dpto_equipe,
+  dpto_ger_equipe,
+  severidade,
+  dat_abertura,
+  dat_status_concluido,
+  dat_fechamento,
+  data_normalizacao,
+  status,
+  classificacao,
+  -- Aqui está a correção:
+  CAST(dat_estouro_sla AS VARCHAR) AS dat_estouro_sla,
+  num_duracao,
+  duracao_sla,
+  titulo,
+  sla_violado,
+  year,
+  month
+FROM painel-monitoracao.sdm_cr_geral_mcs;
