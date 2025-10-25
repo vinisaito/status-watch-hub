@@ -1,5 +1,5 @@
-line 1:32: mismatched input 'ALTER'. Expecting: '.', 'ADD', 'DROP', 'EXECUTE', 'RENAME', 'SET'
-
+ALTER TABLE painel_monitoracao
+CHANGE dat_estouro_sla dat_estouro_sla string;
 
 
 MSCK REPAIR TABLE painel_monitoracao;
