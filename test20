@@ -1,4 +1,1 @@
-{
-  "statusCode": 500,
-  "body": "{\"error\": \"Query FAILED\"}"
-}
+Insufficient permissions to execute the query. User: arn:aws:sts::368696837445:assumed-role/painel-monitoracao-administrativo-SQL-role-g9b41pyp/painel-monitoracao-administrativo-SQL is not authorized to perform: glue:GetDatabase on resource: arn:aws:glue:us-east-1:368696837445:catalog because no identity-based policy allows the glue:GetDatabase action
