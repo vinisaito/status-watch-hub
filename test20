@@ -1,17 +1,1 @@
-DROP TABLE paineldados;
-
-CREATE EXTERNAL TABLE paineldados (
-  chamado STRING,
-  evento STRING,
-  status STRING,
-  num_duracao INT,
-  data_registro DATE,
-  operador STRING
-)
-PARTITIONED BY (
-  year STRING,
-  month STRING
-)
-STORED AS PARQUET
-LOCATION 's3://painel-monitoracao-administrativo-dados/dados/'
-;
+Only one sql statement is allowed. Got: DROP TABLE paineldados; CREATE EXTERNAL TABLE paineldados ( chamado STRING, evento STRING, status STRING, num_duracao INT, data_registro DATE, operador STRING ) PARTITIONED BY ( year STRING, month STRING ) STORED AS PARQUET LOCATION 's3://painel-monitoracao-administrativo-dados/dados/*' ;
