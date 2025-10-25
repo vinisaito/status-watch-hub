@@ -1,1 +1,5 @@
-MSCK REPAIR TABLE sdm_cr_geral_mcs;
+SELECT *
+FROM sdm_cr_geral_mcs
+WHERE year = '2025' AND month = '02'
+ORDER BY dat_abertura DESC
+LIMIT 100;
