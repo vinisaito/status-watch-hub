@@ -1,6 +1,5 @@
 import boto3
 import json
-import os
 import time
 
 athena = boto3.client('athena', region_name='us-east-1')
@@ -9,11 +8,9 @@ DATABASE = "painelmonitoracao"
 OUTPUT_BUCKET = "s3://painel-monitoracao-administrativo-athena/"
 
 def lambda_handler(event, context):
-    # Recebe parâmetros do front-end (opcional)
     year = event.get("year")
     month = event.get("month")
 
-    # Monta query
     query = f"""
         SELECT chamado, status, num_duracao, data_registro
         FROM paineldados
@@ -39,16 +36,12 @@ def lambda_handler(event, context):
         time.sleep(1)
 
     if state != 'SUCCEEDED':
-        return {
-            "statusCode": 500,
-            "body": json.dumps({"error": f"Query {state}"})
-        }
+        raise Exception(f"Query {state}")
 
-    # Recupera resultados
     result = athena.get_query_results(QueryExecutionId=query_execution_id)
     rows = []
     headers = [col['Label'] for col in result['ResultSet']['ResultSetMetadata']['ColumnInfo']]
-    for r in result['ResultSet']['Rows'][1:]:  # pula header
+    for r in result['ResultSet']['Rows'][1:]:
         row_data = [c.get('VarCharValue', None) for c in r['Data']]
         rows.append(dict(zip(headers, row_data)))
 
@@ -56,36 +49,3 @@ def lambda_handler(event, context):
         "statusCode": 200,
         "body": json.dumps(rows)
     }
-
-
-
-IAM:
-
-{
-	"Version": "2012-10-17",
-	"Statement": [
-		{
-			"Effect": "Allow",
-			"Action": [
-				"athena:StartQueryExecution",
-				"athena:GetQueryExecution",
-				"athena:GetQueryResults"
-			],
-			"Resource": "arn:aws:athena:us-east-1:368696837445:workgroup/painel_monitoracao"
-		},
-		{
-			"Effect": "Allow",
-			"Action": [
-				"s3:GetObject",
-				"s3:PutObject",
-				"s3:ListBucket"
-			],
-			"Resource": [
-				"arn:aws:s3:::painel-monitoracao-administrativo-athena",
-				"arn:aws:s3:::painel-monitoracao-administrativo-athena/*"
-			]
-		}
-	]
-}
-
-
