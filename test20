@@ -1,1 +1,114 @@
-An error occurred while calling o121.parquet. Traceback (most recent call last):
+# glue_job_parquet_last6months_final.py
+
+import sys
+from datetime import datetime
+from dateutil.relativedelta import relativedelta
+from pyspark.context import SparkContext
+from awsglue.context import GlueContext
+from pyspark.sql.functions import col, to_date, date_format
+from awsglue.job import Job
+import os
+
+# Inicialização básica
+sc = SparkContext.getOrCreate()
+glueContext = GlueContext(sc)
+spark = glueContext.spark_session
+job = Job(glueContext)
+
+# ---------- Parâmetros de ambiente ----------
+jdbc_url = os.environ.get("JDBC_URL", "jdbc:sqlserver://172.26.7.233:1433;databaseName=mdb_rep")
+db_user = os.environ.get("DB_USER", "")
+db_password = os.environ.get("DB_PASSWORD", "")
+s3_output = os.environ.get("S3_OUTPUT", "s3://painel-monitoracao-administrativo-dados/dados")
+temp_dir = os.environ.get("GLUE_TEMP_DIR", "s3://painel-monitoracao-administrativo-athena/")
+
+# ---------- Calcular data de corte (6 meses atrás) ----------
+six_months_ago = datetime.utcnow() - relativedelta(months=6)
+six_months_str = six_months_ago.strftime("%Y-%m-%d %H:%M:%S")
+
+# ---------- Query SQL ----------
+query = f"""
+(
+ SELECT [num_chamado],
+        [equipe],
+        [gerente_equipe],
+        [dpto_equipe],
+        [coord_dpto_equipe],
+        [ger_dpto_equipe],
+        [dpto_ger_equipe],
+        [severidade],
+        [dat_abertura],
+        [dat_status_concluido],
+        [dat_fechamento],
+        [data_normalizacao],
+        [status],
+        [classificacao],
+        [dat_estouro_sla],
+        [num_duracao],
+        [duracao_sla],
+        [titulo],
+        [sla_violado]
+ FROM [mdb_rep].[dbo].[sdm_cr_geral_mcs]
+ WHERE dat_abertura >= '{six_months_str}'
+   AND (
+         (classificacao = 'Incidente' AND severidade IN ('3 - Média', '4 - Alta', '5 - Crítica'))
+      OR (classificacao = 'Solicitação' AND severidade = '4 - Alta')
+       )
+) as tmp
+"""
+
+# ---------- Leitura JDBC ----------
+df = (
+    spark.read.format("jdbc")
+    .option("url", jdbc_url)
+    .option("query", query)
+    .option("user", db_user)
+    .option("password", db_password)
+    .option("driver", "com.microsoft.sqlserver.jdbc.SQLServerDriver")
+    .option("fetchsize", "10000")
+    .load()
+)
+
+# ---------- Normalização e tipagem ----------
+
+# Datas em formato DATE
+df = df.withColumn("dat_abertura", to_date("dat_abertura"))
+df = df.withColumn("dat_status_concluido", to_date("dat_status_concluido"))
+df = df.withColumn("dat_fechamento", to_date("dat_fechamento"))
+df = df.withColumn("data_normalizacao", to_date("data_normalizacao"))
+df = df.withColumn("dat_estouro_sla", to_date("dat_estouro_sla"))
+
+# Colunas numéricas
+df = df.withColumn("num_duracao", col("num_duracao").cast("int"))
+df = df.withColumn("duracao_sla", col("duracao_sla").cast("int"))
+
+# Garantia de strings
+df = df.withColumn("equipe", col("equipe").cast("string"))
+df = df.withColumn("gerente_equipe", col("gerente_equipe").cast("string"))
+df = df.withColumn("dpto_equipe", col("dpto_equipe").cast("string"))
+df = df.withColumn("coord_dpto_equipe", col("coord_dpto_equipe").cast("string"))
+df = df.withColumn("ger_dpto_equipe", col("ger_dpto_equipe").cast("string"))
+df = df.withColumn("dpto_ger_equipe", col("dpto_ger_equipe").cast("string"))
+df = df.withColumn("severidade", col("severidade").cast("string"))
+df = df.withColumn("status", col("status").cast("string"))
+df = df.withColumn("classificacao", col("classificacao").cast("string"))
+df = df.withColumn("titulo", col("titulo").cast("string"))
+df = df.withColumn("sla_violado", col("sla_violado").cast("string"))
+
+# ---------- Criação de partições ----------
+df = df.withColumn("year", date_format(col("dat_abertura"), "yyyy"))
+df = df.withColumn("month", date_format(col("dat_abertura"), "MM"))
+
+# ---------- Otimização de escrita ----------
+df = df.coalesce(10)  # Reduz o número de arquivos no S3
+
+# ---------- Escrita em Parquet ----------
+output_path = s3_output.rstrip("/")
+(
+    df.write
+    .mode("overwrite")
+    .partitionBy("year", "month")
+    .parquet(output_path)
+)
+
+job.commit()
