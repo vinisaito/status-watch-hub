@@ -1,1 +1,1 @@
-Invalid location s3:/painel-monitoracao-administrativo-dados/dados/ for table. Only S3 locations are allowed
+MSCK REPAIR TABLE sdm_cr_geral_mcs;
