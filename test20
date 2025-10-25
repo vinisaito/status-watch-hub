@@ -1,57 +1,11 @@
-import boto3
-import json
-import os
-import time
-
-athena = boto3.client('athena', region_name='sa-east-1')
-
-DATABASE = "painelmonitoracao"
-OUTPUT_BUCKET = "s3://painel-monitoracao-athena-query-results/"
-
-def lambda_handler(event, context):
-    # Recebe parâmetros do front-end (opcional)
-    year = event.get("year")
-    month = event.get("month")
-
-    # Monta query
-    query = f"""
-        SELECT chamado, status, num_duracao, data_registro
-        FROM paineldados
-        WHERE year='{year}' AND month='{month}'
-        LIMIT 1000
-    """
-
-    response = athena.start_query_execution(
-        QueryString=query,
-        QueryExecutionContext={'Database': DATABASE},
-        ResultConfiguration={'OutputLocation': OUTPUT_BUCKET}
-    )
-
-    query_execution_id = response['QueryExecutionId']
-
-    # Espera a query terminar
-    while True:
-        status = athena.get_query_execution(QueryExecutionId=query_execution_id)
-        state = status['QueryExecution']['Status']['State']
-        if state in ['SUCCEEDED', 'FAILED', 'CANCELLED']:
-            break
-        time.sleep(1)
-
-    if state != 'SUCCEEDED':
-        return {
-            "statusCode": 500,
-            "body": json.dumps({"error": f"Query {state}"})
-        }
-
-    # Recupera resultados
-    result = athena.get_query_results(QueryExecutionId=query_execution_id)
-    rows = []
-    headers = [col['Label'] for col in result['ResultSet']['ResultSetMetadata']['ColumnInfo']]
-    for r in result['ResultSet']['Rows'][1:]:  # pula header
-        row_data = [c.get('VarCharValue', None) for c in r['Data']]
-        rows.append(dict(zip(headers, row_data)))
-
-    return {
-        "statusCode": 200,
-        "body": json.dumps(rows)
-    }
+{
+  "errorMessage": "An error occurred (AccessDeniedException) when calling the StartQueryExecution operation: You are not authorized to perform: athena:StartQueryExecution on the resource. After your AWS administrator or you have updated your permissions, please try again.",
+  "errorType": "ClientError",
+  "requestId": "90813394-a788-4449-9061-6b9e864f5223",
+  "stackTrace": [
+    "  File \"/var/task/lambda_function.py\", line 24, in lambda_handler\n    response = athena.start_query_execution(\n",
+    "  File \"/var/lang/lib/python3.11/site-packages/botocore/client.py\", line 602, in _api_call\n    return self._make_api_call(operation_name, kwargs)\n",
+    "  File \"/var/lang/lib/python3.11/site-packages/botocore/context.py\", line 123, in wrapper\n    return func(*args, **kwargs)\n",
+    "  File \"/var/lang/lib/python3.11/site-packages/botocore/client.py\", line 1078, in _make_api_call\n    raise error_class(parsed_response, operation_name)\n"
+  ]
+}
