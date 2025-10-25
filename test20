@@ -1,1 +1,16 @@
-LAUNCH ERROR | Error downloading from S3 for bucket: painel-monitoracao-administrativo-scripts, key: scripts/glue_coleta_6meses.py.User: arn:aws:sts::368696837445:assumed-role/GlueAcess/GlueJobRunnerSession is not authorized to perform: s3:GetObject on resource: "arn:aws:s3:::painel-monitoracao-administrativo-scripts/scripts/glue_coleta_6meses.py" because no identity-based policy allows the s3:GetObject action (Service: Amazon S3; Status Code: 403; Please refer logs for details.
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": [
+        "s3:GetObject",
+        "s3:ListBucket"
+      ],
+      "Resource": [
+        "arn:aws:s3:::painel-monitoracao-administrativo-scripts",
+        "arn:aws:s3:::painel-monitoracao-administrativo-scripts/*"
+      ]
+    }
+  ]
+}
