@@ -1,11 +1,12 @@
 # glue_job_parquet_last6months.py
 import sys
-from datetime import datetime, timedelta
+from datetime import datetime
 from dateutil.relativedelta import relativedelta
 from pyspark.context import SparkContext
 from awsglue.context import GlueContext
-from pyspark.sql.functions import col, to_date, date_format
+from pyspark.sql.functions import col, year, month
 from awsglue.job import Job
+from pyspark.sql.types import *
 import os
 
 sc = SparkContext.getOrCreate()
@@ -13,57 +14,76 @@ glueContext = GlueContext(sc)
 spark = glueContext.spark_session
 job = Job(glueContext)
 
-# Parametros via --JOB-ARGUMENTS
+# Parametros via Environment Vars
 jdbc_url = os.environ.get("JDBC_URL", "jdbc:sqlserver://172.26.7.233:1433;databaseName=mdb_rep")
 db_user = os.environ.get("DB_USER", "")
 db_password = os.environ.get("DB_PASSWORD", "")
 s3_output = os.environ.get("S3_OUTPUT", "s3://painel-monitoracao-administrativo-dados/dados")
-temp_dir = os.environ.get("GLUE_TEMP_DIR", "s3://painel-monitoracao-administrativo-athena/")
 
-# Calcular data 6 meses atrás (use timezone conforme necessário)
+# Calcular data 6 meses atrás
 six_months_ago = datetime.utcnow() - relativedelta(months=6)
 six_months_str = six_months_ago.strftime("%Y-%m-%d %H:%M:%S")
 
-# Monta query — garantia de parênteses para subquery
+# Query
 query = f"""
 (
- SELECT [num_chamado]
-      ,[equipe]
-      ,[gerente_equipe]
-      ,[dpto_equipe]
-      ,[coord_dpto_equipe]
-      ,[ger_dpto_equipe]
-      ,[dpto_ger_equipe]
-      ,[severidade]
-      ,[dat_abertura]
-      ,[dat_status_concluido]
-      ,[dat_fechamento]
-      ,[data_normalizacao]
-      ,[status]
-      ,[classificacao]
-      ,[dat_estouro_sla]
-      ,[num_duracao]
-      ,[duracao_sla]
-      ,[titulo]
-      ,[sla_violado]
- FROM [mdb_rep].[dbo].[sdm_cr_geral_mcs]
+ SELECT 
+      num_chamado,
+      equipe,
+      gerente_equipe,
+      dpto_equipe,
+      coord_dpto_equipe,
+      ger_dpto_equipe,
+      dpto_ger_equipe,
+      severidade,
+      dat_abertura,
+      dat_status_concluido,
+      dat_fechamento,
+      data_normalizacao,
+      status,
+      classificacao,
+      dat_estouro_sla,
+      num_duracao,
+      duracao_sla,
+      titulo,
+      sla_violado
+ FROM mdb_rep.dbo.sdm_cr_geral_mcs
  WHERE dat_abertura >= '{six_months_str}'
    AND (
          (classificacao = 'Incidente' AND severidade IN ('3 - Média', '4 - Alta', '5 - Crítica'))
       OR (classificacao = 'Solicitação' AND severidade = '4 - Alta')
        )
-) as tmp
+) tmp
 """
 
-# Leitura JDBC. Ajuste driver e propriedades
-jdbc_properties = {
-    "user": db_user,
-    "password": db_password,
-    "driver": "com.microsoft.sqlserver.jdbc.SQLServerDriver",
-    "fetchsize": "10000"
-}
+# 🔥 **Schema explícito** — evitando inferência instável
+schema = StructType([
+    StructField("num_chamado", IntegerType(), True),
+    StructField("equipe", StringType(), True),
+    StructField("gerente_equipe", StringType(), True),
+    StructField("dpto_equipe", StringType(), True),
+    StructField("coord_dpto_equipe", StringType(), True),
+    StructField("ger_dpto_equipe", StringType(), True),
+    StructField("dpto_ger_equipe", StringType(), True),
+    StructField("severidade", StringType(), True),
+    StructField("dat_abertura", TimestampType(), True),
+    StructField("dat_status_concluido", TimestampType(), True),
+    StructField("dat_fechamento", TimestampType(), True),
+    StructField("data_normalizacao", TimestampType(), True),
+    StructField("status", StringType(), True),
+    StructField("classificacao", StringType(), True),
+    
+    # ✅ FORÇADO como STRING sempre (era a causa dos erros)
+    StructField("dat_estouro_sla", StringType(), True),
 
-df = spark.read \
+    StructField("num_duracao", IntegerType(), True),
+    StructField("duracao_sla", IntegerType(), True),
+    StructField("titulo", StringType(), True),
+    StructField("sla_violado", StringType(), True),
+])
+
+# Leitura
+raw_df = spark.read \
     .format("jdbc") \
     .option("url", jdbc_url) \
     .option("dbtable", query) \
@@ -72,18 +92,19 @@ df = spark.read \
     .option("driver", "com.microsoft.sqlserver.jdbc.SQLServerDriver") \
     .load()
 
-# Normaliza coluna de data e cria coluna de partição (ano, mes)
-df.show(5)
-df.printSchema()
-df = df.withColumn("dat_abertura_date", to_date(col("dat_abertura")))
-df = df.withColumn("year", date_format(col("dat_abertura_date"), "yyyy"))
-df = df.withColumn("month", date_format(col("dat_abertura_date"), "MM"))
+# Aplicar schema garantido
+df = spark.createDataFrame(raw_df.rdd, schema)
 
-# Coalesce para reduzir números de ficheiros (ajuste conforme tamanho)
+# Criar colunas de partição
+df = df.withColumn("year", year(col("dat_abertura"))) \
+       .withColumn("month", month(col("dat_abertura")))
+
+# Reduz número de arquivos (evita milhares de part files)
 df = df.coalesce(10)
 
-# Escreve parquet particionado
-output_path = s3_output.rstrip("/")
-df.write.mode("overwrite").partitionBy("year", "month").parquet(output_path)
+# Salvar em parquet particionado
+df.write.mode("overwrite") \
+    .partitionBy("year", "month") \
+    .parquet(s3_output.rstrip("/"))
 
 job.commit()
