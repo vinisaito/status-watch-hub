@@ -1,16 +1,1 @@
-{
-  "Version": "2012-10-17",
-  "Statement": [
-    {
-      "Effect": "Allow",
-      "Action": [
-        "s3:GetObject",
-        "s3:ListBucket"
-      ],
-      "Resource": [
-        "arn:aws:s3:::painel-monitoracao-administrativo-scripts",
-        "arn:aws:s3:::painel-monitoracao-administrativo-scripts/*"
-      ]
-    }
-  ]
-}
+Py4JJavaError: An error occurred while calling o111.parquet. java.lang.reflect.InvocationTargetException
