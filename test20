@@ -1,5 +1,2 @@
-SELECT *
-FROM sdm_cr_geral_mcs
-WHERE year = '2025' AND month = '02'
-ORDER BY dat_abertura DESC
-LIMIT 100;
+HIVE_BAD_DATA: Malformed Parquet file. Field dat_estouro_sla's type BINARY in parquet file s3://painel-monitoracao-administrativo-dados/dados/year=2025/month=04/part-00000-0e1d2140-e1a7-41cc-b6a9-a60aeff71392.c000.snappy.parquet is incompatible with type timestamp(3) defined in table schema [s3://painel-monitoracao-administrativo-dados/dados/year=2025/month=04/part-00000-0e1d2140-e1a7-41cc-b6a9-a60aeff71392.c000.snappy.parquet]
+Esta consulta foi executada no banco de dados "painel-monitoracao", a menos que tenha sido qualificada pela consulta. Publique a mensagem de erro em nosso fórum  ou entre em contato com suporte ao cliente  fornecendo o ID da consulta: b9fee145-7e5d-4d30-96c6-a775f3c15e15
