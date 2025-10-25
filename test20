@@ -1,1 +1,17 @@
-HIVE_BAD_DATA: Malformed Parquet file. Field num_duracao's type INT32 in parquet file s3://painel-monitoracao-administrativo-dados/dados/year=2025/month=06/part-00000-fc235667-3d54-428e-8c62-7a0093eba118.c000.snappy.parquet is incompatible with type double defined in table schema [s3://painel-monitoracao-administrativo-dados/dados/year=2025/month=06/part-00000-fc235667-3d54-428e-8c62-7a0093eba118.c000.snappy.parquet]
+DROP TABLE paineldados;
+
+CREATE EXTERNAL TABLE paineldados (
+  chamado STRING,
+  evento STRING,
+  status STRING,
+  num_duracao INT,
+  data_registro DATE,
+  operador STRING
+)
+PARTITIONED BY (
+  year STRING,
+  month STRING
+)
+STORED AS PARQUET
+LOCATION 's3://painel-monitoracao-administrativo-dados/dados/'
+;
