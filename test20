@@ -1,1 +1,135 @@
-An error occurred while calling o96.load. Incorrect syntax near the keyword 'WHERE'.
+# glue_job_parquet_last6months_final_v2.py
+import sys
+from datetime import datetime
+from dateutil.relativedelta import relativedelta
+from pyspark.context import SparkContext
+from awsglue.context import GlueContext
+from pyspark.sql.functions import col, to_date, date_format, year, month
+from awsglue.job import Job
+from pyspark.sql.types import IntegerType
+import os
+import logging
+
+# init
+sc = SparkContext.getOrCreate()
+glueContext = GlueContext(sc)
+spark = glueContext.spark_session
+job = Job(glueContext)
+
+# Params via env
+jdbc_url = os.environ.get("JDBC_URL", "jdbc:sqlserver://172.26.7.233:1433;databaseName=mdb_rep")
+db_user = os.environ.get("DB_USER", "")
+db_password = os.environ.get("DB_PASSWORD", "")
+s3_output = os.environ.get("S3_OUTPUT", "s3://painel-monitoracao-administrativo-dados/dados")
+# optional temp dir if needed in job params
+temp_dir = os.environ.get("GLUE_TEMP_DIR", None)
+
+# debug logs
+logging.getLogger("py4j").setLevel(logging.ERROR)
+logger = logging.getLogger("glue_job")
+logger.setLevel(logging.INFO)
+
+# compute cutoff
+six_months_ago = datetime.utcnow() - relativedelta(months=6)
+six_months_str = six_months_ago.strftime("%Y-%m-%d %H:%M:%S")
+
+# SQL (nota: sem parênteses externos; vamos usar .option("query", ...))
+sql = f"""
+SELECT
+    [num_chamado],
+    [equipe],
+    [gerente_equipe],
+    [dpto_equipe],
+    [coord_dpto_equipe],
+    [ger_dpto_equipe],
+    [dpto_ger_equipe],
+    [severidade],
+    [dat_abertura],
+    [dat_status_concluido],
+    [dat_fechamento],
+    [data_normalizacao],
+    [status],
+    [classificacao],
+    [dat_estouro_sla],
+    [num_duracao],
+    [duracao_sla],
+    [titulo],
+    [sla_violado]
+FROM [mdb_rep].[dbo].[sdm_cr_geral_mcs]
+WHERE dat_abertura >= '{six_months_str}'
+  AND (
+        (classificacao = 'Incidente' AND severidade IN ('3 - Média', '4 - Alta', '5 - Crítica'))
+     OR (classificacao = 'Solicitação' AND severidade = '4 - Alta')
+      )
+"""
+
+logger.info("SQL a ser usado na leitura (resumido): %s", sql[:500])
+
+# Read JDBC using "query" option (mais robusto para SQL Server)
+raw_df = (
+    spark.read.format("jdbc")
+    .option("url", jdbc_url)
+    .option("user", db_user)
+    .option("password", db_password)
+    .option("driver", "com.microsoft.sqlserver.jdbc.SQLServerDriver")
+    .option("fetchsize", "10000")
+    .option("query", sql)   # <-- USAR query em vez de dbtable para evitar problemas de parênteses/alias
+    .load()
+)
+
+logger.info("Leitura concluída. Linhas (preview):")
+raw_df.show(3, truncate=False)
+raw_df.printSchema()
+
+# === Normalização de tipos ===
+# Converter colunas de data para DATE (to_date aceita timestamp ou string com formato padrão)
+df = raw_df
+
+# Se alguma coluna de data vier como inteiro epoch, etc, você precisa tratar separadamente.
+# Aqui assumimos que as colunas vêm como strings ou timestamps parseáveis pelo to_date.
+date_cols = ["dat_abertura", "dat_status_concluido", "dat_fechamento", "data_normalizacao", "dat_estouro_sla"]
+for c in date_cols:
+    # aplica to_date apenas se a coluna existir; evita erro se o schema mudar
+    if c in df.columns:
+        df = df.withColumn(c, to_date(col(c)))
+
+# Normaliza numerics (se vierem como string)
+if "num_duracao" in df.columns:
+    df = df.withColumn("num_duracao", col("num_duracao").cast(IntegerType()))
+if "duracao_sla" in df.columns:
+    df = df.withColumn("duracao_sla", col("duracao_sla").cast(IntegerType()))
+
+# Forçar strings em colunas textuais (opcional, mas garante consistência)
+str_cols = ["equipe","gerente_equipe","dpto_equipe","coord_dpto_equipe","ger_dpto_equipe","dpto_ger_equipe",
+            "severidade","status","classificacao","titulo","sla_violado"]
+for c in str_cols:
+    if c in df.columns:
+        df = df.withColumn(c, col(c).cast("string"))
+
+# === Particionamento ===
+# cria year/month a partir de dat_abertura
+df = df.withColumn("year", date_format(col("dat_abertura"), "yyyy")) \
+       .withColumn("month", date_format(col("dat_abertura"), "MM"))
+
+# debug breve
+logger.info("Schema após normalizacao:")
+df.printSchema()
+logger.info("Preview apos normalizacao:")
+df.show(3, truncate=False)
+
+# Recomenda: apagar o conteúdo anterior do S3 manualmente antes da 1ª execução com este job
+output_path = s3_output.rstrip("/")
+
+# otimização: reduzir número de ficheiros por partição
+df = df.coalesce(10)
+
+# === Escrita final em Parquet particionado ===
+(df.write
+   .mode("overwrite")
+   .partitionBy("year", "month")
+   .parquet(output_path)
+)
+
+logger.info("Escrita concluída em: %s", output_path)
+
+job.commit()
