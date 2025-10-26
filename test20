@@ -1,9 +1,1 @@
-import sys
-from awsglue.utils import getResolvedOptions
-
-args = getResolvedOptions(sys.argv, ["JDBC_URL", "DB_USER", "DB_PASSWORD", "S3_OUTPUT"])
-
-jdbc_url = args["JDBC_URL"]
-db_user = args["DB_USER"]
-db_password = args["DB_PASSWORD"]
-s3_output = args["S3_OUTPUT"]
+A função de execução fornecida deve permitir que o AWS EventBridge Scheduler assuma a função.
