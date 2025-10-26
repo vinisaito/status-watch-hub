@@ -1,16 +1,16 @@
-{
-  "errorMessage": "Parameter validation failed:\nInvalid bucket name \"painel-monitoracao-administrativo-dados/apicache/\": Bucket name must match the regex \"^[a-zA-Z0-9.\\-_]{1,255}$\" or be an ARN matching the regex \"^arn:(aws).*:(s3|s3-object-lambda):[a-z\\-0-9]*:[0-9]{12}:accesspoint[/:][a-zA-Z0-9\\-.]{1,63}$|^arn:(aws).*:s3-outposts:[a-z\\-0-9]+:[0-9]{12}:outpost[/:][a-zA-Z0-9\\-]{1,63}[/:]accesspoint[/:][a-zA-Z0-9\\-]{1,63}$\"",
-  "errorType": "ParamValidationError",
-  "requestId": "8ac276cf-5dde-42f5-bc19-98b8c8ffc10f",
-  "stackTrace": [
-    "  File \"/var/task/lambda_function.py\", line 73, in lambda_handler\n    s3.put_object(\n",
-    "  File \"/var/lang/lib/python3.11/site-packages/botocore/client.py\", line 602, in _api_call\n    return self._make_api_call(operation_name, kwargs)\n",
-    "  File \"/var/lang/lib/python3.11/site-packages/botocore/context.py\", line 123, in wrapper\n    return func(*args, **kwargs)\n",
-    "  File \"/var/lang/lib/python3.11/site-packages/botocore/client.py\", line 1019, in _make_api_call\n    api_params = self._emit_api_params(\n",
-    "  File \"/var/lang/lib/python3.11/site-packages/botocore/client.py\", line 1138, in _emit_api_params\n    self.meta.events.emit(\n",
-    "  File \"/var/lang/lib/python3.11/site-packages/botocore/hooks.py\", line 412, in emit\n    return self._emitter.emit(aliased_event_name, **kwargs)\n",
-    "  File \"/var/lang/lib/python3.11/site-packages/botocore/hooks.py\", line 256, in emit\n    return self._emit(event_name, kwargs)\n",
-    "  File \"/var/lang/lib/python3.11/site-packages/botocore/hooks.py\", line 239, in _emit\n    response = handler(**kwargs)\n",
-    "  File \"/var/lang/lib/python3.11/site-packages/botocore/handlers.py\", line 321, in validate_bucket_name\n    raise ParamValidationError(report=error_msg)\n"
-  ]
-}
+import boto3
+import json
+
+s3 = boto3.client("s3")
+
+def lambda_handler(event, context):
+    obj = s3.get_object(
+        Bucket="painel-monitoracao-administrativo-dados",
+        Key="api_cache/dados.json"
+    )
+    data = json.loads(obj["Body"].read())
+
+    return {
+        "statusCode": 200,
+        "body": json.dumps(data)
+    }
