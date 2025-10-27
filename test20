@@ -1,29 +1,26 @@
-CREATE TABLE "painel-monitoracao".sdm_cr_geral_mcs_corrigida
-WITH (
-  format = 'PARQUET',
-  external_location = 's3://painel-monitoracao-administrativo-dados/dados_corrigidos/',
-  partitioned_by = ARRAY['year','month']
-) AS
-SELECT
-    num_chamado,
-    equipe,
-    gerente_equipe,
-    dpto_equipe,
-    coord_dpto_equipe,
-    ger_dpto_equipe,
-    dpto_ger_equipe,
-    severidade,
-    dat_abertura,
-    dat_status_concluido,
-    dat_fechamento,
-    data_normalizacao,
-    status,
-    classificacao,
-    CAST(dat_estouro_sla AS VARCHAR) AS dat_estouro_sla,  -- corrigido
-    CAST(num_duracao AS DOUBLE) AS num_duracao,           -- corrigido
-    duracao_sla,
-    titulo,
-    sla_violado,
-    year,
-    month
-FROM "painel-monitoracao".sdm_cr_geral_mcs;
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "AllowListBucket",
+      "Effect": "Allow",
+      "Action": [
+        "s3:ListBucket"
+      ],
+      "Resource": [
+        "arn:aws:s3:::painel-monitoracao-administrativo-athena"
+      ]
+    },
+    {
+      "Sid": "AllowWriteBucket",
+      "Effect": "Allow",
+      "Action": [
+        "s3:PutObject",
+        "s3:GetObject"
+      ],
+      "Resource": [
+        "arn:aws:s3:::painel-monitoracao-administrativo-athena/*"
+      ]
+    }
+  ]
+}
