@@ -1,1 +1,11 @@
-A função de execução fornecida deve permitir que o AWS EventBridge Scheduler assuma a função.
+{
+  "errorMessage": "An error occurred (InvalidRequestException) when calling the StartQueryExecution operation: Unable to verify/create output bucket painel-monitoracao-administrativo-athena",
+  "errorType": "InvalidRequestException",
+  "requestId": "26351f40-30ce-4cdc-9cc7-3b92b98f0cc0",
+  "stackTrace": [
+    "  File \"/var/task/lambda_function.py\", line 46, in lambda_handler\n    exec_id = athena.start_query_execution(\n",
+    "  File \"/var/lang/lib/python3.11/site-packages/botocore/client.py\", line 602, in _api_call\n    return self._make_api_call(operation_name, kwargs)\n",
+    "  File \"/var/lang/lib/python3.11/site-packages/botocore/context.py\", line 123, in wrapper\n    return func(*args, **kwargs)\n",
+    "  File \"/var/lang/lib/python3.11/site-packages/botocore/client.py\", line 1078, in _make_api_call\n    raise error_class(parsed_response, operation_name)\n"
+  ]
+}
