@@ -3,26 +3,15 @@
   "Statement": [
     {
       "Effect": "Allow",
-      "Action": [
-        "athena:StartQueryExecution",
-        "athena:GetQueryExecution",
-        "athena:GetQueryResults"
-      ],
-      "Resource": "*"
+      "Principal": { "Service": "athena.amazonaws.com" },
+      "Action": ["s3:GetBucketLocation", "s3:ListBucket"],
+      "Resource": "arn:aws:s3:::painel-monitoracao-administrativo-athena"
     },
     {
       "Effect": "Allow",
-      "Action": [
-        "s3:PutObject",
-        "s3:GetObject",
-        "s3:ListBucket"
-      ],
-      "Resource": [
-        "arn:aws:s3:::painel-monitoracao-administrativo-athena",
-        "arn:aws:s3:::painel-monitoracao-administrativo-athena/*",
-        "arn:aws:s3:::painel-monitoracao-administrativo-dados",
-        "arn:aws:s3:::painel-monitoracao-administrativo-dados/*"
-      ]
+      "Principal": { "Service": "athena.amazonaws.com" },
+      "Action": ["s3:PutObject"],
+      "Resource": "arn:aws:s3:::painel-monitoracao-administrativo-athena/*"
     }
   ]
 }
