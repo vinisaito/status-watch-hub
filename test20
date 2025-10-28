@@ -1,66 +1,114 @@
-import boto3
+import os
+import pyodbc
 import json
-import logging
-from datetime import datetime, timedelta
-
-# --- Configurações ---
-s3 = boto3.client("s3")
-logger = logging.getLogger()
-logger.setLevel(logging.INFO)
-
-CACHE_BUCKET = "painel-monitoracao-administrativo-dados"
-CACHE_PREFIX = "api_cache/dados_part_"
-SIGNED_URL_EXPIRATION = 3600  # segundos que o link ficará válido (1h por padrão)
+import time
+import boto3
+from datetime import datetime
+from botocore.exceptions import ClientError
 
 def lambda_handler(event, context):
+    start_total = time.time()
+    print("[INÍCIO] Execução da Lambda")
+
+    # Variáveis de ambiente
+    server = os.environ['DB_SERVER']
+    username = os.environ['DB_USER']
+    password = os.environ['DB_PASSWORD']
+    port = os.environ.get('DB_PORT', '1433')
+    database = 'mdb'
+    connections_table = os.environ['CONNECTIONS_TABLE']
+    ws_api_endpoint = os.environ['WS_API_ENDPOINT']  # ex: wss://abc123.execute-api.us-east-1.amazonaws.com/prod
+
+    dynamodb = boto3.resource('dynamodb')
+    table = dynamodb.Table(connections_table)
+
+    apigw = boto3.client('apigatewaymanagementapi', endpoint_url=ws_api_endpoint)
+
     try:
-        logger.info("Iniciando geração de URLs pré-assinadas...")
+        # Conexão com SQL Server
+        start_conexao = time.time()
+        connection_string = (
+            f'DRIVER={{ODBC Driver 18 for SQL Server}};'
+            f'SERVER={server},{port};'
+            f'DATABASE={database};'
+            f'UID={username};'
+            f'PWD={password};'
+            f'Encrypt=no;TrustServerCertificate=yes;CHARSET=UTF8;'
+        )
+        conn = pyodbc.connect(connection_string, timeout=5)
+        cursor = conn.cursor()
+        print(f"[TEMPO] Conexão com o banco: {time.time() - start_conexao:.2f}s")
 
-        # Lista todos os arquivos de cache
-        response = s3.list_objects_v2(Bucket=CACHE_BUCKET, Prefix=CACHE_PREFIX)
-        if "Contents" not in response:
-            return {
-                "statusCode": 404,
-                "body": json.dumps({"error": "Nenhum arquivo encontrado"})
-            }
+        # Executa consulta SQL
+        query = """
+            SELECT [chamado]
+                  ,[tipo_chamado]
+                  ,[status_chamado]
+                  ,[abertura_chamado]
+                  ,[resumo_chamado]
+                  ,[grupo_chamado]
+                  ,[severidade_chamado]
+                  ,[acionado]
+                  ,[link_chamado]
+            FROM [mdb].[dbo].[view_ciops_acionamento]
+            WHERE TRY_CONVERT(DATETIME, abertura_chamado, 103) >= DATEADD(HOUR, -10, GETDATE());
+        """
+        start_query = time.time()
+        cursor.execute(query)
+        rows = cursor.fetchall()
+        print(f"[TEMPO] Execução da query: {time.time() - start_query:.2f}s")
 
-        # Ordena os arquivos por parte
-        files = sorted([obj["Key"] for obj in response["Contents"]])
+        # Processamento dos dados
+        start_process = time.time()
+        columns = [column[0] for column in cursor.description]
+        results = []
+        for row in rows:
+            row_dict = dict(zip(columns, row))
+            if isinstance(row_dict.get("abertura_chamado"), datetime):
+                row_dict["abertura_chamado"] = row_dict["abertura_chamado"].strftime("%Y-%m-%dT%H:%M:%S")
+            results.append(row_dict)
+        print(f"[TEMPO] Processamento dos dados: {time.time() - start_process:.2f}s")
 
-        # Gera URLs pré-assinadas
-        presigned_urls = []
-        for key in files:
-            url = s3.generate_presigned_url(
-                ClientMethod="get_object",
-                Params={"Bucket": CACHE_BUCKET, "Key": key},
-                ExpiresIn=SIGNED_URL_EXPIRATION
-            )
-            presigned_urls.append({
-                "part": key.split("_")[-1].replace(".json", ""),
-                "url": url
-            })
+        cursor.close()
+        conn.close()
 
-        logger.info(f"Geradas {len(presigned_urls)} URLs.")
+        # Mensagem JSON final
+        message = {
+            "action": "getChamados",
+            "data": results
+        }
 
-        # Retorna apenas as URLs
+        # Envia mensagem para todas conexões ativas
+        start_send = time.time()
+        connections = table.scan().get("Items", [])
+        print(f"[INFO] Enviando para {len(connections)} conexões")
+
+        for conn_item in connections:
+            connection_id = conn_item.get("connectionId")
+            try:
+                apigw.post_to_connection(
+                    ConnectionId=connection_id,
+                    Data=json.dumps(message, ensure_ascii=False).encode('utf-8')
+                )
+            except ClientError as e:
+                if e.response['Error']['Code'] == 'GoneException':
+                    # Conexão não existe mais → remove do DynamoDB
+                    print(f"[REMOVENDO] Conexão expirada: {connection_id}")
+                    table.delete_item(Key={'connectionId': connection_id})
+                else:
+                    print(f"[ERRO envio] {connection_id}: {e}")
+
+        print(f"[TEMPO] Envio WS: {time.time() - start_send:.2f}s")
+        print(f"[TOTAL] Tempo total da Lambda: {time.time() - start_total:.2f}s")
+
         return {
             "statusCode": 200,
-            "headers": {
-                "Access-Control-Allow-Origin": "*",
-                "Access-Control-Allow-Methods": "GET,OPTIONS",
-                "Access-Control-Allow-Headers": "Content-Type",
-                "Content-Type": "application/json",
-            },
-            "body": json.dumps({
-                "status": "ok",
-                "total_parts": len(presigned_urls),
-                "signed_urls": presigned_urls
-            }, ensure_ascii=False),
+            "body": json.dumps({"message": "Chamados enviados via WebSocket"})
         }
 
     except Exception as e:
-        logger.error(f"Erro: {str(e)}")
+        print("[ERRO]", str(e))
         return {
             "statusCode": 500,
-            "body": json.dumps({"error": str(e)}),
+            "body": json.dumps({"error": str(e)}, ensure_ascii=False)
         }
