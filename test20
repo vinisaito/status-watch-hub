@@ -1,1 +1,132 @@
-Executando função: falha (logs ) Detalhes{ "errorMessage": "Response payload size exceeded maximum allowed payload size (6291556 bytes).", "errorType": "Function.ResponseSizeTooLarge" }ResumoCódigo SHA-256gmC5Pv1Nx8V2SoURJ0wQyzvw0TCGOZmou6xmnrWEWQ8=Tempo de execuçãohá 3 segundosVersão da função$LATESTID da solicitação36f0400d-2e20-4fa9-ae14-477d9e99a108Duração2499.81 msPeríodo cobrado2500 msRecursos configurados1024 MBMemória máxima usada235 MBResultado de saída do logThe area below shows the last 4 KB of the execution log. Click here  to view the corresponding CloudWatch log group.START RequestId: 36f0400d-2e20-4fa9-ae14-477d9e99a108 Version: $LATEST [INFO] 2025-10-28T12:46:38.001Z 36f0400d-2e20-4fa9-ae14-477d9e99a108 Iniciando leitura dos arquivos de cache... [INFO] 2025-10-28T12:46:38.117Z 36f0400d-2e20-4fa9-ae14-477d9e99a108 Lendo api_cache/dados_part_006.json [INFO] 2025-10-28T12:46:38.871Z 36f0400d-2e20-4fa9-ae14-477d9e99a108 Total de registros retornados: 37550 [ERROR] [1761655599995] LAMBDA_RUNTIME Failed to post handler success response. Http response code: 413. Traceback (most recent call last): File "/var/runtime/bootstrap.py", line 63, in main() File "/var/runtime/bootstrap.py", line 60, in main awslambdaricmain.main([os.environ["LAMBDA_TASK_ROOT"], os.environ["_HANDLER"]]) File "/var/lang/lib/python3.11/site-packages/awslambdaric/__main__.py", line 21, in main bootstrap.run(app_root, handler, lambda_runtime_api_addr) File "/var/lang/lib/python3.11/site-packages/awslambdaric/bootstrap.py", line 529, in run handle_event_request( File "/var/lang/lib/python3.11/site-packages/awslambdaric/bootstrap.py", line 210, in handle_event_request lambda_runtime_client.post_invocation_result( File "/var/lang/lib/python3.11/site-packages/awslambdaric/lambda_runtime_client.py", line 148, in post_invocation_result runtime_client.post_invocation_result( RuntimeError: Failed to post invocation response END RequestId: 36f0400d-2e20-4fa9-ae14-477d9e99a108 REPORT RequestId: 36f0400d-2e20-4fa9-ae14-477d9e99a108 Duration: 2499.81 ms Billed Duration: 2500 ms Memory Size: 1024 MB Max Memory Used: 235 MB Status: error Error Type: Runtime.ExitError
+import boto3
+import json
+import time
+import logging
+
+# --- Config ---
+athena = boto3.client("athena", region_name="us-east-1")
+s3 = boto3.client("s3")
+
+DATABASE = "painel-monitoracao"
+WORKGROUP = "painel_monitoracao"
+OUTPUT_BUCKET = "s3://painel-monitoracao-administrativo-dados/athena_lambda/"
+CACHE_BUCKET = "painel-monitoracao-administrativo-dados"
+CACHE_PREFIX = "api_cache/dados_part_"
+
+QUERY = """
+SELECT 
+    num_chamado,
+    equipe,
+    gerente_equipe,
+    dpto_equipe,
+    coord_dpto_equipe,
+    ger_dpto_equipe,
+    dpto_ger_equipe,
+    severidade,
+    dat_abertura,
+    dat_status_concluido,
+    dat_fechamento,
+    data_normalizacao,
+    status,
+    classificacao,
+    dat_estouro_sla,
+    num_duracao,
+    duracao_sla,
+    titulo,
+    sla_violado
+FROM painel_monitoracao_administrativo
+WHERE dat_abertura >= date_add('month', -6, current_date)
+  AND (
+        (classificacao = 'Incidente' AND severidade IN ('3 - Média', '4 - Alta', '5 - Crítica'))
+     OR (classificacao = 'Solicitação' AND severidade = '4 - Alta')
+      )
+ORDER BY num_chamado DESC
+"""
+
+logger = logging.getLogger()
+logger.setLevel(logging.INFO)
+
+# Número de registros por arquivo de cache
+CHUNK_SIZE = 50000
+
+def lambda_handler(event, context):
+    logger.info("Iniciando execução Athena...")
+
+    # Inicia query
+    exec_id = athena.start_query_execution(
+        QueryString=QUERY,
+        QueryExecutionContext={"Database": DATABASE},
+        ResultConfiguration={"OutputLocation": OUTPUT_BUCKET},
+        WorkGroup=WORKGROUP
+    )["QueryExecutionId"]
+
+    # Aguarda conclusão
+    while True:
+        status = athena.get_query_execution(QueryExecutionId=exec_id)["QueryExecution"]["Status"]["State"]
+        if status in ["SUCCEEDED", "FAILED", "CANCELLED"]:
+            break
+        time.sleep(3)
+
+    if status != "SUCCEEDED":
+        raise Exception(f"Athena query failed: {status}")
+
+    logger.info("Consulta Athena concluída com sucesso.")
+
+    # --- Recupera resultados paginados ---
+    headers = []
+    results = []
+    total_count = 0
+    part_number = 1
+    s3_files = []
+    next_token = None
+
+    while True:
+        response = athena.get_query_results(QueryExecutionId=exec_id, NextToken=next_token) if next_token else athena.get_query_results(QueryExecutionId=exec_id)
+
+        if not headers:
+            headers = [c["Label"] for c in response["ResultSet"]["ResultSetMetadata"]["ColumnInfo"]]
+
+        for row in response["ResultSet"]["Rows"][1:]:
+            values = [v.get("VarCharValue") for v in row["Data"]]
+            results.append(dict(zip(headers, values)))
+            total_count += 1
+
+            # salva chunk
+            if len(results) >= CHUNK_SIZE:
+                key = f"{CACHE_PREFIX}{part_number:03d}.json"
+                s3.put_object(
+                    Bucket=CACHE_BUCKET,
+                    Key=key,
+                    Body=json.dumps(results, ensure_ascii=False),
+                    ContentType="application/json"
+                )
+                logger.info(f"Salvou {len(results)} registros em {key}")
+                s3_files.append(key)
+                results.clear()
+                part_number += 1
+
+        next_token = response.get("NextToken")
+        if not next_token:
+            break
+
+    # salva os dados restantes
+    if results:
+        key = f"{CACHE_PREFIX}{part_number:03d}.json"
+        s3.put_object(
+            Bucket=CACHE_BUCKET,
+            Key=key,
+            Body=json.dumps(results, ensure_ascii=False),
+            ContentType="application/json"
+        )
+        logger.info(f"Salvou {len(results)} registros finais em {key}")
+        s3_files.append(key)
+
+    logger.info(f"Processo concluído. Total de {total_count} registros em {len(s3_files)} arquivos.")
+
+    # Retorna apenas metadados + lista de arquivos S3
+    return {
+        "status": "ok",
+        "total_records": total_count,
+        "parts": len(s3_files),
+        "s3_files": [f"s3://{CACHE_BUCKET}/{k}" for k in s3_files]
+    }
