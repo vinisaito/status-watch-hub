@@ -1,13 +1,15 @@
 import boto3
 import json
 import time
+import logging
 
+# Configurações
 athena = boto3.client("athena", region_name="us-east-1")
 s3 = boto3.client("s3")
 
 DATABASE = "painel-monitoracao"
 WORKGROUP = "painel_monitoracao"
-OUTPUT_BUCKET = "s3://painel-monitoracao-administrativo-dados/athena_lambda"
+OUTPUT_BUCKET = "s3://painel-monitoracao-administrativo-dados/athena_lambda/"
 CACHE_BUCKET = "painel-monitoracao-administrativo-dados"
 CACHE_KEY = "api_cache/dados.json"
 
@@ -41,8 +43,14 @@ WHERE dat_abertura >= date_add('month', -6, current_date)
 ORDER BY num_chamado DESC
 """
 
-def lambda_handler(event, context):
+# Logger
+logger = logging.getLogger()
+logger.setLevel(logging.INFO)
 
+def lambda_handler(event, context):
+    logger.info("Iniciando execução Athena...")
+
+    # 1. Inicia execução no Athena
     exec_id = athena.start_query_execution(
         QueryString=QUERY,
         QueryExecutionContext={"Database": DATABASE},
@@ -50,31 +58,50 @@ def lambda_handler(event, context):
         WorkGroup=WORKGROUP
     )["QueryExecutionId"]
 
-    # Aguarda Athena terminar
+    # 2. Espera a query terminar
     while True:
-        state = athena.get_query_execution(QueryExecutionId=exec_id)["QueryExecution"]["Status"]["State"]
-        if state in ["SUCCEEDED", "FAILED", "CANCELLED"]:
+        status = athena.get_query_execution(QueryExecutionId=exec_id)["QueryExecution"]["Status"]["State"]
+        if status in ["SUCCEEDED", "FAILED", "CANCELLED"]:
             break
-        time.sleep(2)
+        time.sleep(3)
 
-    if state != "SUCCEEDED":
-        raise Exception(f"Athena query failed: {state}")
+    if status != "SUCCEEDED":
+        raise Exception(f"Athena query failed: {status}")
 
-    # Busca resultado
-    result = athena.get_query_results(QueryExecutionId=exec_id)
+    logger.info("Consulta Athena concluída com sucesso.")
 
-    headers = [c["Label"] for c in result["ResultSet"]["ResultSetMetadata"]["ColumnInfo"]]
-    rows = []
+    # 3. Paginação: busca todas as páginas de resultados
+    results = []
+    next_token = None
+    headers = []
 
-    for r in result["ResultSet"]["Rows"][1:]:
-        values = [v.get("VarCharValue") for v in r["Data"]]
-        rows.append(dict(zip(headers, values)))
+    while True:
+        if next_token:
+            response = athena.get_query_results(QueryExecutionId=exec_id, NextToken=next_token)
+        else:
+            response = athena.get_query_results(QueryExecutionId=exec_id)
 
+        if not headers:
+            headers = [col["Label"] for col in response["ResultSet"]["ResultSetMetadata"]["ColumnInfo"]]
+
+        for row in response["ResultSet"]["Rows"][1:]:  # Pula cabeçalho
+            data = [v.get("VarCharValue") for v in row["Data"]]
+            results.append(dict(zip(headers, data)))
+
+        next_token = response.get("NextToken")
+        if not next_token:
+            break  # Última página
+
+    logger.info(f"Total de registros coletados: {len(results)}")
+
+    # 4. Salva JSON completo no S3
     s3.put_object(
         Bucket=CACHE_BUCKET,
         Key=CACHE_KEY,
-        Body=json.dumps(rows),
+        Body=json.dumps(results, ensure_ascii=False),
         ContentType="application/json"
     )
 
-    return {"status": "updated", "count": len(rows)}
+    logger.info(f"JSON salvo com sucesso em s3://{CACHE_BUCKET}/{CACHE_KEY}")
+
+    return {"status": "ok", "total": len(results)}
