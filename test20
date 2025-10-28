@@ -3,7 +3,6 @@ import json
 import time
 import logging
 
-# Configurações
 athena = boto3.client("athena", region_name="us-east-1")
 s3 = boto3.client("s3")
 
@@ -11,7 +10,7 @@ DATABASE = "painel-monitoracao"
 WORKGROUP = "painel_monitoracao"
 OUTPUT_BUCKET = "s3://painel-monitoracao-administrativo-dados/athena_lambda/"
 CACHE_BUCKET = "painel-monitoracao-administrativo-dados"
-CACHE_KEY = "api_cache/dados.json"
+CACHE_PREFIX = "api_cache/dados_part_"
 
 QUERY = """
 SELECT 
@@ -43,14 +42,14 @@ WHERE dat_abertura >= date_add('month', -6, current_date)
 ORDER BY num_chamado DESC
 """
 
-# Logger
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
+
+CHUNK_SIZE = 50000  # número de registros por arquivo
 
 def lambda_handler(event, context):
     logger.info("Iniciando execução Athena...")
 
-    # 1. Inicia execução no Athena
     exec_id = athena.start_query_execution(
         QueryString=QUERY,
         QueryExecutionContext={"Database": DATABASE},
@@ -58,7 +57,6 @@ def lambda_handler(event, context):
         WorkGroup=WORKGROUP
     )["QueryExecutionId"]
 
-    # 2. Espera a query terminar
     while True:
         status = athena.get_query_execution(QueryExecutionId=exec_id)["QueryExecution"]["Status"]["State"]
         if status in ["SUCCEEDED", "FAILED", "CANCELLED"]:
@@ -70,10 +68,11 @@ def lambda_handler(event, context):
 
     logger.info("Consulta Athena concluída com sucesso.")
 
-    # 3. Paginação: busca todas as páginas de resultados
     results = []
     next_token = None
     headers = []
+    total_count = 0
+    part_number = 1
 
     while True:
         if next_token:
@@ -84,24 +83,39 @@ def lambda_handler(event, context):
         if not headers:
             headers = [col["Label"] for col in response["ResultSet"]["ResultSetMetadata"]["ColumnInfo"]]
 
-        for row in response["ResultSet"]["Rows"][1:]:  # Pula cabeçalho
+        for row in response["ResultSet"]["Rows"][1:]:
             data = [v.get("VarCharValue") for v in row["Data"]]
             results.append(dict(zip(headers, data)))
+            total_count += 1
+
+            # Salva em partes
+            if len(results) >= CHUNK_SIZE:
+                key = f"{CACHE_PREFIX}{part_number:03d}.json"
+                s3.put_object(
+                    Bucket=CACHE_BUCKET,
+                    Key=key,
+                    Body=json.dumps(results, ensure_ascii=False),
+                    ContentType="application/json"
+                )
+                logger.info(f"Salvou {len(results)} registros em {key}")
+                results.clear()
+                part_number += 1
 
         next_token = response.get("NextToken")
         if not next_token:
-            break  # Última página
+            break
 
-    logger.info(f"Total de registros coletados: {len(results)}")
+    # salva o restante
+    if results:
+        key = f"{CACHE_PREFIX}{part_number:03d}.json"
+        s3.put_object(
+            Bucket=CACHE_BUCKET,
+            Key=key,
+            Body=json.dumps(results, ensure_ascii=False),
+            ContentType="application/json"
+        )
+        logger.info(f"Salvou {len(results)} registros finais em {key}")
 
-    # 4. Salva JSON completo no S3
-    s3.put_object(
-        Bucket=CACHE_BUCKET,
-        Key=CACHE_KEY,
-        Body=json.dumps(results, ensure_ascii=False),
-        ContentType="application/json"
-    )
+    logger.info(f"Processo concluído. Total de {total_count} registros em {part_number} partes.")
 
-    logger.info(f"JSON salvo com sucesso em s3://{CACHE_BUCKET}/{CACHE_KEY}")
-
-    return {"status": "ok", "total": len(results)}
+    return {"status": "ok", "total": total_count, "parts": part_number}
