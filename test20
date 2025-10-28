@@ -12,6 +12,7 @@ WORKGROUP = "painel_monitoracao"
 OUTPUT_BUCKET = "s3://painel-monitoracao-administrativo-dados/athena_lambda/"
 CACHE_BUCKET = "painel-monitoracao-administrativo-dados"
 CACHE_PREFIX = "api_cache/dados_part_"
+INDEX_KEY = "api_cache/index.json"
 
 QUERY = """
 SELECT 
@@ -46,13 +47,12 @@ ORDER BY num_chamado DESC
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
-# Número de registros por arquivo de cache
-CHUNK_SIZE = 50000
+CHUNK_SIZE = 50000  # Número de registros por arquivo
 
 def lambda_handler(event, context):
     logger.info("Iniciando execução Athena...")
 
-    # Inicia query
+    # Executa query
     exec_id = athena.start_query_execution(
         QueryString=QUERY,
         QueryExecutionContext={"Database": DATABASE},
@@ -72,7 +72,7 @@ def lambda_handler(event, context):
 
     logger.info("Consulta Athena concluída com sucesso.")
 
-    # --- Recupera resultados paginados ---
+    # --- Paginação ---
     headers = []
     results = []
     total_count = 0
@@ -91,7 +91,6 @@ def lambda_handler(event, context):
             results.append(dict(zip(headers, values)))
             total_count += 1
 
-            # salva chunk
             if len(results) >= CHUNK_SIZE:
                 key = f"{CACHE_PREFIX}{part_number:03d}.json"
                 s3.put_object(
@@ -109,7 +108,7 @@ def lambda_handler(event, context):
         if not next_token:
             break
 
-    # salva os dados restantes
+    # Salva últimos registros restantes
     if results:
         key = f"{CACHE_PREFIX}{part_number:03d}.json"
         s3.put_object(
@@ -121,12 +120,12 @@ def lambda_handler(event, context):
         logger.info(f"Salvou {len(results)} registros finais em {key}")
         s3_files.append(key)
 
-    # salva index.json para controle
-    index_key = f"{CACHE_PREFIX}index.json"
+    # Salva índice com lista de partes
+    index_data = {"parts": len(s3_files), "files": s3_files}
     s3.put_object(
         Bucket=CACHE_BUCKET,
-        Key=index_key,
-        Body=json.dumps({"parts": len(s3_files)}, ensure_ascii=False),
+        Key=INDEX_KEY,
+        Body=json.dumps(index_data, ensure_ascii=False),
         ContentType="application/json"
     )
 
