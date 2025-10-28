@@ -1,1 +1,80 @@
-HIVE_CURSOR_ERROR: Row is not a valid JSON Object - JSONException: Expected a ',' or ']' at 4 [character 5 line 1]
+import boto3
+import json
+import time
+
+athena = boto3.client("athena", region_name="us-east-1")
+s3 = boto3.client("s3")
+
+DATABASE = "painel-monitoracao"
+WORKGROUP = "painel_monitoracao"
+OUTPUT_BUCKET = "s3://painel-monitoracao-administrativo-athena/"
+CACHE_BUCKET = "painel-monitoracao-administrativo-dados"
+CACHE_KEY = "api_cache/dados.json"
+
+QUERY = """
+SELECT 
+    num_chamado,
+    equipe,
+    gerente_equipe,
+    dpto_equipe,
+    coord_dpto_equipe,
+    ger_dpto_equipe,
+    dpto_ger_equipe,
+    severidade,
+    dat_abertura,
+    dat_status_concluido,
+    dat_fechamento,
+    data_normalizacao,
+    status,
+    classificacao,
+    dat_estouro_sla,
+    num_duracao,
+    duracao_sla,
+    titulo,
+    sla_violado
+FROM painel_monitoracao_administrativo
+WHERE dat_abertura >= date_add('month', -6, current_date)
+  AND (
+        (classificacao = 'Incidente' AND severidade IN ('3 - Média', '4 - Alta', '5 - Crítica'))
+     OR (classificacao = 'Solicitação' AND severidade = '4 - Alta')
+      )
+ORDER BY num_chamado DESC
+"""
+
+def lambda_handler(event, context):
+
+    exec_id = athena.start_query_execution(
+        QueryString=QUERY,
+        QueryExecutionContext={"Database": DATABASE},
+        ResultConfiguration={"OutputLocation": OUTPUT_BUCKET},
+        WorkGroup=WORKGROUP
+    )["QueryExecutionId"]
+
+    # Aguarda Athena terminar
+    while True:
+        state = athena.get_query_execution(QueryExecutionId=exec_id)["QueryExecution"]["Status"]["State"]
+        if state in ["SUCCEEDED", "FAILED", "CANCELLED"]:
+            break
+        time.sleep(2)
+
+    if state != "SUCCEEDED":
+        raise Exception(f"Athena query failed: {state}")
+
+    # Busca resultado
+    result = athena.get_query_results(QueryExecutionId=exec_id)
+
+    headers = [c["Label"] for c in result["ResultSet"]["ResultSetMetadata"]["ColumnInfo"]]
+    rows = []
+
+    for r in result["ResultSet"]["Rows"][1:]:
+        values = [v.get("VarCharValue") for v in r["Data"]]
+        rows.append(dict(zip(headers, values)))
+
+    s3.put_object(
+        Bucket=CACHE_BUCKET,
+        Key=CACHE_KEY,
+        Body=json.dumps(rows),
+        ContentType="application/json"
+    )
+
+    return {"status": "updated", "count": len(rows)}
