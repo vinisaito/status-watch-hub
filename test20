@@ -1,41 +1,48 @@
 import boto3
 import json
 import logging
+from datetime import datetime, timedelta
 
+# --- Configurações ---
 s3 = boto3.client("s3")
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
 CACHE_BUCKET = "painel-monitoracao-administrativo-dados"
-INDEX_KEY = "api_cache/index.json"
+CACHE_PREFIX = "api_cache/dados_part_"
+SIGNED_URL_EXPIRATION = 3600  # segundos que o link ficará válido (1h por padrão)
 
 def lambda_handler(event, context):
     try:
-        # Recebe parâmetro do front-end: part (opcional)
-        part = int(event.get("queryStringParameters", {}).get("part", 1))
-        logger.info(f"Solicitada a parte {part}")
+        logger.info("Iniciando geração de URLs pré-assinadas...")
 
-        # Lê índice
-        index_obj = s3.get_object(Bucket=CACHE_BUCKET, Key=INDEX_KEY)
-        index_data = json.loads(index_obj["Body"].read().decode("utf-8"))
-
-        total_parts = index_data["parts"]
-        files = index_data["files"]
-
-        if part < 1 or part > total_parts:
+        # Lista todos os arquivos de cache
+        response = s3.list_objects_v2(Bucket=CACHE_BUCKET, Prefix=CACHE_PREFIX)
+        if "Contents" not in response:
             return {
-                "statusCode": 400,
-                "body": json.dumps({"error": f"Part inválida. Deve ser entre 1 e {total_parts}"})
+                "statusCode": 404,
+                "body": json.dumps({"error": "Nenhum arquivo encontrado"})
             }
 
-        # Lê arquivo solicitado
-        key = files[part - 1]
-        logger.info(f"Lendo arquivo {key}")
-        obj = s3.get_object(Bucket=CACHE_BUCKET, Key=key)
-        data = json.loads(obj["Body"].read().decode("utf-8"))
+        # Ordena os arquivos por parte
+        files = sorted([obj["Key"] for obj in response["Contents"]])
 
-        logger.info(f"Registros retornados: {len(data)}")
+        # Gera URLs pré-assinadas
+        presigned_urls = []
+        for key in files:
+            url = s3.generate_presigned_url(
+                ClientMethod="get_object",
+                Params={"Bucket": CACHE_BUCKET, "Key": key},
+                ExpiresIn=SIGNED_URL_EXPIRATION
+            )
+            presigned_urls.append({
+                "part": key.split("_")[-1].replace(".json", ""),
+                "url": url
+            })
 
+        logger.info(f"Geradas {len(presigned_urls)} URLs.")
+
+        # Retorna apenas as URLs
         return {
             "statusCode": 200,
             "headers": {
@@ -44,12 +51,16 @@ def lambda_handler(event, context):
                 "Access-Control-Allow-Headers": "Content-Type",
                 "Content-Type": "application/json",
             },
-            "body": json.dumps(data, ensure_ascii=False)
+            "body": json.dumps({
+                "status": "ok",
+                "total_parts": len(presigned_urls),
+                "signed_urls": presigned_urls
+            }, ensure_ascii=False),
         }
 
     except Exception as e:
         logger.error(f"Erro: {str(e)}")
         return {
             "statusCode": 500,
-            "body": json.dumps({"error": str(e)})
+            "body": json.dumps({"error": str(e)}),
         }
