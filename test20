@@ -1,17 +1,19 @@
+O athena e o glue esta funcionando
+porem, a lambda que gera o json não esta funcionando muito bem
+
+A Lambda esta gerando um csv no /athena que traz todos os dados
+mas o json do /api_cache só traz 999 registros
+
 import boto3
 import json
 import time
-import csv
-import io
-import logging
 
-# --- Configurações ---
 athena = boto3.client("athena", region_name="us-east-1")
 s3 = boto3.client("s3")
 
 DATABASE = "painel-monitoracao"
 WORKGROUP = "painel_monitoracao"
-OUTPUT_BUCKET = "painel-monitoracao-administrativo-athena"
+OUTPUT_BUCKET = "s3://painel-monitoracao-administrativo-athena/"
 CACHE_BUCKET = "painel-monitoracao-administrativo-dados"
 CACHE_KEY = "api_cache/dados.json"
 
@@ -45,57 +47,40 @@ WHERE dat_abertura >= date_add('month', -6, current_date)
 ORDER BY num_chamado DESC
 """
 
-# --- Logger ---
-logger = logging.getLogger()
-logger.setLevel(logging.INFO)
-
 def lambda_handler(event, context):
-    try:
-        logger.info("Iniciando execução da query Athena...")
 
-        # Inicia execução no Athena
-        exec_id = athena.start_query_execution(
-            QueryString=QUERY,
-            QueryExecutionContext={"Database": DATABASE},
-            ResultConfiguration={"OutputLocation": f"s3://{OUTPUT_BUCKET}/"},
-            WorkGroup=WORKGROUP
-        )["QueryExecutionId"]
+    exec_id = athena.start_query_execution(
+        QueryString=QUERY,
+        QueryExecutionContext={"Database": DATABASE},
+        ResultConfiguration={"OutputLocation": OUTPUT_BUCKET},
+        WorkGroup=WORKGROUP
+    )["QueryExecutionId"]
 
-        # Espera até a query finalizar
-        while True:
-            status = athena.get_query_execution(QueryExecutionId=exec_id)["QueryExecution"]["Status"]["State"]
-            if status in ["SUCCEEDED", "FAILED", "CANCELLED"]:
-                break
-            time.sleep(3)
+    # Aguarda Athena terminar
+    while True:
+        state = athena.get_query_execution(QueryExecutionId=exec_id)["QueryExecution"]["Status"]["State"]
+        if state in ["SUCCEEDED", "FAILED", "CANCELLED"]:
+            break
+        time.sleep(2)
 
-        if status != "SUCCEEDED":
-            raise Exception(f"Athena query failed: {status}")
+    if state != "SUCCEEDED":
+        raise Exception(f"Athena query failed: {state}")
 
-        logger.info("Consulta Athena concluída com sucesso.")
+    # Busca resultado
+    result = athena.get_query_results(QueryExecutionId=exec_id)
 
-        # Athena salva o resultado CSV automaticamente no bucket de OUTPUT
-        result_path = f"{exec_id}.csv"
-        logger.info(f"Lendo arquivo CSV: {result_path}")
+    headers = [c["Label"] for c in result["ResultSet"]["ResultSetMetadata"]["ColumnInfo"]]
+    rows = []
 
-        # Lê o CSV diretamente do S3
-        obj = s3.get_object(Bucket=OUTPUT_BUCKET, Key=result_path)
-        content = obj["Body"].read().decode("utf-8")
-        csv_reader = csv.DictReader(io.StringIO(content))
+    for r in result["ResultSet"]["Rows"][1:]:
+        values = [v.get("VarCharValue") for v in r["Data"]]
+        rows.append(dict(zip(headers, values)))
 
-        rows = list(csv_reader)
-        logger.info(f"Total de registros lidos: {len(rows)}")
+    s3.put_object(
+        Bucket=CACHE_BUCKET,
+        Key=CACHE_KEY,
+        Body=json.dumps(rows),
+        ContentType="application/json"
+    )
 
-        # Salva no bucket de cache em formato JSON
-        s3.put_object(
-            Bucket=CACHE_BUCKET,
-            Key=CACHE_KEY,
-            Body=json.dumps(rows, ensure_ascii=False),
-            ContentType="application/json"
-        )
-
-        logger.info(f"Arquivo JSON salvo com sucesso em s3://{CACHE_BUCKET}/{CACHE_KEY}")
-        return {"status": "ok", "rows": len(rows)}
-
-    except Exception as e:
-        logger.exception("Erro ao processar Lambda:")
-        return {"error": str(e)}
+    return {"status": "updated", "count": len(rows)}
