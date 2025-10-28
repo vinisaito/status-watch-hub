@@ -1,57 +1,140 @@
 import boto3
 import json
-import os
+import time
 import logging
 
+# --- Config ---
+athena = boto3.client("athena", region_name="us-east-1")
 s3 = boto3.client("s3")
+
+DATABASE = "painel-monitoracao"
+WORKGROUP = "painel_monitoracao"
+OUTPUT_BUCKET = "s3://painel-monitoracao-administrativo-dados/athena_lambda/"
+CACHE_BUCKET = "painel-monitoracao-administrativo-dados"
+CACHE_PREFIX = "api_cache/dados_part_"
+
+QUERY = """
+SELECT 
+    num_chamado,
+    equipe,
+    gerente_equipe,
+    dpto_equipe,
+    coord_dpto_equipe,
+    ger_dpto_equipe,
+    dpto_ger_equipe,
+    severidade,
+    dat_abertura,
+    dat_status_concluido,
+    dat_fechamento,
+    data_normalizacao,
+    status,
+    classificacao,
+    dat_estouro_sla,
+    num_duracao,
+    duracao_sla,
+    titulo,
+    sla_violado
+FROM painel_monitoracao_administrativo
+WHERE dat_abertura >= date_add('month', -6, current_date)
+  AND (
+        (classificacao = 'Incidente' AND severidade IN ('3 - Média', '4 - Alta', '5 - Crítica'))
+     OR (classificacao = 'Solicitação' AND severidade = '4 - Alta')
+      )
+ORDER BY num_chamado DESC
+"""
+
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
-# Configurações
-CACHE_BUCKET = "painel-monitoracao-administrativo-dados"
-CACHE_PREFIX = "api_cache/dados_part_"
-MAX_PARTS = 10  # limite opcional para não retornar tudo de uma vez (ajuste se quiser)
+# Número de registros por arquivo de cache
+CHUNK_SIZE = 50000
 
 def lambda_handler(event, context):
-    try:
-        logger.info("Iniciando leitura dos arquivos de cache...")
+    logger.info("Iniciando execução Athena...")
 
-        # Lista todos os arquivos gerados pela Lambda 1
-        response = s3.list_objects_v2(Bucket=CACHE_BUCKET, Prefix=CACHE_PREFIX)
-        if "Contents" not in response:
-            return {"statusCode": 404, "body": json.dumps({"error": "Nenhum arquivo encontrado"})}
+    # Inicia query
+    exec_id = athena.start_query_execution(
+        QueryString=QUERY,
+        QueryExecutionContext={"Database": DATABASE},
+        ResultConfiguration={"OutputLocation": OUTPUT_BUCKET},
+        WorkGroup=WORKGROUP
+    )["QueryExecutionId"]
 
-        # Ordena as partes para garantir a sequência correta
-        files = sorted([obj["Key"] for obj in response["Contents"]])
+    # Aguarda conclusão
+    while True:
+        status = athena.get_query_execution(QueryExecutionId=exec_id)["QueryExecution"]["Status"]["State"]
+        if status in ["SUCCEEDED", "FAILED", "CANCELLED"]:
+            break
+        time.sleep(3)
 
-        # (Opcional) lê apenas uma parte ou até o máximo configurado
-        files = files[:MAX_PARTS]
+    if status != "SUCCEEDED":
+        raise Exception(f"Athena query failed: {status}")
 
-        all_data = []
+    logger.info("Consulta Athena concluída com sucesso.")
 
-        for key in files:
-            logger.info(f"Lendo {key}")
-            obj = s3.get_object(Bucket=CACHE_BUCKET, Key=key)
-            data = json.loads(obj["Body"].read().decode("utf-8"))
-            all_data.extend(data)
+    # --- Recupera resultados paginados ---
+    headers = []
+    results = []
+    total_count = 0
+    part_number = 1
+    s3_files = []
+    next_token = None
 
-        logger.info(f"Total de registros retornados: {len(all_data)}")
+    while True:
+        response = athena.get_query_results(QueryExecutionId=exec_id, NextToken=next_token) if next_token else athena.get_query_results(QueryExecutionId=exec_id)
 
-        # Retorna como API REST (para API Gateway)
-        return {
-            "statusCode": 200,
-            "headers": {
-                "Access-Control-Allow-Origin": "*",
-                "Access-Control-Allow-Methods": "GET,OPTIONS",
-                "Access-Control-Allow-Headers": "Content-Type",
-                "Content-Type": "application/json",
-            },
-            "body": json.dumps(all_data, ensure_ascii=False),
-        }
+        if not headers:
+            headers = [c["Label"] for c in response["ResultSet"]["ResultSetMetadata"]["ColumnInfo"]]
 
-    except Exception as e:
-        logger.error(f"Erro: {str(e)}")
-        return {
-            "statusCode": 500,
-            "body": json.dumps({"error": str(e)}),
-        }
+        for row in response["ResultSet"]["Rows"][1:]:
+            values = [v.get("VarCharValue") for v in row["Data"]]
+            results.append(dict(zip(headers, values)))
+            total_count += 1
+
+            # salva chunk
+            if len(results) >= CHUNK_SIZE:
+                key = f"{CACHE_PREFIX}{part_number:03d}.json"
+                s3.put_object(
+                    Bucket=CACHE_BUCKET,
+                    Key=key,
+                    Body=json.dumps(results, ensure_ascii=False),
+                    ContentType="application/json"
+                )
+                logger.info(f"Salvou {len(results)} registros em {key}")
+                s3_files.append(key)
+                results.clear()
+                part_number += 1
+
+        next_token = response.get("NextToken")
+        if not next_token:
+            break
+
+    # salva os dados restantes
+    if results:
+        key = f"{CACHE_PREFIX}{part_number:03d}.json"
+        s3.put_object(
+            Bucket=CACHE_BUCKET,
+            Key=key,
+            Body=json.dumps(results, ensure_ascii=False),
+            ContentType="application/json"
+        )
+        logger.info(f"Salvou {len(results)} registros finais em {key}")
+        s3_files.append(key)
+
+    # salva index.json para controle
+    index_key = f"{CACHE_PREFIX}index.json"
+    s3.put_object(
+        Bucket=CACHE_BUCKET,
+        Key=index_key,
+        Body=json.dumps({"parts": len(s3_files)}, ensure_ascii=False),
+        ContentType="application/json"
+    )
+
+    logger.info(f"Processo concluído. Total de {total_count} registros em {len(s3_files)} arquivos.")
+
+    return {
+        "status": "ok",
+        "total_records": total_count,
+        "parts": len(s3_files),
+        "s3_files": [f"s3://{CACHE_BUCKET}/{k}" for k in s3_files]
+    }
