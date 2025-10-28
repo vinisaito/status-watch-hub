@@ -1,9 +1,3 @@
-O athena e o glue esta funcionando
-porem, a lambda que gera o json não esta funcionando muito bem
-
-A Lambda esta gerando um csv no /athena que traz todos os dados
-mas o json do /api_cache só traz 999 registros
-
 import boto3
 import json
 import time
@@ -13,7 +7,7 @@ s3 = boto3.client("s3")
 
 DATABASE = "painel-monitoracao"
 WORKGROUP = "painel_monitoracao"
-OUTPUT_BUCKET = "s3://painel-monitoracao-administrativo-athena/"
+OUTPUT_BUCKET = "s3://painel-monitoracao-administrativo-dados/athena_lambda"
 CACHE_BUCKET = "painel-monitoracao-administrativo-dados"
 CACHE_KEY = "api_cache/dados.json"
 
