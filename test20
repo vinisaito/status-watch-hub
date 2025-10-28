@@ -42,7 +42,7 @@ ORDER BY num_chamado DESC
 """
 
 def lambda_handler(event, context):
-
+    # Inicia a execução da query no Athena
     exec_id = athena.start_query_execution(
         QueryString=QUERY,
         QueryExecutionContext={"Database": DATABASE},
@@ -50,7 +50,7 @@ def lambda_handler(event, context):
         WorkGroup=WORKGROUP
     )["QueryExecutionId"]
 
-    # Aguarda Athena terminar
+    # Aguarda a conclusão da consulta
     while True:
         state = athena.get_query_execution(QueryExecutionId=exec_id)["QueryExecution"]["Status"]["State"]
         if state in ["SUCCEEDED", "FAILED", "CANCELLED"]:
@@ -60,20 +60,37 @@ def lambda_handler(event, context):
     if state != "SUCCEEDED":
         raise Exception(f"Athena query failed: {state}")
 
-    # Busca resultado
-    result = athena.get_query_results(QueryExecutionId=exec_id)
-
-    headers = [c["Label"] for c in result["ResultSet"]["ResultSetMetadata"]["ColumnInfo"]]
+    # Paginação manual para buscar todos os resultados
     rows = []
+    next_token = None
 
-    for r in result["ResultSet"]["Rows"][1:]:
-        values = [v.get("VarCharValue") for v in r["Data"]]
-        rows.append(dict(zip(headers, values)))
+    while True:
+        if next_token:
+            response = athena.get_query_results(QueryExecutionId=exec_id, NextToken=next_token)
+        else:
+            response = athena.get_query_results(QueryExecutionId=exec_id)
 
+        result_set = response["ResultSet"]
+        headers = [c["Label"] for c in result_set["ResultSetMetadata"]["ColumnInfo"]]
+
+        # Ignora a primeira linha se for cabeçalho duplicado
+        data_rows = result_set["Rows"]
+        if not rows:  # primeira página, pula cabeçalho
+            data_rows = data_rows[1:]
+
+        for r in data_rows:
+            values = [v.get("VarCharValue") for v in r["Data"]]
+            rows.append(dict(zip(headers, values)))
+
+        next_token = response.get("NextToken")
+        if not next_token:
+            break
+
+    # Grava no S3 como JSON completo
     s3.put_object(
         Bucket=CACHE_BUCKET,
         Key=CACHE_KEY,
-        Body=json.dumps(rows),
+        Body=json.dumps(rows, ensure_ascii=False),
         ContentType="application/json"
     )
 
